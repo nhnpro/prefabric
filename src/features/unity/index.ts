@@ -1,8 +1,10 @@
-/** Unity code insight for C#: event function completion and gutter icons, Unity-aware rename. */
+/** Unity code insight for C#: event function completion and gutter icons, Unity-aware rename;
+ * navigation in assembly definitions. */
 import { EditorState } from "@codemirror/state";
 import { CONTRIBUTED_RENAME, registerEditorContribution } from "@/editor/api";
 import { useProject } from "@/platform/project";
 import { clearUnityBases, unityDeps } from "./bases";
+import { assemblyDefinitionSupport } from "./asmdef";
 import { unityMessageSource } from "./completion";
 import { eventFunctionGutter } from "./gutter";
 import { unityRename } from "./rename";
@@ -26,7 +28,9 @@ export function activate() {
             ]),
             eventFunctionGutter(ctx.path, deps),
           ]
-        : [],
+        : ctx.language === "json" && !ctx.virtual
+          ? assemblyDefinitionSupport(ctx.path)
+          : [],
   });
   const unsubscribe = useProject.subscribe((s, prev) => {
     if (s.project?.root !== prev.project?.root) clearUnityBases();

@@ -3,7 +3,8 @@ import { CompletionContext, type Completion } from "@codemirror/autocomplete";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { indentUnit } from "@codemirror/language";
-import type { HierarchyItem, TextEdit, WorkspaceEdit } from "@/platform/ipc";
+import type { AssemblyDefinition, HierarchyItem, TextEdit, WorkspaceEdit } from "@/platform/ipc";
+import { referenceAt, resolveReference } from "./asmdef";
 import { serializedFieldAt, unityRename } from "./rename";
 import { readFileSync } from "node:fs";
 import { Text } from "@codemirror/state";
@@ -268,5 +269,35 @@ describe("Unity-aware rename", () => {
       "class A : MonoBehaviour {\n  /// <summary>Doc</summary>\n  public int hp = 3;\n  public static int count;\n}";
     expect(serializedFieldAt(text, text.indexOf("hp"))?.declarationStart).toBe(text.indexOf("public int hp"));
     expect(serializedFieldAt(text, text.indexOf("count"))).toBeNull();
+  });
+});
+
+describe("assembly definition references", () => {
+  const tests = readFileSync("fixtures/unity-sample/Assets/Tests/EditMode/Game.Tests.EditMode.asmdef", "utf8");
+  const asmdef = "/p/Assets/Tests/Game.Tests.asmdef";
+  const definitions: AssemblyDefinition[] = [
+    { name: "Game.Runtime", path: "/p/Assets/Scripts/Game.Runtime.asmdef", guid: "f3a9c0d1e2b34567890abcdef1234567" },
+    { name: "UnityEngine.TestRunner", path: "/p/Library/PackageCache/t/UnityEngine.TestRunner.asmdef", guid: null },
+  ];
+
+  it("finds the reference under the caret", () => {
+    const at = tests.indexOf("Game.Runtime") + 3;
+    expect(referenceAt(asmdef, tests, at)).toEqual({ value: "Game.Runtime", from: at - 3, to: at - 3 + 12 });
+    // The assembly's own name, other arrays and keys are not references.
+    expect(referenceAt(asmdef, tests, tests.indexOf("Game.Tests.EditMode") + 2)).toBeNull();
+    expect(referenceAt(asmdef, tests, tests.indexOf("nunit.framework") + 2)).toBeNull();
+    expect(referenceAt(asmdef, tests, tests.indexOf("references") + 2)).toBeNull();
+    expect(referenceAt("/p/a.json", tests, at)).toBeNull();
+    const asmref = '{\n  "reference": "GUID:F3A9C0D1E2B34567890ABCDEF1234567"\n}';
+    expect(referenceAt("/p/Assets/X/X.asmref", asmref, asmref.indexOf("GUID") + 1)?.value).toBe(
+      "GUID:F3A9C0D1E2B34567890ABCDEF1234567",
+    );
+  });
+
+  it("resolves names and GUIDs", () => {
+    expect(resolveReference("Game.Runtime", definitions)?.path).toBe("/p/Assets/Scripts/Game.Runtime.asmdef");
+    expect(resolveReference("GUID:F3A9C0D1E2B34567890ABCDEF1234567", definitions)?.name).toBe("Game.Runtime");
+    expect(resolveReference("UnityEditor.TestRunner", definitions)).toBeNull();
+    expect(resolveReference("GUID:0000", definitions)).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 //! Unity project identity. Generated C# solutions are optional, not root markers.
 
+pub mod assemblies;
 pub(crate) mod assets;
 pub mod editor;
 pub mod package;

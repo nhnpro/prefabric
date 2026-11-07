@@ -6350,5 +6350,6 @@
   "Unity documentation": "Unity 文档",
   "Unity event function {name} of {owner}": "{owner} 的 Unity 事件函数 {name}",
   "Rename file to {file}": "将文件重命名为 {file}",
-  "Add [FormerlySerializedAs(\"{name}\")] to keep saved values": "添加 [FormerlySerializedAs(\"{name}\")] 以保留已保存的值"
+  "Add [FormerlySerializedAs(\"{name}\")] to keep saved values": "添加 [FormerlySerializedAs(\"{name}\")] 以保留已保存的值",
+  "No assembly definition named '{name}' in this project": "此项目中没有名为 '{name}' 的程序集定义"
 }

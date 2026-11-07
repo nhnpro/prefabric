@@ -102,6 +102,7 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
         app::project_roots,
         unity::unity_install_package,
         unity::unity_generate_project_files,
+        unity::unity_assembly_definitions,
         app::cancel_request,
         app::cancel_task,
         app::log_frontend,

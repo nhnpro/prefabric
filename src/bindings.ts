@@ -94,6 +94,8 @@ export const commands = {
 	unityInstallPackage: () => typedError<ProjectInfo_Serialize, IdeError>(__TAURI_INVOKE("unity_install_package")),
 	/**  Generates the C# solution and projects with the project's Unity version in batch mode. */
 	unityGenerateProjectFiles: () => typedError<ProjectInfo_Serialize, IdeError>(__TAURI_INVOKE("unity_generate_project_files")),
+	/**  The project's assembly definitions (`.asmdef`), with their GUIDs. */
+	unityAssemblyDefinitions: () => typedError<AssemblyDefinition[], IdeError>(__TAURI_INVOKE("unity_assembly_definitions")),
 	cancelRequest: (id: RequestId) => __TAURI_INVOKE<void>("cancel_request", { id }),
 	/**
 	 *  Stops a background task the backend reported with `cancellable` set; false when it
@@ -1767,6 +1769,13 @@ export type AskpassKind =
 "text" | 
 /**  Yes / no (an unknown host key); answered with `yes` or `no`. */
 "confirm";
+
+export type AssemblyDefinition = {
+	name: string,
+	path: string,
+	/**  From the `.meta` file; none when Unity hasn't imported it yet. */
+	guid: string | null,
+};
 
 export type AttachKind = "java" | "node" | "python" | "go" | "native";
 

@@ -54,5 +54,6 @@
   "Unity documentation": "Unity documentation",
   "Unity event function {name} of {owner}": "Unity event function {name} of {owner}",
   "Rename file to {file}": "Rename file to {file}",
-  "Add [FormerlySerializedAs(\"{name}\")] to keep saved values": "Add [FormerlySerializedAs(\"{name}\")] to keep saved values"
+  "Add [FormerlySerializedAs(\"{name}\")] to keep saved values": "Add [FormerlySerializedAs(\"{name}\")] to keep saved values",
+  "No assembly definition named '{name}' in this project": "No assembly definition named '{name}' in this project"
 }

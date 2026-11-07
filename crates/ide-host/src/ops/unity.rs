@@ -4,7 +4,7 @@
 use crate::Host;
 use crate::ops::project::{ProjectInfo, info};
 use ide_core::{IdeError, IdeResult};
-use ide_workspace::unity::{self, UnityPackageStatus};
+use ide_workspace::unity::{self, UnityPackageStatus, assemblies::AssemblyDefinition};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -106,7 +106,14 @@ fn failure_message(log: &str) -> String {
     }
 }
 
+/// The project's assembly definitions, for navigation from `.asmdef` references.
+pub async fn assembly_definitions(host: &Arc<Host>, window: &str) -> IdeResult<Vec<AssemblyDefinition>> {
+    let project = host.project(window)?;
+    blocking(move || Ok(unity::assemblies::assembly_definitions(&project.root))).await
+}
+
 pub fn register(d: &mut crate::rpc::Dispatcher) {
+    d.add("unity_assembly_definitions", |c| async move { assembly_definitions(&c.host, &c.window).await });
     d.add("unity_install_package", |c| async move { install_package(&c.host, &c.window).await });
     d.add("unity_generate_project_files", |c| async move { generate_project_files(&c.host, &c.window).await });
 }

@@ -1,7 +1,7 @@
 id = "json"
 name = "JSON"
 formatter = { tool = "prettier", parser = "json", range = true }
-extensions = ["json", "geojson", "topojson", "webmanifest", "har", "avsc", "jsonl", "ndjson", "json.map"]
+extensions = ["json", "geojson", "topojson", "webmanifest", "har", "avsc", "jsonl", "ndjson", "json.map", "asmdef", "asmref"]
 filenames = [".prettierrc", ".watchmanconfig", "composer.lock", ".arcconfig"]
 indent = { tab-size = 2, insert-spaces = true }
 ui-mode = "JSON"
@@ -13,3 +13,37 @@ command = "vscode-json-language-server"
 args = ["--stdio"]
 initialization-options = { provideFormatter = true }
 install-hint = "npm i -g vscode-langservers-extracted"
+
+# The server turns validation off when settings arrive without `validate.enable`.
+[language-servers.settings.json]
+validate = { enable = true }
+
+# Unity assembly definitions (`.asmdef`) and references (`.asmref`), validated offline.
+[[language-servers.settings.json.schemas]]
+fileMatch = ["*.asmdef"]
+[language-servers.settings.json.schemas.schema]
+title = "Unity assembly definition"
+type = "object"
+required = ["name"]
+[language-servers.settings.json.schemas.schema.properties]
+name = { type = "string", minLength = 1, description = "Name of the assembly; other assembly definitions reference it by this name." }
+rootNamespace = { type = "string", description = "Namespace of new scripts in this assembly." }
+references = { type = "array", uniqueItems = true, items = { type = "string", minLength = 1 }, description = "Assemblies this one references, by name or as `GUID:<guid of the .asmdef>`." }
+includePlatforms = { type = "array", uniqueItems = true, items = { type = "string" }, description = "Build only for these platforms (`Editor`, `Android`, `iOS`…); empty for all." }
+excludePlatforms = { type = "array", uniqueItems = true, items = { type = "string" }, description = "Build for every platform except these; empty for none." }
+allowUnsafeCode = { type = "boolean", description = "Allow `unsafe` code." }
+overrideReferences = { type = "boolean", description = "Reference only the precompiled assemblies listed in `precompiledReferences`." }
+precompiledReferences = { type = "array", uniqueItems = true, items = { type = "string" }, description = "Precompiled assemblies (`.dll` file names) referenced when `overrideReferences` is set." }
+autoReferenced = { type = "boolean", description = "Referenced by the predefined assemblies (Assembly-CSharp)." }
+defineConstraints = { type = "array", items = { type = "string" }, description = "Compile only when these symbols are defined (`!SYMBOL` when not)." }
+versionDefines = { type = "array", items = { type = "object", required = ["name", "define"], properties = { name = { type = "string", description = "Package, module or `Unity`." }, expression = { type = "string", description = "Version range, such as `[1.2,2.0)`." }, define = { type = "string", description = "Symbol defined when the version matches." } } }, description = "Symbols defined from the versions of packages and Unity." }
+noEngineReferences = { type = "boolean", description = "Don't reference UnityEngine and UnityEditor." }
+
+[[language-servers.settings.json.schemas]]
+fileMatch = ["*.asmref"]
+[language-servers.settings.json.schemas.schema]
+title = "Unity assembly definition reference"
+type = "object"
+required = ["reference"]
+[language-servers.settings.json.schemas.schema.properties]
+reference = { type = "string", minLength = 1, description = "The assembly definition whose assembly gets this folder's scripts, by name or as `GUID:<guid>`." }

@@ -116,6 +116,14 @@ async fn installs_the_package_and_generates_project_files() {
     };
     assert_eq!(supertypes("Assets/Scripts/Hero.cs", "Hero").await, ["Character"]);
 
+    // `.asmdef` navigation: definitions of the project and of the packages Unity resolved.
+    let definitions = ops::unity::assembly_definitions(&host, WINDOW).await.unwrap();
+    let runtime = definitions.iter().find(|d| d.name == "Game.Runtime").unwrap();
+    let meta = std::fs::read_to_string(root.join("Assets/Scripts/Game.Runtime.asmdef.meta")).unwrap();
+    assert!(meta.contains(&format!("guid: {}", runtime.guid.as_deref().unwrap())));
+    let test_runner = definitions.iter().find(|d| d.name == "UnityEngine.TestRunner").unwrap();
+    assert!(test_runner.path.starts_with(root.join("Library/PackageCache")), "{test_runner:?}");
+
     // Unity-aware rename (what the editor's Unity rename extensions add to Roslyn's edits): the
     // serialized `speed` becomes `velocity` with `[FormerlySerializedAs("speed")]`, then the
     // `Player` MonoBehaviour becomes `Runner` with its file. The script keeps its GUID, and Unity
