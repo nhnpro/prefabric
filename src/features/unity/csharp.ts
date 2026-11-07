@@ -94,22 +94,32 @@ export function classAtMemberLevel(text: string, pos: number): ClassInfo | null 
   return depth === 0 ? containing : null;
 }
 
-/** Names of the methods declared in a class body (its own level only). */
-export function declaredMethods(text: string, cls: ClassInfo): Set<string> {
+/** The methods declared in a class body (its own level only), with the offset of each name. */
+export function methodDeclarations(text: string, cls: ClassInfo): Array<{ name: string; at: number }> {
   const code = codeOnly(text);
-  const names = new Set<string>();
-  let depth = 0;
+  // The body with member bodies blanked (same offsets): only this level's declarations remain.
   let level = "";
+  let depth = 0;
   for (let i = cls.bodyStart; i < cls.bodyEnd; i++) {
     const c = code[i]!;
     if (c === "{") {
-      if (depth === 0) level += "{";
+      level += depth === 0 ? "{" : " ";
       depth++;
-    } else if (c === "}") depth--;
-    else if (depth === 0) level += c;
+    } else if (c === "}") {
+      depth--;
+      level += " ";
+    } else level += depth === 0 || c === "\n" ? c : " ";
   }
-  for (const m of level.matchAll(/\b[A-Za-z_][\w.<>[\],]*\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*(?:\{|=>)/g)) names.add(m[1]!);
-  return names;
+  const found: Array<{ name: string; at: number }> = [];
+  for (const m of level.matchAll(/\b[A-Za-z_][\w.<>[\],]*\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*(?:\{|=>)/g)) {
+    found.push({ name: m[1]!, at: cls.bodyStart + m.index + m[0].lastIndexOf(m[1]!, m[0].indexOf("(")) });
+  }
+  return found;
+}
+
+/** Names of the methods declared in a class body (its own level only). */
+export function declaredMethods(text: string, cls: ClassInfo): Set<string> {
+  return new Set(methodDeclarations(text, cls).map((m) => m.name));
 }
 
 const simpleName = (name: string) =>

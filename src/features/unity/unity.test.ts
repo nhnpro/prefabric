@@ -4,9 +4,13 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { indentUnit } from "@codemirror/language";
 import type { HierarchyItem } from "@/platform/ipc";
-import { classAtMemberLevel, classes, codeOnly, declaredMethods, unityBaseInFile } from "./csharp";
+import { readFileSync } from "node:fs";
+import { Text } from "@codemirror/state";
+import { classAtMemberLevel, classes, codeOnly, declaredMethods, methodDeclarations, unityBaseInFile } from "./csharp";
+import { eventFunctions, eventFunctionTooltip, placeEventFunctions } from "./gutter";
 import { dataVersion, declaration, loadMessageData, messagesFor, unityTypeNames } from "./messages";
-import { clearUnityBases, declarationPrefix, unityMessageSource, type UnityCompletionDeps } from "./completion";
+import { clearUnityBases, type UnityDeps } from "./bases";
+import { declarationPrefix, unityMessageSource } from "./completion";
 
 const PLAYER = `using UnityEngine;
 // class Fake : MonoBehaviour {
@@ -86,7 +90,7 @@ describe("message completion", () => {
     });
   }
 
-  async function complete(view: EditorView, deps: Partial<UnityCompletionDeps> = {}) {
+  async function complete(view: EditorView, deps: Partial<UnityDeps> = {}) {
     const source = unityMessageSource("/p/Assets/Player.cs", {
       data: () => data,
       supertypes: vi.fn().mockResolvedValue([]),
@@ -175,5 +179,41 @@ describe("message completion", () => {
     expect(await complete(editor("class Plain\n{\n    OnTr|\n}"))).toBeNull();
     expect(await complete(editor(PLAYER.replace("if (true) { }", "if (true) { OnTr| }")))).toBeNull();
     expect(await complete(editor(PLAYER.replace("\n\n}", "\n    OnTr|\n}")), { data: async () => null })).toBeNull();
+  });
+});
+
+describe("event function gutter", () => {
+  const data = loadMessageData("6000.3.1f1");
+  const deps: UnityDeps = { data: () => data, supertypes: async () => [], text: async () => "" };
+  const fixture = readFileSync("fixtures/unity-sample/Assets/Scripts/Player.cs", "utf8");
+
+  it("finds method names with their offsets", () => {
+    const methods = methodDeclarations(fixture, classes(fixture)[0]!);
+    expect(methods.map((m) => m.name)).toEqual([
+      "Update",
+      "OnTriggerEnter",
+      "AddCoin",
+      "OnTriggerZoneEntered",
+      "OnFootstep",
+    ]);
+    for (const m of methods) expect(fixture.slice(m.at, m.at + m.name.length)).toBe(m.name);
+  });
+
+  it("marks Update and OnTriggerEnter of the fixture's player, and nothing else", async () => {
+    const found = await eventFunctions("/p/Assets/Scripts/Player.cs", fixture, deps);
+    expect(found.map((f) => f.message.name)).toEqual(["Update", "OnTriggerEnter"]);
+    const doc = Text.of(fixture.split("\n"));
+    expect(placeEventFunctions(doc, found).map((p) => doc.lineAt(p.pos).text.trim())).toEqual([
+      "private void Update()",
+      "private void OnTriggerEnter(Collider other)",
+    ]);
+    expect(eventFunctionTooltip(found[0]!.message)).toMatch(/^Unity event function Update of MonoBehaviour\n\S/);
+  });
+
+  it("marks nothing outside Unity classes or projects", async () => {
+    expect(await eventFunctions("/p/A.cs", "class A { void Update() {} }", deps)).toEqual([]);
+    expect(await eventFunctions("/p/Assets/Scripts/Player.cs", fixture, { ...deps, data: async () => null })).toEqual(
+      [],
+    );
   });
 });
