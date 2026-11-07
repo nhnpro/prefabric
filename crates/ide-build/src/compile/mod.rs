@@ -44,6 +44,9 @@ pub enum BuildSystem {
     TypeScript,
     #[serde(rename = "cmake")]
     CMake,
+    /// `dotnet build` of a solution or project (also Unity's generated ones).
+    #[serde(rename = "dotnet")]
+    DotNet,
 }
 
 /// One command of a build.
@@ -155,6 +158,8 @@ fn detect_dir(dir: &Path, model: &BuildModel, root: &Path) -> Option<BuildSystem
         Some(BuildSystem::Cargo)
     } else if has(dir, &["go.mod"]) {
         Some(BuildSystem::Go)
+    } else if dotnet_target(dir).is_some() {
+        Some(BuildSystem::DotNet)
     } else if has(dir, &["tsconfig.json", "package.json"]) {
         Some(BuildSystem::TypeScript)
     } else if has(dir, &["CMakeLists.txt"]) {
@@ -211,7 +216,7 @@ pub fn plan(
         .or((!model.gradle.is_empty()).then_some(BuildSystem::Gradle))
         .or_else(|| model.maven.as_ref().filter(|m| !m.projects.is_empty()).map(|_| BuildSystem::Maven))
         .ok_or_else(|| {
-            IdeError::not_found("no supported build system (Maven, Gradle, Cargo, Go, TypeScript, CMake) found")
+            IdeError::not_found("no supported build system (Maven, Gradle, Cargo, Go, .NET, TypeScript, CMake) found")
         })?;
     let module = module_dir.as_deref().filter(|d| *d != root);
     let title = match module {
@@ -230,6 +235,7 @@ pub fn plan(
         BuildSystem::Go => go_steps(file.and_then(Path::parent).unwrap_or(&dir), kind),
         BuildSystem::TypeScript => ts_steps(&dir, kind),
         BuildSystem::CMake => cmake_steps(&dir, kind, cmake.and_then(<[_]>::first)),
+        BuildSystem::DotNet => dotnet_steps(&dir, kind),
     };
     Ok(BuildPlan { system, title, steps })
 }
@@ -382,6 +388,48 @@ fn go_steps(dir: &Path, kind: BuildKind) -> Vec<BuildStep> {
 }
 
 /// `pnpm` / `yarn` / `bun` / `npm`, from the lock file next to `package.json` or above it.
+/// What `dotnet build` builds in `dir`: a solution (`.sln` first, as SDKs before 9.0.200 can't
+/// read `.slnx`; the one named after the folder when there are several), else the only project.
+fn dotnet_target(dir: &Path) -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    let stem = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let pick = |exts: &[&str]| {
+        let found: Vec<&String> = names.iter().filter(|n| exts.iter().any(|e| n.ends_with(e))).collect();
+        found
+            .iter()
+            .find(|n| n.rsplit_once('.').is_some_and(|(s, _)| s == stem))
+            .or(found.first())
+            .map(|n| (*n).clone())
+    };
+    pick(&[".sln"]).or_else(|| pick(&[".slnx"])).or_else(|| {
+        let projects: Vec<&String> =
+            names.iter().filter(|n| [".csproj", ".fsproj", ".vbproj"].iter().any(|e| n.ends_with(e))).collect();
+        (projects.len() == 1).then(|| projects[0].clone())
+    })
+}
+
+fn dotnet_steps(dir: &Path, kind: BuildKind) -> Vec<BuildStep> {
+    let Some(target) = dotnet_target(dir) else { return Vec::new() };
+    // Full paths for the messages, no repeated summary, plain console output.
+    let verb = if kind == BuildKind::Artifacts { "publish" } else { "build" };
+    let mut args = vec![verb, target.as_str(), "-nologo", "-tl:off", "-clp:NoSummary", "-p:GenerateFullPaths=true"];
+    match kind {
+        BuildKind::Rebuild => args.push("--no-incremental"),
+        BuildKind::Artifacts => args.extend(["-c", "Release"]),
+        BuildKind::Build => {}
+    }
+    let mut s = BuildStep::new("dotnet", &args, dir, Format::MsBuild);
+    s.env.insert("DOTNET_CLI_TELEMETRY_OPTOUT".into(), "1".into());
+    s.env.insert("DOTNET_NOLOGO".into(), "1".into());
+    vec![s]
+}
+
 fn package_manager(dir: &Path) -> &'static str {
     for d in dir.ancestors() {
         if d.join("pnpm-lock.yaml").is_file() {
@@ -1030,6 +1078,31 @@ mod tests {
         let none = tmp.path().join("none");
         std::fs::create_dir_all(&none).unwrap();
         assert!(plan(&none, &BuildModel::default(), BuildKind::Build, None, None).is_err());
+    }
+
+    #[test]
+    fn plans_dotnet_builds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("App");
+        write(&root, "Other.slnx", "<Solution />");
+        write(&root, "App.slnx", "<Solution />");
+        write(&root, "src/Lib/Lib.csproj", "<Project />");
+        write(&root, "src/Lib/A.cs", "");
+        write(&root, "package.json", "{}");
+        let p = plan(&root, &BuildModel::default(), BuildKind::Rebuild, None, None).unwrap();
+        assert_eq!(p.system, BuildSystem::DotNet);
+        assert_eq!(
+            p.steps[0].display(),
+            "dotnet build App.slnx -nologo -tl:off -clp:NoSummary -p:GenerateFullPaths=true --no-incremental"
+        );
+        let p = plan(&root, &BuildModel::default(), BuildKind::Build, Some(&root.join("src/Lib/A.cs")), None).unwrap();
+        assert_eq!((p.steps[0].args[1].as_str(), p.steps[0].cwd.clone()), ("Lib.csproj", root.join("src/Lib")));
+        write(&root, "App.sln", "");
+        assert_eq!(dotnet_target(&root).as_deref(), Some("App.sln"));
+        let two = tmp.path().join("two");
+        write(&two, "A.csproj", "");
+        write(&two, "B.csproj", "");
+        assert!(dotnet_target(&two).is_none());
     }
 
     #[test]

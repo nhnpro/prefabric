@@ -1957,7 +1957,9 @@ export type BuildResult = {
 	messages: BuildMessage[],
 };
 
-export type BuildSystem = "maven" | "gradle" | "cargo" | "go" | "typescript" | "cmake";
+export type BuildSystem = "maven" | "gradle" | "cargo" | "go" | "typescript" | "cmake" | 
+/**  `dotnet build` of a solution or project (also Unity's generated ones). */
+"dotnet";
 
 export type BuildTool = "maven" | "gradle";
 

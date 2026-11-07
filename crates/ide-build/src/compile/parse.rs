@@ -24,6 +24,8 @@ pub(crate) enum Format {
     Go,
     /// GCC / Clang (through `cmake --build`): `src/a.cpp:12:5: error: msg`.
     Gcc,
+    /// MSBuild (`dotnet build`): `/p/A.cs(12,5): error CS0103: msg [/p/A.csproj]`.
+    MsBuild,
 }
 
 /// What a printed column counts.
@@ -86,6 +88,9 @@ pub(crate) struct Parsed {
     pub console: Option<String>,
 }
 
+/// Where and what a message says, to drop repeats.
+type MessageKey = (Option<String>, Option<u32>, Option<u32>, String);
+
 /// A message waiting for its detail lines.
 struct Pending {
     msg: RawMessage,
@@ -96,6 +101,8 @@ struct Pending {
 pub(crate) struct OutputParser {
     format: Format,
     pending: Option<Pending>,
+    /// MSBuild prints a message once per target framework and project that compiles the file.
+    seen: std::collections::HashSet<MessageKey>,
 }
 
 /// Removes ANSI escape sequences (colour, cursor movement).
@@ -309,6 +316,47 @@ fn gcc_line(line: &str) -> Option<RawMessage> {
     (!msg.is_empty()).then(|| RawMessage::new(severity, msg, ColUnit::Byte).at(path, ln, col))
 }
 
+/// MSBuild's canonical message: `origin: [subcategory] error|warning code: text [project]`,
+/// where origin is `file(line[,col[,endLine,endCol]])`, a file, or a tool (`CSC`, `MSBUILD`).
+fn msbuild_line(line: &str) -> Option<RawMessage> {
+    let (at, severity, kw) = [(": error ", Severity::Error), (": warning ", Severity::Warning)]
+        .into_iter()
+        .filter_map(|(kw, sev)| line.find(kw).map(|i| (i, sev, kw)))
+        .min_by_key(|(i, ..)| *i)?;
+    let origin = line[..at].trim();
+    if origin.is_empty() {
+        return None;
+    }
+    let rest = &line[at + kw.len()..];
+    let (code, text) = match rest.split_once(':') {
+        Some((code, text)) if !code.is_empty() && !code.contains(' ') => (Some(code.to_owned()), text.trim()),
+        _ => (None, rest.trim_start_matches(':').trim()),
+    };
+    // The project that reported it.
+    let text = match text.rfind(" [") {
+        Some(i) if text.ends_with(']') => text[..i].trim_end(),
+        _ => text,
+    };
+    let mut m = match origin.strip_suffix(')').and_then(|o| o.rsplit_once('(')) {
+        Some((path, pos)) if pos.bytes().all(|b| b.is_ascii_digit() || b == b',' || b == b'-') => {
+            // `l`, `l-el`, `l,c`, `l,c-ec` or `l,c,el,ec`.
+            let (lines, cols) = pos.split_once(',').unwrap_or((pos, ""));
+            let (line, _) = lines.split_once('-').unwrap_or((lines, ""));
+            let cols: Vec<Option<u32>> = cols.split([',', '-']).map(num).collect();
+            let mut m = RawMessage::new(severity, text, ColUnit::Utf16).at(path.trim(), num(line)?, cols[0]);
+            match cols[..] {
+                [_, Some(ec)] => (m.end_line, m.end_col) = (m.line, Some(ec)),
+                [_, el @ Some(_), ec @ Some(_)] => (m.end_line, m.end_col) = (el, ec),
+                _ => {}
+            }
+            m
+        }
+        _ => RawMessage::new(severity, format!("{origin}: {text}"), ColUnit::Utf16),
+    };
+    m.code = code;
+    Some(m)
+}
+
 /// rustc's JSON diagnostic (`reason: compiler-message`) → message and its rendered text.
 fn cargo_json(v: &Value) -> Option<(Option<RawMessage>, String)> {
     if v.get("reason")?.as_str()? != "compiler-message" {
@@ -354,7 +402,7 @@ fn cargo_json(v: &Value) -> Option<(Option<RawMessage>, String)> {
 
 impl OutputParser {
     pub(crate) fn new(format: Format) -> Self {
-        OutputParser { format, pending: None }
+        OutputParser { format, pending: None, seen: Default::default() }
     }
 
     fn flush(&mut self, out: &mut Vec<RawMessage>) {
@@ -424,6 +472,8 @@ impl OutputParser {
             Format::Tsc => tsc_line(&line),
             Format::Go => go_line(&line),
             Format::Gcc => gcc_line(&line),
+            Format::MsBuild => msbuild_line(&line)
+                .filter(|m| self.seen.insert((m.path.clone(), m.line, m.col, format!("{:?}{}", m.code, m.text)))),
             Format::Cargo => None,
         };
         if let Some(msg) = parsed {
@@ -575,6 +625,37 @@ mod tests {
         assert!(out[1].text.ends_with("\nProperty 'x' is missing in type 'A'."));
         assert_eq!(pos(&out[2]), (Severity::Error, "src/c.tsx", 7, Some(10)));
         assert_eq!(out[2].text, "Cannot find name 'foo'.");
+    }
+
+    #[test]
+    fn msbuild_messages() {
+        let out = parse(
+            Format::MsBuild,
+            "  Game -> /p/bin/Game.dll\n\
+             /p/src/A.cs(3,9): error CS0103: The name 'x' does not exist in the current context [/p/src/Game.csproj::TargetFramework=net8.0]\n\
+             /p/src/A.cs(3,9): error CS0103: The name 'x' does not exist in the current context [/p/src/Game.csproj::TargetFramework=net9.0]\n\
+             /My Projects/B.cs(10,5,10,12): warning CS0168: The variable 'e' is declared but never used [/p/B.csproj]\n\
+             /p/C.cs(4,2-6): warning UNT0001: Empty Unity message\n\
+             /p/D.csproj(7): error MSB4025: The project file could not be loaded.\n\
+             CSC : error CS5001: Program does not contain a static 'Main' method [/p/E.csproj]\n\
+             Build FAILED.\n",
+        );
+        let summary: Vec<_> = out.iter().map(|m| (m.path.as_deref(), m.line, m.col, m.end_line, m.end_col)).collect();
+        assert_eq!(
+            summary,
+            [
+                (Some("/p/src/A.cs"), Some(3), Some(9), None, None),
+                (Some("/My Projects/B.cs"), Some(10), Some(5), Some(10), Some(12)),
+                (Some("/p/C.cs"), Some(4), Some(2), Some(4), Some(6)),
+                (Some("/p/D.csproj"), Some(7), None, None, None),
+                (None, None, None, None, None),
+            ]
+        );
+        assert_eq!(out[0].code.as_deref(), Some("CS0103"));
+        assert_eq!(out[0].text, "The name 'x' does not exist in the current context");
+        assert_eq!(out[1].severity, Severity::Warning);
+        assert_eq!(out[4].text, "CSC: Program does not contain a static 'Main' method");
+        assert_eq!(out[4].code.as_deref(), Some("CS5001"));
     }
 
     #[test]
