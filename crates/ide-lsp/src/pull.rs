@@ -190,7 +190,11 @@ impl LspManager {
             server.config.ignore_diagnostics.iter().filter(|i| i.applies_to(&path)).collect();
         let items = items
             .into_iter()
-            .filter(|d| !ignored.iter().any(|i| d.code.as_ref().is_some_and(|c| i.codes.iter().any(|x| code_is(c, x)))))
+            .filter(|d| {
+                !ignored
+                    .iter()
+                    .any(|i| i.codes.iter().any(|x| x == "*" || d.code.as_ref().is_some_and(|c| code_is(c, x))))
+            })
             .map(|d| convert::diagnostic(&conv, &path, d, &server.name))
             .collect();
         self.sink.emit(IdeEvent::Diagnostics { path: path.into(), source: server.name.clone(), items });

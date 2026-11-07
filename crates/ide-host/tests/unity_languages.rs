@@ -1,6 +1,7 @@
-//! Unity's JSON and CSS dialects with the servers of `vscode-langservers-extracted`: assembly
-//! definitions are validated with a bundled schema; USS gets no vendor-prefix warnings for
-//! `-unity-*` properties. `#[ignore]`d: they need `npm i -g vscode-langservers-extracted`.
+//! Unity's JSON, CSS and YAML dialects with their language servers: assembly definitions are
+//! validated with a bundled schema; USS gets no vendor-prefix warnings for `-unity-*`
+//! properties; Unity's YAML assets get no "unresolved tag" errors. `#[ignore]`d: they need
+//! `npm i -g vscode-langservers-extracted yaml-language-server`.
 //!
 //! cargo test -p ide-host --test unity_languages -- --ignored
 
@@ -73,4 +74,21 @@ async fn uss_files_keep_css_checks_without_vendor_prefix_warnings() {
     let text = ".title {\n  -unity-font-style: bold;\n  -unity-text-align: middle-center;\n  colr: red;\n}\n";
     let messages = diagnostics(&root, "Assets/Menu.uss", text, std::time::Duration::from_secs(60)).await;
     assert_eq!(messages, ["Unknown property: 'colr'"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs yaml-language-server"]
+async fn unity_yaml_assets_have_no_unresolved_tag_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(tmp.path()).unwrap().join("game");
+    let prefab = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/unity-sample/Assets/Prefabs/Player.prefab"
+    ))
+    .unwrap();
+    let quiet = diagnostics(&root, "Assets/Player.prefab", &prefab, std::time::Duration::from_secs(15)).await;
+    assert_eq!(quiet, Vec::<String>::new());
+    // Other YAML keeps its checks.
+    let other = diagnostics(&root, "config.yaml", "a: [1\n", std::time::Duration::from_secs(60)).await;
+    assert!(!other.is_empty());
 }

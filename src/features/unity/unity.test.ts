@@ -6,6 +6,7 @@ import { indentUnit } from "@codemirror/language";
 import type { AssemblyDefinition, HierarchyItem, TextEdit, WorkspaceEdit } from "@/platform/ipc";
 import { referenceAt, resolveReference } from "./asmdef";
 import { ussSource } from "./uss";
+import { isUnityYaml, unityYamlLock, unlockUnityYaml, useUnityYaml } from "./unityYaml";
 import { serializedFieldAt, unityRename } from "./rename";
 import { readFileSync } from "node:fs";
 import { Text } from "@codemirror/state";
@@ -326,5 +327,32 @@ describe("USS completion", () => {
   it("stays out of selectors", async () => {
     expect(await complete(".tit|le { }")).toBeNull();
     expect(await complete("Button > .ti|")).toBeNull();
+  });
+});
+
+describe("Unity YAML", () => {
+  const prefab = readFileSync("fixtures/unity-sample/Assets/Prefabs/Player.prefab", "utf8");
+
+  it("recognises Unity's YAML dialect", () => {
+    expect(isUnityYaml(Text.of(prefab.split("\n")))).toBe(true);
+    expect(isUnityYaml(Text.of(["%YAML 1.2", "---", "a: 1"]))).toBe(false);
+    expect(isUnityYaml(Text.of(["a: 1"]))).toBe(false);
+  });
+
+  it("opens read-only until Edit Anyway, and only Unity's files", async () => {
+    const path = "/p/Assets/Prefabs/Player.prefab";
+    const view = new EditorView({ state: EditorState.create({ doc: prefab, extensions: unityYamlLock(path) }) });
+    expect(view.state.readOnly).toBe(true);
+    expect(useUnityYaml.getState().locked[path]).toBe(true);
+    unlockUnityYaml(path);
+    await Promise.resolve();
+    expect(view.state.readOnly).toBe(false);
+    expect(useUnityYaml.getState().locked[path]).toBe(false);
+    // Unlocked for the session: reopening stays editable.
+    const again = EditorState.create({ doc: prefab, extensions: unityYamlLock(path) });
+    expect(again.readOnly).toBe(false);
+    const plain = EditorState.create({ doc: "a: 1\n", extensions: unityYamlLock("/p/config.yaml") });
+    expect(plain.readOnly).toBe(false);
+    view.destroy();
   });
 });

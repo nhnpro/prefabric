@@ -55,5 +55,7 @@
   "Unity event function {name} of {owner}": "Unity event function {name} of {owner}",
   "Rename file to {file}": "Rename file to {file}",
   "Add [FormerlySerializedAs(\"{name}\")] to keep saved values": "Add [FormerlySerializedAs(\"{name}\")] to keep saved values",
-  "No assembly definition named '{name}' in this project": "No assembly definition named '{name}' in this project"
+  "No assembly definition named '{name}' in this project": "No assembly definition named '{name}' in this project",
+  "Unity saves this file: it opens read-only, as edits here can break references between its objects.": "Unity saves this file: it opens read-only, as edits here can break references between its objects.",
+  "Edit Anyway": "Edit Anyway"
 }

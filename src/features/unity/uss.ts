@@ -4,6 +4,7 @@
  */
 import type { Completion, CompletionContext, CompletionResult } from "@codemirror/autocomplete";
 import { EditorState, type Extension } from "@codemirror/state";
+import { tx } from "@/platform/i18n";
 
 export interface UssProperty {
   name: string;
@@ -11,8 +12,6 @@ export interface UssProperty {
   /** Keyword values; empty for colors, lengths, assets. */
   values: string[];
 }
-
-const SLICE = "Pixels of the image's border kept unscaled (9-slicing)";
 
 export const USS_PROPERTIES: UssProperty[] = [
   { name: "-unity-background-image-tint-color", description: "Tint color of the background image.", values: [] },
@@ -26,7 +25,7 @@ export const USS_PROPERTIES: UssProperty[] = [
     description: "Text rendering in the Editor.",
     values: ["sdf", "bitmap"],
   },
-  { name: "-unity-font", description: 'Font asset, as `resource("…")` or `url("…")`.', values: [] },
+  { name: "-unity-font", description: "Font asset, as resource(…) or url(…).", values: [] },
   { name: "-unity-font-definition", description: "Font asset or font definition (Text Core).", values: [] },
   {
     name: "-unity-font-style",
@@ -39,10 +38,10 @@ export const USS_PROPERTIES: UssProperty[] = [
     values: ["padding-box", "content-box"],
   },
   { name: "-unity-paragraph-spacing", description: "Space between paragraphs.", values: [] },
-  { name: "-unity-slice-bottom", description: `${SLICE}: bottom.`, values: [] },
-  { name: "-unity-slice-left", description: `${SLICE}: left.`, values: [] },
-  { name: "-unity-slice-right", description: `${SLICE}: right.`, values: [] },
-  { name: "-unity-slice-top", description: `${SLICE}: top.`, values: [] },
+  { name: "-unity-slice-bottom", description: "Unscaled border of a 9-sliced image, bottom.", values: [] },
+  { name: "-unity-slice-left", description: "Unscaled border of a 9-sliced image, left.", values: [] },
+  { name: "-unity-slice-right", description: "Unscaled border of a 9-sliced image, right.", values: [] },
+  { name: "-unity-slice-top", description: "Unscaled border of a 9-sliced image, top.", values: [] },
   { name: "-unity-slice-scale", description: "Scale of the sliced borders.", values: [] },
   {
     name: "-unity-slice-type",
@@ -98,7 +97,7 @@ export function ussContext(
 
 const info = (p: UssProperty) => () => {
   const dom = document.createElement("div");
-  dom.textContent = p.description;
+  dom.textContent = tx(p.description);
   return dom;
 };
 

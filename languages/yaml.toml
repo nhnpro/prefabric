@@ -1,7 +1,7 @@
 id = "yaml"
 name = "YAML"
 formatter = { tool = "prettier", parser = "yaml", range = false }
-extensions = ["yaml", "yml"]
+extensions = ["yaml", "yml", "unity", "prefab", "anim", "controller", "overridecontroller", "physicmaterial", "mixer", "playable", "signal", "lighting", "spriteatlas", "terrainlayer", "preset"]
 filenames = [".clang-format", ".clang-tidy", ".clangd", ".gemrc", "pnpm-lock.yaml", "CITATION.cff"]
 first-line = "^%YAML"
 line-comment = "#"
@@ -14,3 +14,6 @@ name = "yaml-language-server"
 command = "yaml-language-server"
 args = ["--stdio"]
 install-hint = "npm i -g yaml-language-server"
+# Unity's serialized assets: every object has a `!u!` tag the server can't resolve. Other Unity
+# YAML assets (`.asset`, `.mat`) are recognised by their `%YAML` first line.
+ignore-diagnostics = [{ files = ["*.unity", "*.prefab", "*.anim", "*.controller", "*.overrideController", "*.physicMaterial", "*.mixer", "*.playable", "*.signal", "*.lighting", "*.spriteatlas", "*.terrainlayer", "*.preset", "*.asset", "*.mat"], codes = ["*"] }]

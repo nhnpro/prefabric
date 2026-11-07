@@ -98,7 +98,7 @@ pub struct IndentConfig {
 pub struct IgnoredDiagnostics {
     /// File names: `*.uss` (by extension, ignoring case) or an exact name.
     pub files: Vec<String>,
-    /// Diagnostic codes, as the server reports them.
+    /// Diagnostic codes, as the server reports them; `*` for all.
     pub codes: Vec<String>,
 }
 
