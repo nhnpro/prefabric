@@ -75,6 +75,13 @@ const CASES: Record<string, Case> = {
     evaluate: ["r.Method", /^"GET"$/],
     request: "http://127.0.0.1:8080/notes?q=openidea",
   },
+  csharp: {
+    fixture: "csharp-app",
+    debugger: "netcoredbg",
+    file: "src/Tasks.Cli/Program.cs",
+    variable: "item",
+    evaluate: ["item.Title", /^"Buy milk"$/],
+  },
   java: {
     fixture: "java-app",
     debugger: "java-debug",
@@ -237,7 +244,21 @@ async function smoke(language: string) {
   expect(after.stopReason, shown()).toBe("step");
   expect(after.frames[0]!.line, shown()).toBeGreaterThan(line);
 
+  let stops = useDebug.getState().stopSeq;
   await executeAction("debug.resume");
+  // A breakpoint in a loop (C#'s `foreach` over the pending tasks) stops once per item.
+  for (let i = 0; i < 10 && !c.request; i++) {
+    const next = await until("the next stop or the end", () =>
+      useDebug.getState().stopSeq > stops && paused()
+        ? "paused"
+        : Object.values(useDebug.getState().sessions).every((d) => d.status === "terminated")
+          ? "ended"
+          : null,
+    );
+    if (next === "ended") break;
+    stops = useDebug.getState().stopSeq;
+    await executeAction("debug.resume");
+  }
   if (c.request) {
     await until("the request to be served", () => useDebug.getState().sessions[s.id]?.status === "running");
     await executeAction("debug.stop");

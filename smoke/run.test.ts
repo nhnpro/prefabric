@@ -101,6 +101,17 @@ const CASES: Record<string, Case> = {
       file: "store_test.go",
     },
   },
+  csharp: {
+    fixture: "csharp-app",
+    run: { config: "dotnet:src/Tasks.Cli/Tasks.Cli.csproj:run:", prints: "1 of 3 done" },
+    tests: {
+      config: "dotnet:tests/Tasks.Tests/Tasks.Tests.csproj:test:",
+      failing: (c) => env(c, { OPENIDEA_FAIL: "1" }),
+      passed: 7,
+      failed: "SearchIgnoresCase",
+      file: "TaskStoreTests.cs",
+    },
+  },
   java: {
     fixture: "java-app",
     tests: {

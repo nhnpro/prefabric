@@ -682,6 +682,11 @@ export function produceFile(input: ContextInput, env: ToolEnv): Produced | null 
       const test = found && goTestNamed(found, input);
       if (test) return { name: test.name, scope: "file", config: test };
     }
+    // C#: `Main` / top-level statements run through their project's .NET configuration.
+    if (/\.cs$/.test(rel) && role === "main") {
+      const main = contextConfig(rel, configs, input.content);
+      if (main) return { name: main.name, scope: "file", config: main };
+    }
     if (lang === "rust" && cargoOwner(rel, configs).length) {
       const example = /(?:^|\/)examples\/([^/]+)\.rs$/.exec(rel)?.[1];
       if (example && hasRustMain(input.content)) {

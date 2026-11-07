@@ -112,7 +112,8 @@ function filteredArgs(args: readonly string[], filter: string): string[] {
 
 /**
  * The run of only `paths`: a `dotnet-test` configuration rebuilds its command line from its
- * parameters at launch, so the filter goes into its test arguments; other commands get it directly.
+ * parameters at launch, so the filter goes into its test arguments as well; other commands get it
+ * directly.
  */
 export function dotnetTestsConfig(
   config: RunConfig,
@@ -126,5 +127,6 @@ export function dotnetTestsConfig(
 export function withDotnetFilter(config: RunConfig, filter: string): Pick<RunConfig, "args" | "params"> {
   if (config.kind !== "dotnet-test") return { args: filteredArgs(config.args, filter), params: config.params };
   const programArgs = formatArgs(filteredArgs(parseArgs(config.params?.programArgs ?? ""), filter));
-  return { args: config.args, params: { ...config.params, programArgs } };
+  // The arguments too: what runs before (or without) the type's launch step.
+  return { args: filteredArgs(config.args, filter), params: { ...config.params, programArgs } };
 }

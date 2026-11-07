@@ -121,3 +121,15 @@ describe("C# run targets", () => {
     expect(testHostProcessId("Waiting for debugger attach...")).toBeNull();
   });
 });
+
+describe("C# file context", () => {
+  it("runs Program.cs through its project's configuration", async () => {
+    const { produceFile } = await import("./producers");
+    const content = readFileSync("fixtures/csharp-app/src/Tasks.Cli/Program.cs", "utf8");
+    const produced = produceFile(
+      { path: "/w/src/Tasks.Cli/Program.cs", root: "/w", content, configs: CONFIGS } as never,
+      {} as never,
+    );
+    expect(produced?.config?.id).toBe("dotnet:src/Tasks.Cli/Tasks.Cli.csproj:run:");
+  });
+});
