@@ -6376,5 +6376,8 @@
   "Where the ellipsis goes when text overflows.": "文本溢出时省略号的位置。",
   "Font asset, as resource(…) or url(…).": "字体资源，写作 resource(…) 或 url(…)。",
   "Attach .NET Debugger": "附加 .NET 调试器",
-  "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })": "将 netcoredbg 附加到等待中的 .NET 测试宿主（参数：{ name, pid, process, runConfig }）"
+  "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })": "将 netcoredbg 附加到等待中的 .NET 测试宿主（参数：{ name, pid, process, runConfig }）",
+  "This Unity project saves assets in binary": "此 Unity 项目以二进制格式保存资源",
+  "Prefabric reads scenes and prefabs as text to show where scripts, fields and methods are used. To switch, open Edit > Project Settings > Editor in Unity and set Asset Serialization > Mode to Force Text; Unity then saves every asset as text.": "Prefabric 以文本方式读取场景和预制件，以显示脚本、字段和方法的使用位置。要切换，请在 Unity 中打开 Edit > Project Settings > Editor，将 Asset Serialization > Mode 设为 Force Text；Unity 随后会以文本保存所有资源。",
+  "Unity assets with merge conflicts": "存在合并冲突的 Unity 资源"
 }

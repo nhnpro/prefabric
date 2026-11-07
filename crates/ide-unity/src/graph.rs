@@ -164,6 +164,21 @@ impl Graph {
         Some(self.files.get(*self.by_rel.get(rel)? as usize)?.record)
     }
 
+    /// Binary assets, and the paths of conflicted ones (sorted).
+    pub(crate) fn problems(&self) -> (u32, Vec<Arc<str>>) {
+        let mut binary = 0;
+        let mut conflicted = Vec::new();
+        for f in self.files.iter().filter(|f| !f.removed) {
+            match f.record.problem {
+                crate::problems::Problem::Binary => binary += 1,
+                crate::problems::Problem::Conflict => conflicted.push(f.rel.clone()),
+                crate::problems::Problem::None => {}
+            }
+        }
+        conflicted.sort();
+        (binary, conflicted)
+    }
+
     pub(crate) fn file_count(&self) -> u32 {
         self.live_files
     }

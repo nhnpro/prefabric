@@ -17,7 +17,7 @@ pub(crate) const FILES: TableDefinition<&str, &[u8]> = TableDefinition::new("fil
 const SCANS: TableDefinition<&str, &[u8]> = TableDefinition::new("scans");
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 /// Bump when a stored record or its encoding changes.
-const SCHEMA: &str = "prefabric-unity-3";
+const SCHEMA: &str = "prefabric-unity-4";
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -34,6 +34,8 @@ pub(crate) struct Record {
     pub scanned: bool,
     /// Hash of a scanned asset's content: a save that changes nothing isn't scanned again.
     pub hash: u64,
+    /// Why a serialized asset isn't scanned.
+    pub problem: crate::problems::Problem,
 }
 
 pub(crate) struct Store {
@@ -121,6 +123,17 @@ impl Store {
         let txn = self.db.read().begin_read().map_err(err)?;
         let table = txn.open_table(SCANS).map_err(err)?;
         Ok(table.get(rel).map_err(err)?.and_then(|v| postcard::from_bytes(v.value()).ok()))
+    }
+
+    /// A flag kept with the index (a notice already shown).
+    pub(crate) fn flag(&self, key: &str) -> bool {
+        self.meta(key).ok().flatten().is_some()
+    }
+
+    pub(crate) fn set_flag(&self, key: &str) -> Result<()> {
+        let txn = self.db.read().begin_write().map_err(err)?;
+        txn.open_table(META).map_err(err)?.insert(key, &b"1"[..]).map_err(err)?;
+        txn.commit().map_err(err)
     }
 
     pub(crate) fn write_record(&self, rel: &str, record: Record) -> Result<()> {

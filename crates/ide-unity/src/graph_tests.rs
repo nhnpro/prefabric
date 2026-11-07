@@ -239,11 +239,12 @@ fn a_bulk_change_is_one_rescan() {
     for chunk in paths.chunks(50) {
         index.update(chunk, &[]);
     }
-    // Queueing a branch switch's worth of changes doesn't block the caller (the watcher thread).
+    // Queueing a branch switch's worth of changes only queues them: it doesn't hold up the
+    // watcher thread (generous for a debug build sharing the machine with the other tests).
     let many: Vec<_> = (0..5_000).map(|i| root.join(format!("Assets/Other/F{i}.prefab"))).collect();
     let queued = std::time::Instant::now();
     index.update(&[], &many);
-    assert!(queued.elapsed() < Duration::from_millis(50), "{:?}", queued.elapsed());
+    assert!(queued.elapsed() < Duration::from_millis(250), "{:?}", queued.elapsed());
     until(|| index.status().indexing);
     // Queries keep answering from the previous index meanwhile.
     let asked = std::time::Instant::now();
@@ -251,4 +252,76 @@ fn a_bulk_change_is_one_rescan() {
     assert!(asked.elapsed() < Duration::from_millis(100));
     until(|| !index.status().indexing && usages(&index).len() == 307);
     eprintln!("300 new prefabs indexed in {:?}", started.elapsed());
+}
+
+fn notices(events: &parking_lot::Mutex<Vec<ide_core::IdeEvent>>) -> Vec<(String, String)> {
+    events
+        .lock()
+        .iter()
+        .filter_map(|e| match e {
+            ide_core::IdeEvent::Notify { title, body, .. } => Some((title.clone(), body.clone().unwrap_or_default())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn recorded(root: &Path, store: &Path) -> (Arc<UnityIndex>, Arc<parking_lot::Mutex<Vec<ide_core::IdeEvent>>>) {
+    let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let sink = {
+        let events = events.clone();
+        Arc::new(move |e: ide_core::IdeEvent| events.lock().push(e)) as ide_core::SharedSink
+    };
+    let index = UnityIndex::open(root, store, sink, Box::new(|| true)).unwrap();
+    assert!(index.wait_idle(Duration::from_secs(20)));
+    (index, events)
+}
+
+#[test]
+fn binary_assets_are_reported_once_per_project() {
+    let (_project, _store, index, root) = copied();
+    drop(index);
+    assert_eq!(crate::problems::serialization_mode(&root), Some(crate::problems::SerializationMode::ForceText));
+    std::fs::write(root.join("Assets/Prefabs/Player Variant.prefab"), b"\0\0\0\x15binary prefab").unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let (index, events) = recorded(&root, store.path());
+    until(|| !notices(&events).is_empty());
+    assert_eq!(notices(&events), [(crate::problems::BINARY_TITLE.to_owned(), crate::problems::BINARY_BODY.to_owned())]);
+    assert_eq!(index.problems().binary_assets, 1);
+    // The variant can't be read: its usages are gone, the rest stay.
+    assert!(usages(&index).iter().all(|(rel, ..)| !rel.contains("Variant")));
+    drop(index);
+    // Not again in the next session of this project.
+    let (_index, events) = recorded(&root, store.path());
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(notices(&events).is_empty());
+}
+
+#[test]
+fn conflicted_assets_are_skipped_and_reported() {
+    let (_project, _store, index, root) = copied();
+    drop(index);
+    let store = tempfile::tempdir().unwrap();
+    let (index, events) = recorded(&root, store.path());
+    assert!(notices(&events).is_empty());
+    let squad = root.join("Assets/Prefabs/Squad.prefab");
+    let original = std::fs::read_to_string(&squad).unwrap();
+    let conflicted = original.replacen(
+        "  m_Name: Squad\n",
+        "<<<<<<< HEAD\n  m_Name: Squad\n=======\n  m_Name: Team\n>>>>>>> feature\n",
+        1,
+    );
+    std::fs::write(&squad, conflicted).unwrap();
+    index.update(std::slice::from_ref(&squad), &[]);
+    until(|| !notices(&events).is_empty());
+    let [(title, body)] = notices(&events).try_into().unwrap();
+    assert_eq!(title, crate::problems::CONFLICT_TITLE);
+    assert!(body.ends_with("\nAssets/Prefabs/Squad.prefab"), "{body}");
+    assert_eq!(index.problems().conflicted, std::slice::from_ref(&squad));
+    assert!(usages(&index).iter().all(|(rel, ..)| rel != "Assets/Prefabs/Squad.prefab"));
+
+    std::fs::write(&squad, original).unwrap();
+    index.update(std::slice::from_ref(&squad), &[]);
+    until(|| index.problems().conflicted.is_empty());
+    until(|| usages(&index) == expected_usages());
+    assert_eq!(notices(&events).len(), 1);
 }

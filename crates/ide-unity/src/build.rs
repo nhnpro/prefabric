@@ -3,6 +3,7 @@
 //! instead of being read again.
 
 use crate::graph::{Cache, Graph, Source};
+use crate::problems::{self, Problem};
 use crate::scan::{self, ScannedFile};
 use crate::store::{Record, Store};
 use crate::walk::{self, Stamp};
@@ -92,13 +93,15 @@ pub(crate) fn read(
     known: Option<&Record>,
 ) -> (Record, Option<ScannedFile>) {
     let guid = std::fs::read(walk::meta_path(abs)).ok().and_then(|m| walk::meta_guid(&m));
-    let bytes = walk::is_scanned(rel).then(|| std::fs::read(abs).ok()).flatten().filter(|b| b.starts_with(b"%YAML"));
+    let bytes = walk::is_scanned(rel).then(|| std::fs::read(abs).ok()).flatten();
     let hash = bytes.as_deref().map_or(0, content_hash);
-    let record = Record { asset, meta, guid, scanned: bytes.is_some(), hash };
-    if known.is_some_and(|k| k.scanned && k.hash == hash) {
+    let problem = bytes.as_deref().map_or(Problem::None, problems::problem);
+    let readable = bytes.filter(|_| problem == Problem::None);
+    let record = Record { asset, meta, guid, scanned: readable.is_some(), hash, problem };
+    if record.scanned && known.is_some_and(|k| k.scanned && k.hash == hash) {
         return (record, None);
     }
-    let scanned = bytes.map(|b| scan::scan(&b));
+    let scanned = readable.map(|b| scan::scan(&b));
     (record, scanned)
 }
 

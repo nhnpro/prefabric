@@ -59,5 +59,8 @@
   "Unity saves this file: it opens read-only, as edits here can break references between its objects.": "Unity saves this file: it opens read-only, as edits here can break references between its objects.",
   "Edit Anyway": "Edit Anyway",
   "Attach .NET Debugger": "Attach .NET Debugger",
-  "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })": "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })"
+  "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })": "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })",
+  "This Unity project saves assets in binary": "This Unity project saves assets in binary",
+  "Prefabric reads scenes and prefabs as text to show where scripts, fields and methods are used. To switch, open Edit > Project Settings > Editor in Unity and set Asset Serialization > Mode to Force Text; Unity then saves every asset as text.": "Prefabric reads scenes and prefabs as text to show where scripts, fields and methods are used. To switch, open Edit > Project Settings > Editor in Unity and set Asset Serialization > Mode to Force Text; Unity then saves every asset as text.",
+  "Unity assets with merge conflicts": "Unity assets with merge conflicts"
 }

@@ -10,6 +10,7 @@ mod build;
 pub mod events;
 mod graph;
 pub mod prefab;
+pub mod problems;
 pub mod scan;
 mod store;
 #[doc(hidden)]
@@ -68,6 +69,20 @@ struct Shared {
     pending: Mutex<Pending>,
     /// Signalled when changes arrive or the index is cancelled.
     wake: Condvar,
+    /// The binary-assets notice was shown in this session.
+    binary_reported: AtomicBool,
+    /// The conflicted assets last reported.
+    conflicts_reported: Mutex<Vec<Arc<str>>>,
+}
+
+/// Assets the index can't read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Problems {
+    pub serialization: Option<problems::SerializationMode>,
+    /// Serialized assets in Unity's binary format.
+    pub binary_assets: u32,
+    /// Assets skipped for their merge-conflict markers.
+    pub conflicted: Vec<PathBuf>,
 }
 
 struct Indexed {
@@ -105,6 +120,7 @@ impl Shared {
         if !self.rescan(store.as_ref()) {
             return;
         }
+        self.report(store.as_deref());
         while let Some(rels) = self.next_changes() {
             if rels.len() > BULK {
                 let files = self.status.lock().files;
@@ -112,12 +128,60 @@ impl Shared {
                 if !self.rescan(store.as_ref()) {
                     return;
                 }
+                self.report(store.as_deref());
                 continue;
             }
             let Some(indexed) = self.indexed.read().clone() else { continue };
             build::apply(&self.root, &indexed.graph, &*indexed.source, &indexed.cache, rels);
             let files = indexed.graph.read().file_count();
             self.set(UnityIndexStatus { indexing: false, files });
+            self.report(store.as_deref());
+        }
+    }
+
+    fn problems(&self) -> Problems {
+        let Some(indexed) = self.indexed.read().clone() else { return Problems::default() };
+        let (binary_assets, conflicted) = indexed.graph.read().problems();
+        Problems {
+            serialization: problems::serialization_mode(&self.root),
+            binary_assets,
+            conflicted: conflicted.iter().map(|rel| self.root.join(&**rel)).collect(),
+        }
+    }
+
+    /// Tells the user about binary assets (once per project) and conflicted ones (when they change).
+    fn report(&self, store: Option<&store::Store>) {
+        use ide_core::event::NotifyLevel;
+        let Some(indexed) = self.indexed.read().clone() else { return };
+        let (binary, conflicted) = indexed.graph.read().problems();
+        let mode = problems::serialization_mode(&self.root);
+        let binary_project = binary > 0
+            || matches!(mode, Some(problems::SerializationMode::ForceBinary | problems::SerializationMode::Unreadable));
+        const SHOWN: &str = "binary-notice";
+        if binary_project && !self.binary_reported.swap(true, Ordering::AcqRel) && !store.is_some_and(|s| s.flag(SHOWN))
+        {
+            self.sink.emit(IdeEvent::Notify {
+                level: NotifyLevel::Info,
+                title: problems::BINARY_TITLE.into(),
+                body: Some(problems::BINARY_BODY.into()),
+            });
+            if let Some(store) = store
+                && let Err(e) = store.set_flag(SHOWN)
+            {
+                tracing::warn!("unity index: {e}");
+            }
+        }
+        let mut reported = self.conflicts_reported.lock();
+        if *reported != conflicted {
+            if !conflicted.is_empty() {
+                let files: Vec<&str> = conflicted.iter().map(|r| &**r).collect();
+                self.sink.emit(IdeEvent::Notify {
+                    level: NotifyLevel::Warning,
+                    title: problems::CONFLICT_TITLE.into(),
+                    body: Some(problems::conflict_body(&files)),
+                });
+            }
+            *reported = conflicted;
         }
     }
 
@@ -182,6 +246,8 @@ impl UnityIndex {
             indexed: RwLock::new(None),
             pending: Mutex::new(Pending::default()),
             wake: Condvar::new(),
+            binary_reported: AtomicBool::new(false),
+            conflicts_reported: Mutex::new(Vec::new()),
         });
         let worker = {
             let shared = shared.clone();
@@ -258,6 +324,11 @@ impl UnityIndex {
     /// The serialized field `field` on every component using `script`, overrides applied.
     pub fn field_values(&self, script: Guid, field: &str) -> Vec<FieldValue> {
         self.query(|q| q.field_values(script, field))
+    }
+
+    /// Assets the index can't read: binary ones, and ones with merge conflicts.
+    pub fn problems(&self) -> Problems {
+        self.shared.problems()
     }
 
     /// Heap held by the in-memory graph, roughly.
