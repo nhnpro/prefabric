@@ -3,8 +3,9 @@
 //!
 //! cargo test -p ide-host --test unity_package -- --ignored
 
-use ide_core::IdeEvent;
+use ide_core::{IdeEvent, Pos};
 use ide_host::{Host, HostConfig, ops};
+use ide_lsp::types::HierarchyDirection;
 use ide_workspace::unity::UnityPackageStatus;
 use std::path::Path;
 use std::sync::Arc;
@@ -53,6 +54,16 @@ async fn installs_the_package_and_generates_project_files() {
             std::fs::remove_file(entry.path()).unwrap();
         }
     }
+    std::fs::write(
+        root.join("Assets/Scripts/Character.cs"),
+        "using UnityEngine;\n\nnamespace Game\n{\n    public abstract class Character : MonoBehaviour {}\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("Assets/Scripts/Hero.cs"),
+        "namespace Game\n{\n    public class Hero : Character\n    {\n    }\n}\n",
+    )
+    .unwrap();
     let host = host(tmp.path());
     host.trust.decide(&root, false, false).unwrap();
     host.open_project(WINDOW, &root).unwrap();
@@ -78,4 +89,30 @@ async fn installs_the_package_and_generates_project_files() {
     let csproj = std::fs::read_to_string(root.join("Game.Runtime.csproj")).unwrap();
     assert!(csproj.contains("Microsoft.Unity.Analyzers.dll"));
     assert!(csproj.contains("<LangVersion>9.0</LangVersion>"));
+
+    // Unity message completion walks a script's bases declared in other files with Roslyn's type
+    // hierarchy, which needs the generated projects (and Roslyn installed). Roslyn lists only
+    // supertypes with source: `Hero : Character` names Character, `Character : MonoBehaviour` none.
+    let supertypes = |file: &'static str, class: &'static str| {
+        let host = host.clone();
+        let root = root.clone();
+        async move {
+            let doc = ops::doc::open(&host, WINDOW, root.join(file)).await.unwrap().id;
+            let text = ops::doc::snapshot(&host, WINDOW, doc).await.unwrap().text;
+            let (line, content) =
+                text.lines().enumerate().find(|(_, l)| l.contains(&format!("class {class}"))).unwrap();
+            let pos = Pos { line: line as u32, col: content.find(class).unwrap() as u32 };
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(240);
+            loop {
+                let items = ops::lsp::lsp_type_hierarchy(&host, WINDOW, doc, pos, HierarchyDirection::Incoming)
+                    .await
+                    .unwrap_or_default();
+                if !items.is_empty() || std::time::Instant::now() > deadline {
+                    break items.into_iter().map(|i| i.name).collect::<Vec<_>>();
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        }
+    };
+    assert_eq!(supertypes("Assets/Scripts/Hero.cs", "Hero").await, ["Character"]);
 }

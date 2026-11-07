@@ -6346,5 +6346,6 @@
   "Update Package": "更新软件包",
   "C# project files are missing. Generate them with Unity, or regenerate them in Unity's Preferences > External Tools.": "缺少 C# 项目文件。可以用 Unity 生成，或在 Unity 的偏好设置 > 外部工具中重新生成。",
   "Generating…": "正在生成…",
-  "Generate Project Files": "生成项目文件"
+  "Generate Project Files": "生成项目文件",
+  "Unity documentation": "Unity 文档"
 }

@@ -50,5 +50,6 @@
   "Update Package": "Update Package",
   "C# project files are missing. Generate them with Unity, or regenerate them in Unity's Preferences > External Tools.": "C# project files are missing. Generate them with Unity, or regenerate them in Unity's Preferences > External Tools.",
   "Generating…": "Generating…",
-  "Generate Project Files": "Generate Project Files"
+  "Generate Project Files": "Generate Project Files",
+  "Unity documentation": "Unity documentation"
 }
