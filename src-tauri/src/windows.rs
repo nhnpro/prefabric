@@ -345,8 +345,17 @@ pub fn cycle_target(sorted: &[String], current: &str, forward: bool) -> Option<S
 const VALUE_FLAGS: [&str; 2] = ["--line", "--column"];
 
 /// The project path from command-line arguments (`openidea /path/to/project`):
-/// the first argument after the binary that is not a flag or a flag's value, resolved against `cwd`.
+/// the first of [`cli_paths`].
 pub fn cli_path(args: &[String], cwd: &Path) -> Option<PathBuf> {
+    cli_paths(args, cwd).into_iter().next()
+}
+
+/// The paths on the command line: the arguments after the binary that are not flags or a
+/// flag's value, resolved against `cwd`. A project and a file in it
+/// (`openidea <project> --line 12 <file>`, as code editor integrations call it) open the
+/// file in that project's window.
+pub fn cli_paths(args: &[String], cwd: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
     let mut rest = args.iter().skip(1);
     while let Some(a) = rest.next() {
         if VALUE_FLAGS.contains(&a.as_str()) {
@@ -357,9 +366,9 @@ pub fn cli_path(args: &[String], cwd: &Path) -> Option<PathBuf> {
             continue;
         }
         let p = PathBuf::from(a);
-        return Some(if p.is_absolute() { p } else { cwd.join(p) });
+        paths.push(if p.is_absolute() { p } else { cwd.join(p) });
     }
-    None
+    paths
 }
 
 /// `--line <n>` and `--column <n>` (1-based, also as `--line=<n>`) as a 0-based position;
@@ -378,9 +387,10 @@ pub fn cli_position(args: &[String]) -> Option<(u32, u32)> {
     Some((line.saturating_sub(1), number("--column").unwrap_or(1).saturating_sub(1)))
 }
 
-/// Remembers the command line's `--line` / `--column` for `path` (a file) before it is opened.
-pub fn remember_cli_position(windows: &WindowsState, args: &[String], path: &Path) {
+/// Remembers the command line's `--line` / `--column` for the last of `paths` (a file) before it is opened.
+pub fn remember_cli_position(windows: &WindowsState, args: &[String], paths: &[PathBuf]) {
     if let Some(position) = cli_position(args)
+        && let Some(path) = paths.last()
         && !path.is_dir()
     {
         windows.set_position(path, position);
@@ -917,11 +927,6 @@ fn resolve(paths: Vec<PathBuf>) -> Vec<(PathBuf, bool)> {
         .collect()
 }
 
-/// Opens `path` from the command line / a second instance; see [`open_paths`].
-pub fn open_path(app: &AppHandle, path: &Path) {
-    open_paths(app, vec![path.to_path_buf()]);
-}
-
 /// Opens paths from outside the app (a second instance, Finder's Open With, the Dock):
 /// see [`plan_open`]; the focused window is the preferred free one.
 pub fn open_paths(app: &AppHandle, paths: Vec<PathBuf>) {
@@ -1035,19 +1040,17 @@ pub fn on_second_instance(app: &AppHandle, args: Vec<String>, cwd: String) {
             return;
         }
     }
-    match cli_path(&args, Path::new(&cwd)) {
-        Some(path) => {
-            remember_cli_position(&app.state::<WindowsState>(), &args, &path);
-            open_path(app, &path)
+    let paths = cli_paths(&args, Path::new(&cwd));
+    if paths.is_empty() {
+        if let Some(w) = target_window(app) {
+            focus(&w);
+        } else {
+            spawn_window(app, None);
         }
-        None => {
-            if let Some(w) = target_window(app) {
-                focus(&w);
-            } else {
-                spawn_window(app, None);
-            }
-        }
+        return;
     }
+    remember_cli_position(&app.state::<WindowsState>(), &args, &paths);
+    open_paths(app, paths);
 }
 
 pub fn cycle(app: &AppHandle, current: &str, forward: bool) {
@@ -1449,6 +1452,16 @@ mod tests {
             cli_path(&s(&["openidea", "--line=3", "a b/文件.rs"]), cwd),
             Some(PathBuf::from("/work/a b/文件.rs"))
         );
+    }
+
+    #[test]
+    fn cli_paths_are_a_project_and_its_file() {
+        let args = s(&["prefabric", "/work/Game", "--line", "12", "--column", "5", "Assets/Player.cs"]);
+        assert_eq!(
+            cli_paths(&args, Path::new("/work/Game")),
+            vec![PathBuf::from("/work/Game"), PathBuf::from("/work/Game/Assets/Player.cs")]
+        );
+        assert!(cli_paths(&s(&["prefabric", "--line", "3"]), Path::new("/w")).is_empty());
     }
 
     #[test]

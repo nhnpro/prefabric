@@ -162,11 +162,12 @@ pub fn run() {
         builder.mount_events(app);
         let state = AppState::new(app.handle().clone())?;
         let windows = WindowsState::default();
-        if let Ok(cwd) = std::env::current_dir()
-            && let Some(path) = windows::cli_path(&std::env::args().collect::<Vec<_>>(), &cwd)
-        {
-            windows::remember_cli_position(&windows, &std::env::args().collect::<Vec<_>>(), &path);
-            windows.set_launch("main", windows::path_launch(path));
+        let args = std::env::args().collect::<Vec<_>>();
+        let mut cli_paths = std::env::current_dir().map(|cwd| windows::cli_paths(&args, &cwd)).unwrap_or_default();
+        windows::remember_cli_position(&windows, &args, &cli_paths);
+        if let [path] = cli_paths.as_slice() {
+            windows.set_launch("main", windows::path_launch(path.clone()));
+            cli_paths.clear();
         }
         let menu_state = menu::MenuState::default();
         menu::install(app.handle(), &menu_state, &state.recent.list());
@@ -178,6 +179,10 @@ pub fn run() {
         app.manage(menu_state);
         if let Some(paths) = setup_opens.lock().take() {
             windows::open_paths_at_launch(app.handle(), paths);
+        }
+        // A project and its file (`prefabric <project> --line 12 <file>`) open together.
+        if !cli_paths.is_empty() {
+            windows::open_paths_at_launch(app.handle(), cli_paths);
         }
         app.on_menu_event(on_menu_event);
         windows::create_main_window(app.handle())?;
