@@ -1,0 +1,1256 @@
+{
+  "unity": "6000.3",
+  "types": {
+    "MonoBehaviour": {
+      "base": null,
+      "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour",
+      "messages": [
+        {
+          "name": "Awake",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Unity calls Awake when loading an instance of a script component.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/awake"
+        },
+        {
+          "name": "FixedUpdate",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Update called at regular, fixed intervals as part of Unity&#x27;s physics update loop.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/fixedupdate"
+        },
+        {
+          "name": "LateUpdate",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "LateUpdate is called every frame, if the Behaviour is enabled.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/lateupdate"
+        },
+        {
+          "name": "OnAnimatorIK",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "layerIndex",
+              "type": "int"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Callback for setting up animation IK (inverse kinematics).",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onanimatorik"
+        },
+        {
+          "name": "OnAnimatorMove",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Callback for processing animation movements for modifying root motion.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onanimatormove"
+        },
+        {
+          "name": "OnApplicationFocus",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "hasFocus",
+              "type": "bool"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent to all GameObjects when the player gets or loses focus.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onapplicationfocus"
+        },
+        {
+          "name": "OnApplicationPause",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "pauseStatus",
+              "type": "bool"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent to all GameObjects when the playing application pauses or resumes on losing or regaining focus.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onapplicationpause"
+        },
+        {
+          "name": "OnApplicationQuit",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent to all active GameObjects before the application quits.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onapplicationquit"
+        },
+        {
+          "name": "OnAudioFilterRead",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "data",
+              "type": "float[]"
+            },
+            {
+              "name": "channels",
+              "type": "int"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "If OnAudioFilterRead is implemented, Unity will insert a custom filter into the audio DSP chain.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onaudiofilterread"
+        },
+        {
+          "name": "OnBecameInvisible",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when the renderer is no longer visible to any camera.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onbecameinvisible"
+        },
+        {
+          "name": "OnBecameVisible",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when the renderer becomes visible to any camera.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onbecamevisible"
+        },
+        {
+          "name": "OnChildRectTransformDimensionsChange",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a child RectTransform&#x27;s dimensions change.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onchildrecttransformdimensionschange"
+        },
+        {
+          "name": "OnCollisionEnter",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "collision",
+              "type": "Collision"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "OnCollisionEnter is called when this collider/rigidbody has begun touching another rigidbody/collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/oncollisionenter"
+        },
+        {
+          "name": "OnCollisionEnter2D",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "col",
+              "type": "Collision2D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent when an incoming collider makes contact with this object&#x27;s collider (2D physics only).",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/oncollisionenter2d"
+        },
+        {
+          "name": "OnCollisionExit",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "Collision"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "OnCollisionExit is called when this collider/rigidbody has stopped touching another rigidbody/collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/oncollisionexit"
+        },
+        {
+          "name": "OnCollisionExit2D",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "Collision2D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent when a collider on another object stops touching this object&#x27;s collider (2D physics only).",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/oncollisionexit2d"
+        },
+        {
+          "name": "OnCollisionStay",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "collisionInfo",
+              "type": "Collision"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "OnCollisionStay is called once per frame for every Collider or Rigidbody that touches another Collider or Rigidbody.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/oncollisionstay"
+        },
+        {
+          "name": "OnCollisionStay2D",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "collision",
+              "type": "Collision2D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent each frame where a collider on another object is touching this object&#x27;s collider (2D physics only).",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/oncollisionstay2d"
+        },
+        {
+          "name": "OnControllerColliderHit",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "hit",
+              "type": "ControllerColliderHit"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "OnControllerColliderHit is called when the CharacterController component hits a collider while performing a Move.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/oncontrollercolliderhit"
+        },
+        {
+          "name": "OnDestroy",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a GameObject or component is about to be destroyed.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ondestroy"
+        },
+        {
+          "name": "OnDisable",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a component itself is disabled or its parent GameObject is deactivated.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ondisable"
+        },
+        {
+          "name": "OnDrawGizmos",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Implement OnDrawGizmos if you want to draw gizmos that can be pickable and are always drawn.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ondrawgizmos"
+        },
+        {
+          "name": "OnDrawGizmosSelected",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Implement OnDrawGizmosSelected to draw a gizmo if the object is selected.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ondrawgizmosselected"
+        },
+        {
+          "name": "OnEnable",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a component of an active GameObject is first enabled.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onenable"
+        },
+        {
+          "name": "OnGUI",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnGUI is called for rendering and handling GUI events.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ongui"
+        },
+        {
+          "name": "OnJointBreak",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "breakForce",
+              "type": "float"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a joint attached to the same game object broke.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onjointbreak"
+        },
+        {
+          "name": "OnJointBreak2D",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "brokenJoint",
+              "type": "Joint2D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a Joint2D attached to the same game object breaks.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onjointbreak2d"
+        },
+        {
+          "name": "OnMouseDown",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnMouseDown is called when the user presses the left mouse button while over the Collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onmousedown"
+        },
+        {
+          "name": "OnMouseDrag",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnMouseDrag is called when the user has clicked on a Collider and is still holding down the mouse.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onmousedrag"
+        },
+        {
+          "name": "OnMouseEnter",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when the mouse enters the Collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onmouseenter"
+        },
+        {
+          "name": "OnMouseExit",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when the mouse is not any longer over the Collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onmouseexit"
+        },
+        {
+          "name": "OnMouseOver",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called every frame while the mouse is over the Collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onmouseover"
+        },
+        {
+          "name": "OnMouseUp",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called on releasing the mouse button while the mouse pointer is over the Collider attached to this GameObject.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onmouseup"
+        },
+        {
+          "name": "OnMouseUpAsButton",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnMouseUpAsButton is only called when the mouse is released over the same Collider as it was pressed.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onmouseupasbutton"
+        },
+        {
+          "name": "OnParticleCollision",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "GameObject"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "OnParticleCollision is called when a particle hits a Collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onparticlecollision"
+        },
+        {
+          "name": "OnParticleSystemStopped",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnParticleSystemStopped is called when all particles in the system have died, and no new particles will be born. New particles cease to be created either after Stop is called, or when the duration property of a non-looping system has been exceeded.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onparticlesystemstopped"
+        },
+        {
+          "name": "OnParticleTrigger",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnParticleTrigger is called when any particles in a Particle System meet the conditions in the trigger module.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onparticletrigger"
+        },
+        {
+          "name": "OnParticleUpdateJobScheduled",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnParticleUpdateJobScheduled is called when a Particle System&#x27;s built-in update job has been scheduled.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onparticleupdatejobscheduled"
+        },
+        {
+          "name": "OnPostRender",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Event function that Unity calls after a Camera renders the scene.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onpostrender"
+        },
+        {
+          "name": "OnPreCull",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Event function that Unity calls before a Camera culls the scene.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onprecull"
+        },
+        {
+          "name": "OnPreRender",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Event function that Unity calls before a Camera renders the scene.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onprerender"
+        },
+        {
+          "name": "OnRenderImage",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "src",
+              "type": "RenderTexture"
+            },
+            {
+              "name": "dest",
+              "type": "RenderTexture"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Event function that Unity calls after a Camera has finished rendering, that allows you to modify the Camera&#x27;s final image.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onrenderimage"
+        },
+        {
+          "name": "OnRenderObject",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnRenderObject is called after camera has rendered the Scene.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onrenderobject"
+        },
+        {
+          "name": "OnTransformChildrenChanged",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when the list of direct children of a GameObject&#x27;s Transform changes.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ontransformchildrenchanged"
+        },
+        {
+          "name": "OnTransformParentChanged",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a direct or indirect parent of a GameObject&#x27;s Transform changes.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ontransformparentchanged"
+        },
+        {
+          "name": "OnTriggerEnter",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "Collider"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a collider enters a trigger collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ontriggerenter"
+        },
+        {
+          "name": "OnTriggerEnter2D",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "col",
+              "type": "Collider2D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent when another object enters a trigger collider attached to this object (2D physics only).",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ontriggerenter2d"
+        },
+        {
+          "name": "OnTriggerExit",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "Collider"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when a collider stops touching a trigger collider.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ontriggerexit"
+        },
+        {
+          "name": "OnTriggerExit2D",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "Collider2D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent when another object leaves a trigger collider attached to this object (2D physics only).",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ontriggerexit2d"
+        },
+        {
+          "name": "OnTriggerStay",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "Collider"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Called once per physics update for every collider that is touching the trigger.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ontriggerstay"
+        },
+        {
+          "name": "OnTriggerStay2D",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "Collider2D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Sent once per physics update when another object is within a trigger collider attached to this object (2D physics only).",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/ontriggerstay2d"
+        },
+        {
+          "name": "OnValidate",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Editor-only function that Unity calls when the script is loaded or a value changes in the Inspector.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onvalidate"
+        },
+        {
+          "name": "OnWillRenderObject",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called for each camera if the object is visible and not a UI element.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/onwillrenderobject"
+        },
+        {
+          "name": "Reset",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Reset a component to default values.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/reset"
+        },
+        {
+          "name": "Start",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": true,
+          "static": false,
+          "description": "Start is called on the frame when a script is enabled just before any of the Update methods are called the first time.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/start"
+        },
+        {
+          "name": "Update",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Update is called every frame, if the MonoBehaviour is enabled.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/monobehaviour/update"
+        }
+      ]
+    },
+    "ScriptableObject": {
+      "base": null,
+      "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/scriptableobject",
+      "messages": [
+        {
+          "name": "Awake",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when an instance of ScriptableObject is created.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/scriptableobject/awake"
+        },
+        {
+          "name": "OnDestroy",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "This function is called when the scriptable object will be destroyed.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/scriptableobject/ondestroy"
+        },
+        {
+          "name": "OnDisable",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "This function is called when the scriptable object goes out of scope.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/scriptableobject/ondisable"
+        },
+        {
+          "name": "OnEnable",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "This function is called when the object is loaded.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/scriptableobject/onenable"
+        },
+        {
+          "name": "OnValidate",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Editor-only function that Unity calls when the script is loaded or a value changes in the Inspector.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/scriptableobject/onvalidate"
+        },
+        {
+          "name": "Reset",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Reset to default values.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/scriptableobject/reset"
+        }
+      ]
+    },
+    "Editor": {
+      "base": "ScriptableObject",
+      "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editor",
+      "messages": [
+        {
+          "name": "HasFrameBounds",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Validates whether custom bounds can be calculated for this Editor.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editor/hasframebounds"
+        },
+        {
+          "name": "OnGetFrameBounds",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Gets custom bounds for the target of this editor.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editor/ongetframebounds"
+        },
+        {
+          "name": "OnSceneGUI",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Enables the Editor to handle an event in the Scene view.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editor/onscenegui"
+        }
+      ]
+    },
+    "EditorWindow": {
+      "base": "ScriptableObject",
+      "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow",
+      "messages": [
+        {
+          "name": "Awake",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called as the new window is opened.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/awake"
+        },
+        {
+          "name": "CreateGUI",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "CreateGUI is called when the EditorWindow&#x27;s rootVisualElement is ready to be populated.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/creategui"
+        },
+        {
+          "name": "OnBecameInvisible",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called after the window is removed from a container view, or is no longer visible within a tabbed collection of EditorWindow.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/onbecameinvisible"
+        },
+        {
+          "name": "OnBecameVisible",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called after the window is added to a container view.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/onbecamevisible"
+        },
+        {
+          "name": "OnDestroy",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnDestroy is called to close the EditorWindow window.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/ondestroy"
+        },
+        {
+          "name": "OnFocus",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when the window gets keyboard focus.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/onfocus"
+        },
+        {
+          "name": "OnGUI",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Implement your own editor GUI here.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/ongui"
+        },
+        {
+          "name": "OnHierarchyChange",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Handler for message that is sent when an object or group of objects in the hierarchy changes.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/onhierarchychange"
+        },
+        {
+          "name": "OnInspectorUpdate",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "OnInspectorUpdate is called at 10 frames per second to give the inspector a chance to update.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/oninspectorupdate"
+        },
+        {
+          "name": "OnLostFocus",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when the window loses keyboard focus.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/onlostfocus"
+        },
+        {
+          "name": "OnProjectChange",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Handler for message that is sent whenever the state of the project changes.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/onprojectchange"
+        },
+        {
+          "name": "OnSelectionChange",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called whenever the selection has changed.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/onselectionchange"
+        },
+        {
+          "name": "Update",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Called multiple times per second on all visible windows.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/editorwindow/update"
+        }
+      ]
+    },
+    "AssetPostprocessor": {
+      "base": null,
+      "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor",
+      "messages": [
+        {
+          "name": "OnAssignMaterialModel",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "material",
+              "type": "Material"
+            },
+            {
+              "name": "renderer",
+              "type": "Renderer"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Feeds a source material.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onassignmaterialmodel"
+        },
+        {
+          "name": "OnPostprocessAllAssets",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "importedAssets",
+              "type": "string[]"
+            },
+            {
+              "name": "deletedAssets",
+              "type": "string[]"
+            },
+            {
+              "name": "movedAssets",
+              "type": "string[]"
+            },
+            {
+              "name": "movedFromAssetPaths",
+              "type": "string[]"
+            },
+            {
+              "name": "didDomainReload",
+              "type": "bool"
+            }
+          ],
+          "coroutine": false,
+          "static": true,
+          "description": "This is called after importing of any number of assets is complete (when the Assets progress bar has reached the end).",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessallassets"
+        },
+        {
+          "name": "OnPostprocessAnimation",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "gameObject",
+              "type": "GameObject"
+            },
+            {
+              "name": "animationClip",
+              "type": "AnimationClip"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "This function is called when an AnimationClip has finished importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessanimation"
+        },
+        {
+          "name": "OnPostprocessAssetbundleNameChanged",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "arg0",
+              "type": "string"
+            },
+            {
+              "name": "arg1",
+              "type": "string"
+            },
+            {
+              "name": "arg2",
+              "type": "string"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Handler called when asset is assigned to a different asset bundle.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessassetbundlenamechanged"
+        },
+        {
+          "name": "OnPostprocessAudio",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "audioClip",
+              "type": "AudioClip"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification when an audio clip has completed importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessaudio"
+        },
+        {
+          "name": "OnPostprocessCubemap",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "texture",
+              "type": "Cubemap"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification just before a cubemap texture has completed importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocesscubemap"
+        },
+        {
+          "name": "OnPostprocessGameObjectWithAnimatedUserProperties",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "go",
+              "type": "GameObject"
+            },
+            {
+              "name": "bindings",
+              "type": "EditorCurveBinding[]"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Called when the animation curves for a custom property of type float are finished importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessgameobjectwithanimateduserproperties"
+        },
+        {
+          "name": "OnPostprocessGameObjectWithUserProperties",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "gameObject",
+              "type": "GameObject"
+            },
+            {
+              "name": "arg1",
+              "type": "string[]"
+            },
+            {
+              "name": "arg2",
+              "type": "object[]"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Gets called for each GameObject that had at least one user property attached to it in the imported file.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessgameobjectwithuserproperties"
+        },
+        {
+          "name": "OnPostprocessMaterial",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "material",
+              "type": "Material"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification when a new Material is created during an import of a ModelImporter.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessmaterial"
+        },
+        {
+          "name": "OnPostprocessMeshHierarchy",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "gameObject",
+              "type": "GameObject"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "This function is called when a new transform hierarchy has finished importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessmeshhierarchy"
+        },
+        {
+          "name": "OnPostprocessModel",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "g",
+              "type": "GameObject"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification when a model has completed importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessmodel"
+        },
+        {
+          "name": "OnPostprocessPrefab",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "g",
+              "type": "GameObject"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Gets a notification when a Prefab completes importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessprefab"
+        },
+        {
+          "name": "OnPostprocessSpeedTree",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "gameObject",
+              "type": "GameObject"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification when a SpeedTree asset has completed importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocessspeedtree"
+        },
+        {
+          "name": "OnPostprocessSprites",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "texture",
+              "type": "Texture2D"
+            },
+            {
+              "name": "sprites",
+              "type": "Sprite[]"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification when an texture of sprite(s) has completed importing.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocesssprites"
+        },
+        {
+          "name": "OnPostprocessTexture",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "texture",
+              "type": "Texture2D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification when a texture2D has completed importing just before Unity compresses it.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocesstexture"
+        },
+        {
+          "name": "OnPostprocessTexture2DArray",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "texture",
+              "type": "Texture2DArray"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification when a texture2DArray has completed importing just before Unity compresses it.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocesstexture2darray"
+        },
+        {
+          "name": "OnPostprocessTexture3D",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "texture",
+              "type": "Texture3D"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification when a texture3D has completed importing just before Unity compresses it.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpostprocesstexture3d"
+        },
+        {
+          "name": "OnPreprocessAnimation",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification just before animation from a model (.fbx, .mb file etc.) is imported.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocessanimation"
+        },
+        {
+          "name": "OnPreprocessAsset",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification just before any Asset is imported.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocessasset"
+        },
+        {
+          "name": "OnPreprocessAudio",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification just before an audio clip is being imported.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocessaudio"
+        },
+        {
+          "name": "OnPreprocessCameraDescription",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "description",
+              "type": "CameraDescription"
+            },
+            {
+              "name": "camera",
+              "type": "Camera"
+            },
+            {
+              "name": "clips",
+              "type": "AnimationClip[]"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to receive a notification when a camera is imported from a Model Importer.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocesscameradescription"
+        },
+        {
+          "name": "OnPreprocessLightDescription",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "description",
+              "type": "LightDescription"
+            },
+            {
+              "name": "light",
+              "type": "Light"
+            },
+            {
+              "name": "clips",
+              "type": "AnimationClip[]"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to recieve a notification when a light is imported from a Model Importer.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocesslightdescription"
+        },
+        {
+          "name": "OnPreprocessMaterialDescription",
+          "returns": "void",
+          "parameters": [
+            {
+              "name": "description",
+              "type": "MaterialDescription"
+            },
+            {
+              "name": "material",
+              "type": "Material"
+            },
+            {
+              "name": "materialAnimation",
+              "type": "AnimationClip[]"
+            }
+          ],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to recieve a notification when a new material is created during the import of a ModelImporter.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocessmaterialdescription"
+        },
+        {
+          "name": "OnPreprocessModel",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification just before a model (.fbx, .mb file etc.) is imported.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocessmodel"
+        },
+        {
+          "name": "OnPreprocessSpeedTree",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification just before a SpeedTree asset (.spm file) is imported.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocessspeedtree"
+        },
+        {
+          "name": "OnPreprocessTexture",
+          "returns": "void",
+          "parameters": [],
+          "coroutine": false,
+          "static": false,
+          "description": "Add this function to a subclass to get a notification just before the texture importer is run.",
+          "docs": "https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/assetpostprocessor/onpreprocesstexture"
+        }
+      ]
+    }
+  }
+}
