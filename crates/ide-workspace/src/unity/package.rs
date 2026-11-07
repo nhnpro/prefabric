@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub const NAME: &str = "dev.prefabric.unity";
 /// `version` of `unity/package.json`.
-pub const BUNDLED_VERSION: &str = "0.1.0";
+pub const BUNDLED_VERSION: &str = "0.1.1";
 
 /// Every file of `unity/` (a test keeps the list complete).
 const FILES: &[(&str, &[u8])] = &[

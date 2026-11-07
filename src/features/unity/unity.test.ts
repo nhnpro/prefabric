@@ -5,6 +5,7 @@ import { EditorView } from "@codemirror/view";
 import { indentUnit } from "@codemirror/language";
 import type { AssemblyDefinition, HierarchyItem, TextEdit, WorkspaceEdit } from "@/platform/ipc";
 import { referenceAt, resolveReference } from "./asmdef";
+import { ussSource } from "./uss";
 import { serializedFieldAt, unityRename } from "./rename";
 import { readFileSync } from "node:fs";
 import { Text } from "@codemirror/state";
@@ -299,5 +300,31 @@ describe("assembly definition references", () => {
     expect(resolveReference("GUID:F3A9C0D1E2B34567890ABCDEF1234567", definitions)?.name).toBe("Game.Runtime");
     expect(resolveReference("UnityEditor.TestRunner", definitions)).toBeNull();
     expect(resolveReference("GUID:0000", definitions)).toBeNull();
+  });
+});
+
+describe("USS completion", () => {
+  async function complete(text: string, explicit = false) {
+    const pos = text.indexOf("|");
+    const state = EditorState.create({ doc: text.replace("|", ""), selection: { anchor: pos } });
+    return ussSource(new CompletionContext(state, pos, explicit));
+  }
+
+  it("offers Unity properties where a declaration starts", async () => {
+    const result = await complete(".title {\n  color: red;\n  -unity-te|\n}");
+    expect(result!.options.map((o) => o.label)).toContain("-unity-text-align");
+    expect(result!.from).toBe(".title {\n  color: red;\n  ".length);
+    expect(result!.options.find((o) => o.label === "-unity-text-align")!.apply).toBe("-unity-text-align: ");
+  });
+
+  it("offers a Unity property's keyword values", async () => {
+    const result = await complete(".title { -unity-font-style: bo| }");
+    expect(result!.options.map((o) => o.label)).toEqual(["normal", "italic", "bold", "bold-and-italic"]);
+    expect(await complete(".title { color: re| }")).toBeNull();
+  });
+
+  it("stays out of selectors", async () => {
+    expect(await complete(".tit|le { }")).toBeNull();
+    expect(await complete("Button > .ti|")).toBeNull();
   });
 });

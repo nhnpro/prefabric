@@ -1,7 +1,7 @@
 id = "css"
 name = "CSS"
 formatter = { tool = "prettier", parser = "css", range = false }
-extensions = ["css", "pcss", "postcss"]
+extensions = ["css", "pcss", "postcss", "uss", "tss"]
 block-comment = ["/*", "*/"]
 indent = { tab-size = 2, insert-spaces = true }
 ui-mode = "CSS"

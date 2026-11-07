@@ -1,6 +1,6 @@
 id = "xml"
 name = "XML"
-extensions = ["xml", "xsd", "xsl", "xslt", "svg", "plist", "csproj", "fsproj", "vbproj", "props", "targets", "nuspec", "xaml", "axaml", "resx", "wsdl", "fxml", "iml", "jnlp", "rss", "atom", "xliff", "xlf", "storyboard", "xib", "tld", "pom"]
+extensions = ["xml", "xsd", "xsl", "xslt", "svg", "plist", "csproj", "fsproj", "vbproj", "props", "targets", "nuspec", "xaml", "axaml", "resx", "wsdl", "fxml", "iml", "jnlp", "rss", "atom", "xliff", "xlf", "storyboard", "xib", "tld", "pom", "uxml"]
 filenames = ["NuGet.Config", "Directory.Build.targets", "web.config", "app.config"]
 first-line = "^<\\?xml\\b"
 block-comment = ["<!--", "-->"]
@@ -12,3 +12,9 @@ tree-sitter = "xml"
 name = "lemminx"
 command = "lemminx"
 install-hint = "Install Eclipse LemMinX (https://github.com/redhat-developer/vscode-xml/releases, binary `lemminx`)"
+
+# Unity UXML: the schema Unity generates in `UIElementsSchema/` (Prefabric's "Generate Project
+# Files" updates it). UI Builder writes `noNamespaceSchemaLocation` without the `xsi:` prefix, so
+# the schema is associated by file pattern; lemminx resolves the path against the workspace root.
+[language-servers.settings.xml]
+fileAssociations = [{ pattern = "**/*.uxml", systemId = "UIElementsSchema/UIElements.xsd" }]

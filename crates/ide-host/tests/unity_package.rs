@@ -1,5 +1,6 @@
 //! Installing Prefabric's Unity package and generating project files with the real Unity editor
-//! of the fixture's version (`fixtures/unity-sample`). `#[ignore]`d: it needs that Unity installed.
+//! of the fixture's version (`fixtures/unity-sample`), then the C#, UXML and `.asmdef` support on
+//! the result. `#[ignore]`d: it needs that Unity installed, Roslyn and lemminx.
 //!
 //! cargo test -p ide-host --test unity_package -- --ignored
 
@@ -115,6 +116,33 @@ async fn installs_the_package_and_generates_project_files() {
         }
     };
     assert_eq!(supertypes("Assets/Scripts/Hero.cs", "Hero").await, ["Character"]);
+
+    // UXML: generation writes Unity's schema, which lemminx completes elements from (associated
+    // by pattern: UI Builder writes `noNamespaceSchemaLocation` without its `xsi:` prefix).
+    assert!(root.join("UIElementsSchema/UnityEngine.UIElements.xsd").is_file());
+    let uxml = root.join("Assets/UI/Menu.uxml");
+    std::fs::create_dir_all(uxml.parent().unwrap()).unwrap();
+    std::fs::write(
+        &uxml,
+        "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\" xsi=\"http://www.w3.org/2001/XMLSchema-instance\" \
+         noNamespaceSchemaLocation=\"../../UIElementsSchema/UIElements.xsd\">\n    <ui:\n</ui:UXML>\n",
+    )
+    .unwrap();
+    let doc = ops::doc::open(&host, WINDOW, uxml.clone()).await.unwrap().id;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let items = ops::lsp::lsp_completion(&host, WINDOW, RequestId(78), doc, Pos { line: 1, col: 8 }, None)
+            .await
+            .map(|l| l.items)
+            .unwrap_or_default();
+        if items.iter().any(|i| i.label == "ui:Button" || i.label == "Button") {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "no UXML element completion: {:?}", items.first());
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    ops::doc::close(&host, WINDOW, doc).unwrap();
+    std::fs::remove_file(&uxml).unwrap();
 
     // `.asmdef` navigation: definitions of the project and of the packages Unity resolved.
     let definitions = ops::unity::assembly_definitions(&host, WINDOW).await.unwrap();

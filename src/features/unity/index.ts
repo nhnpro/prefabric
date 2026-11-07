@@ -1,5 +1,5 @@
 /** Unity code insight for C#: event function completion and gutter icons, Unity-aware rename;
- * navigation in assembly definitions. */
+ * navigation in assembly definitions; Unity properties in USS. */
 import { EditorState } from "@codemirror/state";
 import { CONTRIBUTED_RENAME, registerEditorContribution } from "@/editor/api";
 import { useProject } from "@/platform/project";
@@ -8,6 +8,7 @@ import { assemblyDefinitionSupport } from "./asmdef";
 import { unityMessageSource } from "./completion";
 import { eventFunctionGutter } from "./gutter";
 import { unityRename } from "./rename";
+import { ussSupport } from "./uss";
 import { loadMessageData } from "./messages";
 
 const deps = unityDeps(async () => {
@@ -30,7 +31,9 @@ export function activate() {
           ]
         : ctx.language === "json" && !ctx.virtual
           ? assemblyDefinitionSupport(ctx.path)
-          : [],
+          : ctx.language === "css" && !ctx.virtual
+            ? ussSupport(ctx.path)
+            : [],
   });
   const unsubscribe = useProject.subscribe((s, prev) => {
     if (s.project?.root !== prev.project?.root) clearUnityBases();
