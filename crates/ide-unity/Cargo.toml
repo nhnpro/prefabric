@@ -1,0 +1,18 @@
+[package]
+name = "ide-unity"
+description = "Unity asset index: scenes, prefabs and their references to scripts, persisted in redb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dunce.workspace = true
+ide-core.workspace = true
+serde.workspace = true
+specta.workspace = true
+redb.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

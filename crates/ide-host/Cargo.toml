@@ -18,6 +18,7 @@ regex-syntax.workspace = true
 ide-workspace.workspace = true
 ide-language.workspace = true
 ide-index.workspace = true
+ide-unity.workspace = true
 ide-syntax.workspace = true
 ide-search.workspace = true
 ide-lsp.workspace = true

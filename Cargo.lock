@@ -4349,6 +4349,7 @@ dependencies = [
  "ide-terminal",
  "ide-text",
  "ide-tools",
+ "ide-unity",
  "ide-vcs",
  "ide-vfs",
  "ide-workspace",
@@ -4745,6 +4746,20 @@ dependencies = [
  "tracing",
  "which",
  "zip",
+]
+
+[[package]]
+name = "ide-unity"
+version = "0.1.37"
+dependencies = [
+ "dunce",
+ "ide-core",
+ "parking_lot",
+ "redb",
+ "serde",
+ "specta",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -6398,6 +6413,7 @@ dependencies = [
  "ide-terminal",
  "ide-text",
  "ide-tools",
+ "ide-unity",
  "ide-vcs",
  "ide-vfs",
  "ide-web",

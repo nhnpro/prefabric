@@ -4,6 +4,7 @@
 use crate::Host;
 use crate::ops::project::{ProjectInfo, info};
 use ide_core::{CancellationToken, IdeError, IdeResult, RequestId};
+use ide_unity::UnityIndexStatus;
 use ide_workspace::unity::{self, UnityPackageStatus, assemblies::AssemblyDefinition};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -121,7 +122,13 @@ pub async fn assembly_definitions(host: &Arc<Host>, window: &str) -> IdeResult<V
     blocking(move || Ok(unity::assemblies::assembly_definitions(&project.root))).await
 }
 
+/// State of the asset index; `None` outside Unity projects.
+pub fn index_status(host: &Host, window: &str) -> IdeResult<Option<UnityIndexStatus>> {
+    Ok(host.project(window)?.unity.as_ref().map(|u| u.status()))
+}
+
 pub fn register(d: &mut crate::rpc::Dispatcher) {
+    d.add("unity_index_status", |c| async move { index_status(&c.host, &c.window) });
     d.add("unity_assembly_definitions", |c| async move { assembly_definitions(&c.host, &c.window).await });
     d.add("unity_install_package", |c| async move { install_package(&c.host, &c.window).await });
     d.add("unity_generate_project_files", |c| async move {

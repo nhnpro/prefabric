@@ -35,6 +35,11 @@ async fn opens_unity_without_generated_solutions_and_excludes_caches_from_the_in
     assert!(unity.projects.is_empty() && unity.solutions.is_empty());
     assert!(project.index.wait_idle(Duration::from_secs(20)));
     assert_eq!(project.index.find_files("Player.cs", 100).len(), 1);
+    // The asset index starts after the code index, in its own store.
+    let assets = project.unity.as_ref().expect("a Unity project has an asset index");
+    assert!(assets.wait_idle(Duration::from_secs(20)));
+    assert!(!ops::unity::index_status(&host, "main").unwrap().unwrap().indexing);
+    assert!(base.join("data/unity-index").read_dir().unwrap().next().is_some());
     let listed = project.index.files_matching(&project.root, |rel| rel.ends_with("Player.cs"), 10).unwrap();
     assert_eq!(listed.len(), 1);
     for name in ["Cached.cs", "Temporary.cs", "Editor.log"] {
@@ -99,4 +104,28 @@ async fn opens_unity_without_generated_solutions_and_excludes_caches_from_the_in
     assert!(ops::project::info(&project).unity.is_none());
     assert!(!project.exclude_globs().contains(&"/Library".to_owned()));
     host.close_project("main");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn other_projects_have_no_asset_index() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = dunce::canonicalize(temp.path()).unwrap();
+    let root = base.join("App");
+    std::fs::create_dir_all(root.join("Assets")).unwrap();
+    std::fs::write(root.join("App.csproj"), "<Project />\n").unwrap();
+    let host = Host::new(HostConfig {
+        config_dir: base.join("config"),
+        data_dir: base.join("data"),
+        local_data_dir: base.join("data"),
+        languages: Arc::new(ide_language::LanguageRegistry::load(None).unwrap()),
+        syntax: Arc::default(),
+        sink_for: Box::new(|_| Arc::new(NullSink)),
+        owner: |w| w,
+        runtime: tokio::runtime::Handle::current(),
+        project_environment: false,
+    });
+    let project = host.open_project("main", &root).unwrap();
+    assert!(project.unity.is_none());
+    assert_eq!(ops::unity::index_status(&host, "main").unwrap(), None);
+    assert!(!base.join("data/unity-index").exists());
 }

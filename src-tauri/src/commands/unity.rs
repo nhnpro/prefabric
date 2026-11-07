@@ -1,6 +1,7 @@
 use crate::state::AppState;
 use ide_core::{IdeResult, RequestId};
 use ide_host::ops::project::ProjectInfo;
+use ide_unity::UnityIndexStatus;
 use ide_workspace::unity::assemblies::AssemblyDefinition;
 use tauri::{State, Window};
 
@@ -31,4 +32,11 @@ pub async fn unity_assembly_definitions(
     state: State<'_, AppState>,
 ) -> IdeResult<Vec<AssemblyDefinition>> {
     ide_host::ops::unity::assembly_definitions(&state.host, window.label()).await
+}
+
+/// State of the Unity asset index; `null` outside Unity projects.
+#[tauri::command]
+#[specta::specta]
+pub fn unity_index_status(window: Window, state: State<'_, AppState>) -> IdeResult<Option<UnityIndexStatus>> {
+    ide_host::ops::unity::index_status(&state.host, window.label())
 }

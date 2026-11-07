@@ -31,6 +31,8 @@ pub struct Project {
     /// Undo stack of file move / rename refactorings.
     pub moves: FileMoves,
     pub index: Arc<ProjectIndex>,
+    /// The asset index of a Unity project (`None` elsewhere).
+    pub unity: Option<Arc<ide_unity::UnityIndex>>,
     pub lsp: Arc<LspManager>,
     /// Git repositories: the one containing the project root and those nested below it.
     pub repos: Arc<RwLock<Repos>>,
@@ -130,6 +132,7 @@ impl Host {
             sink.clone(),
         )?;
         mark("index");
+        let unity = unity_index(&self.local_data_dir, &root, &project_key, &index, &sink);
         let lsp = LspManager::new(root.clone(), languages.clone(), sink.clone());
         lsp.set_execution_allowed(trusted.load(Ordering::Acquire));
         lsp.set_content_roots(extra_roots.clone());
@@ -483,6 +486,7 @@ impl Host {
             history,
             moves: FileMoves::new(),
             index,
+            unity,
             lsp,
             repos,
             external_log_repos: RwLock::default(),
@@ -627,6 +631,7 @@ impl Host {
             history,
             moves: FileMoves::new(),
             index,
+            unity: None,
             lsp,
             repos: Arc::default(),
             external_log_repos: RwLock::default(),
@@ -1339,6 +1344,25 @@ fn exclude_globs(root: &Path, settings: &ide_core::settings::Settings, detected:
     let mut globs = settings.file_excludes();
     globs.extend(linked_roots(root, settings, detected).excluded_globs());
     globs
+}
+
+/// A Unity project's asset index, in `<localData>/unity-index/<key>`; it starts once the code
+/// index has finished its first scan.
+fn unity_index(
+    local_data: &Path,
+    root: &Path,
+    project_key: &str,
+    index: &Arc<ProjectIndex>,
+    sink: &SharedSink,
+) -> Option<Arc<ide_unity::UnityIndex>> {
+    if !ide_workspace::unity::is_project(root) {
+        return None;
+    }
+    let index = Arc::downgrade(index);
+    let ready = Box::new(move || index.upgrade().is_none_or(|i| !i.status().indexing));
+    ide_unity::UnityIndex::open(root, &local_data.join("unity-index").join(project_key), sink.clone(), ready)
+        .map_err(|e| tracing::warn!("unity index: {e}"))
+        .ok()
 }
 
 pub(crate) fn project_key(root: &Path) -> String {

@@ -99,6 +99,13 @@ export const commands = {
 	unityGenerateProjectFiles: (request: RequestId) => typedError<ProjectInfo_Serialize, IdeError>(__TAURI_INVOKE("unity_generate_project_files", { request })),
 	/**  The project's assembly definitions (`.asmdef`), with their GUIDs. */
 	unityAssemblyDefinitions: () => typedError<AssemblyDefinition[], IdeError>(__TAURI_INVOKE("unity_assembly_definitions")),
+	/**  State of the Unity asset index; `null` outside Unity projects. */
+	unityIndexStatus: () => typedError<{
+	/**  Waiting to start or scanning. */
+	indexing: boolean,
+	/**  Indexed asset files. */
+	files: number,
+} | null, IdeError>(__TAURI_INVOKE("unity_index_status")),
 	cancelRequest: (id: RequestId) => __TAURI_INVOKE<void>("cancel_request", { id }),
 	/**
 	 *  Stops a background task the backend reported with `cancellable` set; false when it
@@ -4294,6 +4301,8 @@ uiMode: string | null } |
 cancellable: boolean } | 
 /**  Project indexing state changed (dumb mode on/off). */
 { type: "indexState"; indexing: boolean; files: number; symbols: number } | 
+/**  Unity asset index state changed (Unity projects only). */
+{ type: "unityIndexState"; indexing: boolean; files: number } | 
 /**  Git status / branch information should be refreshed. */
 { type: "vcsChanged"; root: IpcPath } | { type: "languageServer"; server: ServerId; name: string; status: ServerStatus; message: string | null } | 
 /**  A running server lacks a capability; the UI offers the managed tool as a replacement. */
@@ -7541,6 +7550,13 @@ export type UndoOutcome = {
 	moves: FileMove[],
 	/**  Edited files changed since the refactoring, so their edits were kept. */
 	conflicts: IpcPath[],
+};
+
+export type UnityIndexStatus = {
+	/**  Waiting to start or scanning. */
+	indexing: boolean,
+	/**  Indexed asset files. */
+	files: number,
 };
 
 export type UnityPackageStatus = { state: "missing" } | 

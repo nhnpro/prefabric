@@ -81,6 +81,11 @@ pub enum IdeEvent {
         files: u32,
         symbols: u32,
     },
+    /// Unity asset index state changed (Unity projects only).
+    UnityIndexState {
+        indexing: bool,
+        files: u32,
+    },
     /// Git status / branch information should be refreshed.
     VcsChanged {
         root: crate::IpcPath,
