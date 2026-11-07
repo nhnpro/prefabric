@@ -12,6 +12,7 @@ serde.workspace = true
 specta.workspace = true
 redb.workspace = true
 parking_lot.workspace = true
+memchr = "2"
 tracing.workspace = true
 
 [dev-dependencies]

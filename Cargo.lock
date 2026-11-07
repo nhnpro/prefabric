@@ -4754,6 +4754,7 @@ version = "0.1.37"
 dependencies = [
  "dunce",
  "ide-core",
+ "memchr",
  "parking_lot",
  "redb",
  "serde",
