@@ -98,11 +98,14 @@ function UsagesPopupInner() {
   };
   const openInFindWindow = () => {
     close();
+    const code = groups.filter((g) => g.section !== "assets");
+    const assets = groups.flatMap((g) => g.usages.flatMap((u) => (u.asset ? [u.asset] : [])));
     void showUsageResults({
       symbol,
       note,
-      locations: usageLocations(groups),
-      classified: groups.flatMap((g) =>
+      ...(assets.length ? { assets } : {}),
+      locations: usageLocations(code),
+      classified: code.flatMap((g) =>
         g.usages.map((u) => ({
           location: usageLocations([{ path: g.path, usages: [u] }])[0]!,
           kind: u.kind ?? "unknown",

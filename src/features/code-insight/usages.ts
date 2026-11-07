@@ -1,6 +1,6 @@
 /** Find Usages (⌥F7 → "usages" tool window) and Show Usages (⌥⌘F7 → popup). */
 import { create } from "zustand";
-import type { ClassifiedReference, ReferenceAccess, ReferenceKind, Location, RequestId } from "@/bindings";
+import type { AssetUsage, ClassifiedReference, ReferenceAccess, ReferenceKind, Location, RequestId } from "@/bindings";
 import { clearLineTokens } from "@/editor/lineTokens";
 import { incompleteNote } from "@/editor/lsp/lsp";
 import { commands, isCancelled, nextRequestId } from "@/platform/ipc";
@@ -15,6 +15,7 @@ import {
   reportError,
   type CaretContext,
 } from "./ipc";
+import { assetGroups, fetchAssetUsages } from "./assetUsages";
 import { syntaxUsages } from "./syntaxUsages";
 
 export interface Usage {
@@ -27,13 +28,17 @@ export interface Usage {
   col: number;
   /** End column on `line` (clamped to the line for multi-line ranges). */
   endCol: number;
-  /** The usage's line text (empty when the file couldn't be read). */
+  /** The usage's line text (empty when the file couldn't be read); a Unity asset usage's GameObject. */
   text: string;
+  /** A use in a Unity scene, prefab or clip (from the asset index, not the language server). */
+  asset?: AssetUsage;
 }
 
 export interface UsageGroup {
   path: string;
   usages: Usage[];
+  /** Unity asset usages, listed before the code's. */
+  section?: "assets";
 }
 
 /** Groups reference locations by file (sorted by path, then position), attaching line previews. */
@@ -179,14 +184,28 @@ interface FetchedUsages {
 }
 
 /**
- * The server's references across the project (files outside its analysis scope
+ * Unity asset usages first (reported through `onAssets` as soon as the asset index answers, before
+ * the language server), then the server's references across the project (files outside its analysis scope
  * included); when it is not ready or fails, the syntax fallback (an empty server
  * answer is respected). Without a fallback the server error stands.
  * Cancel with `commands.cancelRequest(request)`.
  */
-export async function fetchUsages(c: CaretContext, request: RequestId = nextRequestId()): Promise<FetchedUsages> {
+export async function fetchUsages(
+  c: CaretContext,
+  request: RequestId = nextRequestId(),
+  onAssets?: (groups: UsageGroup[]) => void,
+): Promise<FetchedUsages> {
   // Usage lines are read afresh: so are the files their syntax colours come from.
   clearLineTokens();
+  const assets = fetchAssetUsages(c).then((groups) => {
+    if (groups.length) onAssets?.(groups);
+    return groups;
+  });
+  const code = await fetchCodeUsages(c, request);
+  return { ...code, groups: [...(await assets), ...code.groups] };
+}
+
+async function fetchCodeUsages(c: CaretContext, request: RequestId): Promise<FetchedUsages> {
   let locs: Location[];
   let classified: ClassifiedReference[] = [];
   let note: string | null = null;
@@ -249,14 +268,20 @@ export async function findUsages() {
     toolWindowService().show("usages");
     const request = nextRequestId();
     inflight.set(id, request);
+    let assets: UsageGroup[] = [];
+    const showAssets = (groups: UsageGroup[]) => {
+      assets = groups;
+      if (inflight.get(id) === request) replaceUsageTab(id, { ...loading, groups });
+    };
     try {
-      const { groups, note } = await fetchUsages(c, request);
+      const { groups, note } = await fetchUsages(c, request, showAssets);
       replaceUsageTab(id, { ...base, loading: false, groups, error: null, note });
     } catch (e) {
       // Cancelled here (closed tab, rerun): a newer state already replaced it.
       if (isCancelled(e) && !inflight.has(id)) return;
       const message = e instanceof Error ? e.message : String(e);
-      if (!replaceUsageTab(id, { ...base, loading: false, groups: [], error: message, note: null })) return;
+      // The asset usages found stay with the server's error.
+      if (!replaceUsageTab(id, { ...base, loading: false, groups: assets, error: message, note: null })) return;
       reportError(e);
     } finally {
       if (inflight.get(id) === request) inflight.delete(id);
@@ -274,6 +299,8 @@ export async function showUsageResults(arg: unknown) {
     symbol?: unknown;
     locations?: unknown;
     classified?: ClassifiedReference[];
+    /** Unity asset usages, shown before the locations. */
+    assets?: AssetUsage[];
     note?: unknown;
   };
   if (!Array.isArray(a.locations)) return;
@@ -288,7 +315,7 @@ export async function showUsageResults(arg: unknown) {
   replaceUsageTab(id, {
     ...base,
     loading: false,
-    groups: groupUsages(locs, files, a.classified),
+    groups: [...assetGroups(Array.isArray(a.assets) ? a.assets : []), ...groupUsages(locs, files, a.classified)],
     error: null,
     note: typeof a.note === "string" ? a.note : null,
   });

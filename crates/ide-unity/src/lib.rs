@@ -15,6 +15,7 @@ pub mod scan;
 mod store;
 #[doc(hidden)]
 pub mod synthetic;
+pub mod usages;
 mod walk;
 
 pub use graph::{BindingKind, FieldValue, MethodBinding, ScriptUsage};

@@ -106,6 +106,14 @@ export const commands = {
 	/**  Indexed asset files. */
 	files: number,
 } | null, IdeError>(__TAURI_INVOKE("unity_index_status")),
+	/**
+	 *  The scenes, prefabs and clips using the C# class, method or serialized field at `pos`;
+	 *  `null` outside Unity projects and for symbols assets can't use.
+	 */
+	unityAssetUsages: (doc: DocId, pos: Pos) => typedError<{
+	symbol: string,
+	usages: AssetUsage[],
+} | null, IdeError>(__TAURI_INVOKE("unity_asset_usages", { doc, pos })),
 	cancelRequest: (id: RequestId) => __TAURI_INVOKE<void>("cancel_request", { id }),
 	/**
 	 *  Stops a background task the backend reported with `cancellable` set; false when it
@@ -1786,6 +1794,28 @@ export type AssemblyDefinition = {
 	/**  From the `.meta` file; none when Unity hasn't imported it yet. */
 	guid: string | null,
 };
+
+export type AssetUsage = {
+	path: IpcPath,
+	/**  0-based line in the asset's YAML. */
+	line: number,
+	/**  The GameObject from its root (`Squad/Follower`), or the animation clip; empty when unknown. */
+	gameObject: string[],
+	/**  The prefab (relative to the project) whose instance brings the component. */
+	through: string | null,
+	usage: AssetUsageKind,
+};
+
+/**  How an asset uses the symbol. */
+export type AssetUsageKind = 
+/**  A component of the script on a GameObject. */
+{ kind: "component" } | 
+/**  A UnityEvent listener calling the method. */
+{ kind: "unityEvent"; field: string } | 
+/**  An animation event calling the method at `time` seconds. */
+{ kind: "animationEvent"; time: string } | 
+/**  The serialized field's value on a component; `overridden` when a prefab instance sets it. */
+{ kind: "fieldValue"; value: string | null; overridden: boolean };
 
 export type AttachKind = "java" | "node" | "python" | "go" | "native";
 
@@ -7557,6 +7587,12 @@ export type UndoOutcome = {
 	moves: FileMove[],
 	/**  Edited files changed since the refactoring, so their edits were kept. */
 	conflicts: IpcPath[],
+};
+
+/**  The assets using the C# class, method or serialized field at `pos` of `doc`. */
+export type UnityAssetUsages = {
+	symbol: string,
+	usages: AssetUsage[],
 };
 
 export type UnityIndexStatus = {

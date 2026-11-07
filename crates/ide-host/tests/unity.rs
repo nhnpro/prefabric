@@ -129,3 +129,106 @@ async fn other_projects_have_no_asset_index() {
     assert_eq!(ops::unity::index_status(&host, "main").unwrap(), None);
     assert!(!base.join("data/unity-index").exists());
 }
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn finds_asset_usages_of_the_symbol_at_the_caret() {
+    use ide_core::Pos;
+    use ide_unity::usages::AssetUsageKind;
+    let temp = tempfile::tempdir().unwrap();
+    let base = dunce::canonicalize(temp.path()).unwrap();
+    let root = base.join("Game");
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/unity-sample");
+    for dir in ["Assets", "ProjectSettings", "Packages"] {
+        copy_dir(&fixture.join(dir), &root.join(dir));
+    }
+    let host = Host::new(HostConfig {
+        config_dir: base.join("config"),
+        data_dir: base.join("data"),
+        local_data_dir: base.join("data"),
+        languages: Arc::new(ide_language::LanguageRegistry::load(None).unwrap()),
+        syntax: Arc::new(std::sync::OnceLock::from(Arc::new(ide_language::Syntax::new()))),
+        sink_for: Box::new(|_| Arc::new(NullSink)),
+        owner: |w| w,
+        runtime: tokio::runtime::Handle::current(),
+        project_environment: false,
+    });
+    let project = host.open_project("main", &root).unwrap();
+    assert!(project.unity.as_ref().unwrap().wait_idle(Duration::from_secs(30)));
+    let script = root.join("Assets/Scripts/Player.cs");
+    let text = std::fs::read_to_string(&script).unwrap();
+    let doc = ops::doc::open(&host, "main", script).await.unwrap().id;
+    let at = |needle: &str| {
+        let line = text.lines().position(|l| l.contains(needle)).unwrap();
+        let col = text.lines().nth(line).unwrap().find(needle).unwrap();
+        Pos::new(line as u32, col as u32 + 1)
+    };
+    let usages = |pos| {
+        let host = &host;
+        async move {
+            ops::unity::asset_usages(host, "main", doc, pos)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("no symbol at {pos:?}"))
+        }
+    };
+    let rel = |u: &ide_unity::usages::AssetUsage| u.path.strip_prefix(&root).unwrap().to_string_lossy().into_owned();
+
+    let class = usages(Pos::new(at("class Player").line, at("class Player").col + 6)).await;
+    assert_eq!(class.symbol, "Player");
+    let files: Vec<String> = class.usages.iter().map(rel).collect();
+    for f in ["Assets/Prefabs/Player.prefab", "Assets/Scenes/Main.unity"] {
+        assert!(files.iter().any(|x| x == f), "{f} in {files:?}");
+    }
+    assert!(class.usages.iter().all(|u| u.usage == AssetUsageKind::Component));
+    let follower = class.usages.iter().find(|u| rel(u) == "Assets/Prefabs/Squad.prefab").unwrap();
+    assert_eq!(
+        (follower.game_object.join("/"), follower.through.as_deref()),
+        ("Squad/Follower".into(), Some("Assets/Prefabs/Player.prefab"))
+    );
+
+    let handler = usages(at("OnTriggerZoneEntered")).await;
+    assert!(handler.usages.iter().any(|u| matches!(&u.usage, AssetUsageKind::UnityEvent { .. })), "{handler:#?}");
+    let footstep = usages(at("OnFootstep")).await;
+    assert!(
+        footstep
+            .usages
+            .iter()
+            .any(|u| matches!(&u.usage, AssetUsageKind::AnimationEvent { .. })
+                && rel(u) == "Assets/Animations/Walk.anim"),
+        "{footstep:#?}"
+    );
+    let speed = usages(at("speed = 2f")).await;
+    assert_eq!(speed.symbol, "speed");
+    let set: Vec<(String, Option<&str>, bool)> = speed
+        .usages
+        .iter()
+        .map(|u| match &u.usage {
+            AssetUsageKind::FieldValue { value, overridden } => (rel(u), value.as_deref(), *overridden),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        set,
+        [
+            ("Assets/Prefabs/Player Variant.prefab".to_owned(), Some("5"), true),
+            ("Assets/Prefabs/Player.prefab".to_owned(), Some("2"), false),
+            ("Assets/Scenes/Main.unity".to_owned(), Some("7"), true),
+        ]
+    );
+    // A local variable isn't a symbol assets use.
+    assert!(ops::unity::asset_usages(&host, "main", doc, at("var unused")).await.unwrap().is_none());
+    host.close_project("main");
+}

@@ -3,8 +3,9 @@
 
 use crate::Host;
 use crate::ops::project::{ProjectInfo, info};
-use ide_core::{CancellationToken, IdeError, IdeResult, RequestId};
+use ide_core::{CancellationToken, DocId, IdeError, IdeResult, Pos, RequestId};
 use ide_unity::UnityIndexStatus;
+use ide_unity::usages::{AssetUsage, symbol_at};
 use ide_workspace::unity::{self, UnityPackageStatus, assemblies::AssemblyDefinition};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -127,7 +128,38 @@ pub fn index_status(host: &Host, window: &str) -> IdeResult<Option<UnityIndexSta
     Ok(host.project(window)?.unity.as_ref().map(|u| u.status()))
 }
 
+/// The assets using the C# class, method or serialized field at `pos` of `doc`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnityAssetUsages {
+    pub symbol: String,
+    pub usages: Vec<AssetUsage>,
+}
+
+/// Asset usages of the symbol at `pos`, from the asset index alone (it answers in milliseconds, so
+/// Find Usages shows them before the language server's references). `None` outside Unity projects,
+/// C# files, and symbols assets can't use.
+pub async fn asset_usages(host: &Host, window: &str, doc: DocId, pos: Pos) -> IdeResult<Option<UnityAssetUsages>> {
+    let project = host.project(window)?;
+    let Some(index) = project.unity.clone() else { return Ok(None) };
+    blocking(move || {
+        let snap = project.documents.text_snapshot(doc)?;
+        if snap.large || snap.language.as_str() != "csharp" {
+            return Ok(None);
+        }
+        let (path, _) = project.documents.identity(doc)?;
+        let outline = project.syntax.outline(doc, &snap.language, snap.version, &snap.text);
+        let Some(symbol) = symbol_at(&path, &snap.text, &outline, pos) else { return Ok(None) };
+        Ok(Some(UnityAssetUsages { symbol: symbol.name().to_owned(), usages: index.asset_usages(&path, &symbol) }))
+    })
+    .await
+}
+
 pub fn register(d: &mut crate::rpc::Dispatcher) {
+    d.add(
+        "unity_asset_usages",
+        |c| async move { asset_usages(&c.host, &c.window, c.arg("doc")?, c.arg("pos")?).await },
+    );
     d.add("unity_index_status", |c| async move { index_status(&c.host, &c.window) });
     d.add("unity_assembly_definitions", |c| async move { assembly_definitions(&c.host, &c.window).await });
     d.add("unity_install_package", |c| async move { install_package(&c.host, &c.window).await });

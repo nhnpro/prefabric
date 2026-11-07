@@ -6379,5 +6379,10 @@
   "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })": "将 netcoredbg 附加到等待中的 .NET 测试宿主（参数：{ name, pid, process, runConfig }）",
   "This Unity project saves assets in binary": "此 Unity 项目以二进制格式保存资源",
   "Prefabric reads scenes and prefabs as text to show where scripts, fields and methods are used. To switch, open Edit > Project Settings > Editor in Unity and set Asset Serialization > Mode to Force Text; Unity then saves every asset as text.": "Prefabric 以文本方式读取场景和预制件，以显示脚本、字段和方法的使用位置。要切换，请在 Unity 中打开 Edit > Project Settings > Editor，将 Asset Serialization > Mode 设为 Force Text；Unity 随后会以文本保存所有资源。",
-  "Unity assets with merge conflicts": "存在合并冲突的 Unity 资源"
+  "Unity assets with merge conflicts": "存在合并冲突的 Unity 资源",
+  "Unity assets": "Unity 资源",
+  "Code usages": "代码中的用法",
+  "UnityEvent {field}": "UnityEvent {field}",
+  "Animation event at {time} s": "{time} 秒处的动画事件",
+  "Overridden: {value}": "已覆盖：{value}"
 }

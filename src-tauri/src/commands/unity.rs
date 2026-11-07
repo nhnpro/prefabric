@@ -1,6 +1,7 @@
 use crate::state::AppState;
-use ide_core::{IdeResult, RequestId};
+use ide_core::{DocId, IdeResult, Pos, RequestId};
 use ide_host::ops::project::ProjectInfo;
+use ide_host::ops::unity::UnityAssetUsages;
 use ide_unity::UnityIndexStatus;
 use ide_workspace::unity::assemblies::AssemblyDefinition;
 use tauri::{State, Window};
@@ -39,4 +40,17 @@ pub async fn unity_assembly_definitions(
 #[specta::specta]
 pub fn unity_index_status(window: Window, state: State<'_, AppState>) -> IdeResult<Option<UnityIndexStatus>> {
     ide_host::ops::unity::index_status(&state.host, window.label())
+}
+
+/// The scenes, prefabs and clips using the C# class, method or serialized field at `pos`;
+/// `null` outside Unity projects and for symbols assets can't use.
+#[tauri::command]
+#[specta::specta]
+pub async fn unity_asset_usages(
+    window: Window,
+    state: State<'_, AppState>,
+    doc: DocId,
+    pos: Pos,
+) -> IdeResult<Option<UnityAssetUsages>> {
+    ide_host::ops::unity::asset_usages(&state.host, window.label(), doc, pos).await
 }

@@ -28,6 +28,7 @@ import {
   type TreeRowState,
   T,
 } from "@/ui";
+import { assetUsageKey, assetUsageText } from "./assetUsages";
 import { previewText } from "./ipc";
 import {
   activeUsageSearch,
@@ -45,10 +46,26 @@ import { UsageAccessFilter, filterUsageAccess, supportsUsageAccess, useUsageAcce
 
 type Node =
   | { kind: "summary"; key: string }
+  | { kind: "section"; key: string; assets: boolean; files: Node[] }
   | { kind: "file"; key: string; group: UsageGroup }
   | { kind: "usage"; key: string; usage: Usage };
 
 export function UsagePreview({ usage }: { usage: Usage }) {
+  return usage.asset ? <AssetUsagePreview usage={usage} /> : <CodeUsagePreview usage={usage} />;
+}
+
+function AssetUsagePreview({ usage }: { usage: Usage }) {
+  const tx = useTx();
+  const { label, detail } = assetUsageText(usage.asset!, tx);
+  return (
+    <span className={styles.preview}>
+      {label}
+      {detail && <span className={styles.assetDetail}>{detail}</span>}
+    </span>
+  );
+}
+
+function CodeUsagePreview({ usage }: { usage: Usage }) {
   const { text, textCol, from, to } = trimPreview(usage);
   const tokens = useLineTokens({ path: usage.path, line: usage.line, col: textCol }, text);
   return (
@@ -104,7 +121,12 @@ export function UsagesTabs() {
 const SUMMARY_KEY = "\u0000summary";
 
 const usageKey = (u: Usage) =>
-  `${u.path}:${u.line}:${u.col}:${u.sourceLocation?.range.end.line ?? u.line}:${u.sourceLocation?.range.end.col ?? u.endCol}`;
+  u.asset
+    ? `${u.path}:${u.line}:${assetUsageKey(u.asset)}`
+    : `${u.path}:${u.line}:${u.col}:${u.sourceLocation?.range.end.line ?? u.line}:${u.sourceLocation?.range.end.col ?? u.endCol}`;
+
+const ASSETS_KEY = "\u0000assets";
+const CODE_KEY = "\u0000code";
 
 /** Excluded (⌫) usages per search. */
 const useExcluded = create<{ byTab: Record<number, ReadonlySet<string>> }>(() => ({ byTab: {} }));
@@ -114,7 +136,7 @@ const NONE: ReadonlySet<string> = new Set();
 function nodeUsages(n: Node, files: readonly Node[]): Usage[] {
   if (n.kind === "usage") return [n.usage];
   if (n.kind === "file") return n.group.usages;
-  return files.flatMap((f) => (f.kind === "file" ? f.group.usages : []));
+  return (n.kind === "section" ? n.files : files).flatMap((f) => (f.kind === "file" ? f.group.usages : []));
 }
 
 /** Toggles exclusion of `usages`: all excluded already → include them, else exclude them all. */
@@ -145,23 +167,37 @@ export function UsagesView() {
       (search?.groups ?? [])
         .map((g) => ({ ...g, usages: filterUsageAccess(g.usages, accessOptions) }))
         .filter((g) => g.usages.length > 0)
-        .map((g) => ({ kind: "file", key: g.path, group: g })),
+        .map((g) => ({ kind: "file", key: g.section ? `${g.section}:${g.path}` : g.path, group: g })),
     [search?.groups, accessOptions],
   );
+  // Unity asset usages get a section before the code's.
+  const sections = useMemo<Node[] | null>(() => {
+    const isAsset = (f: Node) => f.kind === "file" && f.group.section === "assets";
+    const assets = files.filter(isAsset);
+    if (!assets.length) return null;
+    const code = files.filter((f) => !isAsset(f));
+    return [
+      { kind: "section", key: ASSETS_KEY, assets: true, files: assets },
+      ...(code.length ? [{ kind: "section", key: CODE_KEY, assets: false, files: code } as Node] : []),
+    ];
+  }, [files]);
+  const containers = useMemo(() => [...(sections ?? []), ...files], [sections, files]);
   const roots = useMemo<Node[]>(() => (files.length ? [{ kind: "summary", key: SUMMARY_KEY }] : []), [files.length]);
   const searchId = search?.id ?? null;
   const expanded = useMemo(() => {
     const hidden = collapsed.id === searchId ? collapsed.keys : new Set<string>();
-    return new Set([SUMMARY_KEY, ...files.map((r) => r.key)].filter((k) => !hidden.has(k)));
-  }, [files, collapsed, searchId]);
+    return new Set([SUMMARY_KEY, ...containers.map((r) => r.key)].filter((k) => !hidden.has(k)));
+  }, [containers, collapsed, searchId]);
   const getChildren = useCallback(
     (n: Node): Node[] | undefined =>
       n.kind === "summary"
-        ? files
-        : n.kind === "file"
-          ? n.group.usages.map((u) => ({ kind: "usage", key: usageKey(u), usage: u }) as Node)
-          : undefined,
-    [files],
+        ? (sections ?? files)
+        : n.kind === "section"
+          ? n.files
+          : n.kind === "file"
+            ? n.group.usages.map((u) => ({ kind: "usage", key: usageKey(u), usage: u }) as Node)
+            : undefined,
+    [files, sections],
   );
   const tree = useRef<TreeHandle>(null);
   const [lead, setLead] = useState<Node | null>(null);
@@ -187,13 +223,13 @@ export function UsagesView() {
       ? files.some((f) => f.kind === "file" && f.group.usages.some((u) => usageKey(u) === lead.key))
         ? lead
         : null
-      : lead?.kind === "file"
-        ? (files.find((f) => f.key === lead.key) ?? null)
+      : lead?.kind === "file" || lead?.kind === "section"
+        ? (containers.find((f) => f.key === lead.key) ?? null)
         : roots.length
           ? lead
           : null;
   const setAll = (collapse: boolean) =>
-    setCollapsed({ id: search.id, keys: collapse ? new Set(files.map((f) => f.key)) : new Set() });
+    setCollapsed({ id: search.id, keys: collapse ? new Set(containers.map((f) => f.key)) : new Set() });
 
   const exclude = () => {
     if (!visibleLead) return;
@@ -226,6 +262,17 @@ export function UsagesView() {
           {search.note && <span className={styles.note}>{search.note}</span>}
         </span>
       );
+    if (n.kind === "section") {
+      const count = nodeUsages(n, files).length;
+      return (
+        <span className={clsx(styles.row, isExcluded(n) && styles.excluded)}>
+          <span className={styles.groupLabel}>{tx(n.assets ? "Unity assets" : "Code usages")}</span>
+          <span className={styles.count}>
+            {count} {tx(count === 1 ? "usage" : "usages")}
+          </span>
+        </span>
+      );
+    }
     if (n.kind === "file") {
       const path = n.group.path;
       return (
@@ -293,9 +340,11 @@ export function UsagesView() {
             getLabel={(n) =>
               n.kind === "summary"
                 ? tx("Found usages")
-                : n.kind === "file"
-                  ? basename(n.group.path)
-                  : n.usage.text.trim()
+                : n.kind === "section"
+                  ? tx(n.assets ? "Unity assets" : "Code usages")
+                  : n.kind === "file"
+                    ? basename(n.group.path)
+                    : n.usage.text.trim()
             }
             getChildren={getChildren}
             isExpandable={(n) => n.kind !== "usage"}
@@ -304,7 +353,7 @@ export function UsagesView() {
             onExpandedChange={(next) =>
               setCollapsed({
                 id: search.id,
-                keys: new Set([SUMMARY_KEY, ...files.map((f) => f.key)].filter((k) => !next.has(k))),
+                keys: new Set([SUMMARY_KEY, ...containers.map((f) => f.key)].filter((k) => !next.has(k))),
               })
             }
             renderNode={renderNode}
@@ -326,7 +375,7 @@ export function UsagesView() {
               ]);
             }}
             onActivate={(n) => {
-              const u = n.kind === "usage" ? n.usage : n.kind === "file" ? n.group.usages[0] : undefined;
+              const u = n.kind === "usage" ? n.usage : n.kind === "summary" ? undefined : nodeUsages(n, files)[0];
               if (u) openUsage(u, true);
             }}
             empty={
@@ -392,7 +441,14 @@ function UsagesSplit({ preview, children }: { preview: ReactNode; children: Reac
 }
 
 function UsagesPreview({ node }: { node: Node | null }) {
-  const usage = node?.kind === "usage" ? node.usage : node?.kind === "file" ? (node.group.usages[0] ?? null) : null;
+  const usage =
+    node?.kind === "usage"
+      ? node.usage
+      : node?.kind === "file"
+        ? (node.group.usages[0] ?? null)
+        : node?.kind === "section"
+          ? (nodeUsages(node, []).at(0) ?? null)
+          : null;
   const search = useUsages(activeUsageSearch);
   const highlights = useMemo(() => {
     const group = usage && search?.groups.find((g) => g.path === usage.path);
