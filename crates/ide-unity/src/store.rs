@@ -1,19 +1,37 @@
 //! Persistence of the Unity index in its own redb file, apart from the code index: a change to the
 //! code index's grammars doesn't discard it, and it can be rebuilt without touching the other.
 
+use crate::scan::{Guid, ScannedFile};
+use crate::walk::Stamp;
 use parking_lot::RwLock;
-use redb::{Database, ReadableDatabase, ReadableTableMetadata, TableDefinition, TableError};
+#[cfg(test)]
+use redb::ReadableTableMetadata;
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition, TableError};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
+/// Asset path → [`Record`].
 pub(crate) const FILES: TableDefinition<&str, &[u8]> = TableDefinition::new("files");
+/// Asset path → its [`ScannedFile`], for scanned assets.
+const SCANS: TableDefinition<&str, &[u8]> = TableDefinition::new("scans");
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 /// Bump when a stored record or its encoding changes.
-const SCHEMA: &str = "prefabric-unity-1";
+const SCHEMA: &str = "prefabric-unity-2";
 
 type Result<T> = std::result::Result<T, String>;
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
+}
+
+/// What was indexed of an asset, to skip it while neither it nor its `.meta` changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Record {
+    pub asset: Stamp,
+    pub meta: Stamp,
+    pub guid: Option<Guid>,
+    pub scanned: bool,
 }
 
 pub(crate) struct Store {
@@ -68,19 +86,73 @@ impl Store {
 
     fn reset(&self, stamp: &str) -> Result<()> {
         let txn = self.db.read().begin_write().map_err(err)?;
-        match txn.delete_table(FILES) {
-            Ok(_) | Err(TableError::TableDoesNotExist(_)) => {}
-            Err(e) => return Err(err(e)),
+        for table in [FILES, SCANS] {
+            match txn.delete_table(table) {
+                Ok(_) | Err(TableError::TableDoesNotExist(_)) => {}
+                Err(e) => return Err(err(e)),
+            }
         }
         {
             let mut meta = txn.open_table(META).map_err(err)?;
             meta.insert("stamp", stamp.as_bytes()).map_err(err)?;
             txn.open_table(FILES).map_err(err)?;
+            txn.open_table(SCANS).map_err(err)?;
+        }
+        txn.commit().map_err(err)
+    }
+
+    /// Every stored record.
+    pub(crate) fn records(&self) -> Result<HashMap<String, Record>> {
+        let txn = self.db.read().begin_read().map_err(err)?;
+        let table = txn.open_table(FILES).map_err(err)?;
+        let mut out = HashMap::new();
+        for entry in table.iter().map_err(err)? {
+            let (k, v) = entry.map_err(err)?;
+            if let Ok(record) = postcard::from_bytes(v.value()) {
+                out.insert(k.value().to_owned(), record);
+            }
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn scan(&self, rel: &str) -> Result<Option<ScannedFile>> {
+        let txn = self.db.read().begin_read().map_err(err)?;
+        let table = txn.open_table(SCANS).map_err(err)?;
+        Ok(table.get(rel).map_err(err)?.and_then(|v| postcard::from_bytes(v.value()).ok()))
+    }
+
+    /// Stores `put` (a scan of `None` drops the stored one) and forgets `removed`, in one transaction.
+    pub(crate) fn write(&self, put: &[(&str, Record, Option<&ScannedFile>)], removed: &[&str]) -> Result<()> {
+        let txn = self.db.read().begin_write().map_err(err)?;
+        {
+            let mut files = txn.open_table(FILES).map_err(err)?;
+            let mut scans = txn.open_table(SCANS).map_err(err)?;
+            let mut buf = Vec::new();
+            for (rel, record, scan) in put {
+                buf = postcard::to_extend(record, std::mem::take(&mut buf)).map_err(err)?;
+                files.insert(*rel, buf.as_slice()).map_err(err)?;
+                buf.clear();
+                match scan {
+                    Some(scan) => {
+                        buf = postcard::to_extend(*scan, std::mem::take(&mut buf)).map_err(err)?;
+                        scans.insert(*rel, buf.as_slice()).map_err(err)?;
+                        buf.clear();
+                    }
+                    None => {
+                        scans.remove(*rel).map_err(err)?;
+                    }
+                }
+            }
+            for rel in removed {
+                files.remove(*rel).map_err(err)?;
+                scans.remove(*rel).map_err(err)?;
+            }
         }
         txn.commit().map_err(err)
     }
 
     /// Number of stored file records.
+    #[cfg(test)]
     pub(crate) fn file_count(&self) -> Result<u64> {
         let txn = self.db.read().begin_read().map_err(err)?;
         match txn.open_table(FILES) {

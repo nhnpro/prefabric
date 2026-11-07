@@ -6,11 +6,12 @@
 //! line by line and without building a YAML tree, so files of any size scan in one pass; lines that
 //! don't fit the format are skipped. Never panics on any input.
 
-use memchr::memchr;
+use memchr::{memchr, memmem};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// An asset's GUID: 32 hex digits in the `.meta` file and in references.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Guid(pub u128);
 
 impl Guid {
@@ -39,13 +40,13 @@ impl fmt::Debug for Guid {
 }
 
 /// `{fileID: <id>, guid: <guid>, type: <n>}`; without a GUID it points into the same file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObjRef {
     pub file_id: i64,
     pub guid: Option<Guid>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Object {
     /// Unity's class id: 1 GameObject, 4 Transform, 114 MonoBehaviour, 1001 PrefabInstance…
     pub class_id: u32,
@@ -92,7 +93,7 @@ pub struct Object {
 }
 
 /// A UnityEvent listener: `method` of `target`, when the event `field` is raised.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventCall {
     /// The UnityEvent field, as a path of serialized names (`onEnter`, `events.onClick`).
     pub field: Box<str>,
@@ -109,7 +110,7 @@ pub struct EventCall {
 }
 
 /// An AnimationClip event: `function` is called on the animated GameObject's scripts at `time`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnimationEvent {
     pub time: Box<str>,
     pub function: Box<str>,
@@ -119,7 +120,7 @@ pub struct AnimationEvent {
 
 /// An override of a PrefabInstance: `propertyPath` of `target` (an object of the source prefab) is
 /// `value`, or `objectReference` for a reference field.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Modification {
     pub target: ObjRef,
     pub property_path: Box<str>,
@@ -129,9 +130,11 @@ pub struct Modification {
     pub line: u32,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScannedFile {
     pub objects: Vec<Object>,
+    /// Every asset the file refers to (`guid: …` anywhere), sorted, without duplicates.
+    pub references: Vec<Guid>,
 }
 
 /// Which top-level list the following `- ` items belong to.
@@ -263,7 +266,18 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
         }
     }
     file.objects.extend(current);
+    file.references = references(bytes);
     file
+}
+
+fn references(bytes: &[u8]) -> Vec<Guid> {
+    let mut out: Vec<Guid> = memmem::find_iter(bytes, b"guid: ")
+        .filter_map(|at| Guid::parse(bytes.get(at + 6..at + 38)?))
+        .filter(|g| g.0 != 0)
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 const MONO_BEHAVIOUR: u32 = 114;

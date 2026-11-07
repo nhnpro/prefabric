@@ -6,13 +6,21 @@
 //! competes with opening the project. Queries answer from what is indexed so far;
 //! `IdeEvent::UnityIndexState` tells the UI when it is complete.
 
+mod build;
 pub mod events;
+mod graph;
 pub mod prefab;
 pub mod scan;
 mod store;
+#[doc(hidden)]
+pub mod synthetic;
+mod walk;
+
+pub use graph::{BindingKind, FieldValue, MethodBinding, ScriptUsage};
+pub use scan::Guid;
 
 use ide_core::{IdeEvent, SharedSink};
-use parking_lot::{Condvar, Mutex};
+use parking_lot::{Condvar, Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::path::{Path, PathBuf};
@@ -42,6 +50,14 @@ struct Shared {
     /// Signalled when the status changes or the index is cancelled.
     changed: Condvar,
     cancelled: AtomicBool,
+    /// The last complete scan; `None` until the first one ends.
+    indexed: RwLock<Option<Arc<Indexed>>>,
+}
+
+struct Indexed {
+    graph: graph::Graph,
+    source: Arc<dyn graph::Source>,
+    cache: graph::Cache,
 }
 
 impl Shared {
@@ -69,10 +85,18 @@ impl Shared {
         if self.cancelled() {
             return;
         }
-        let store = store::Store::open(&store_dir, &self.root);
-        let files = store.as_ref().and_then(|s| s.file_count().ok()).unwrap_or(0);
-        self.set(UnityIndexStatus { indexing: false, files: u32::try_from(files).unwrap_or(u32::MAX) });
-        // Updates arrive here once the scanner exists; until then the worker idles until closed.
+        let store = store::Store::open(&store_dir, &self.root).map(Arc::new);
+        let started = Instant::now();
+        let Some((graph, source)) = build::full_scan(&self.root, store.as_ref(), &self.cancelled) else { return };
+        tracing::info!(
+            "unity index: {} assets ({} scanned) in {} ms",
+            graph.file_count(),
+            graph.scanned_count(),
+            started.elapsed().as_millis()
+        );
+        let files = graph.file_count();
+        *self.indexed.write() = Some(Arc::new(Indexed { graph, source, cache: graph::Cache::default() }));
+        self.set(UnityIndexStatus { indexing: false, files });
         let mut status = self.status.lock();
         while !self.cancelled() {
             self.changed.wait(&mut status);
@@ -96,6 +120,7 @@ impl UnityIndex {
             status: Mutex::new(UnityIndexStatus { indexing: true, files: 0 }),
             changed: Condvar::new(),
             cancelled: AtomicBool::new(false),
+            indexed: RwLock::new(None),
         });
         let worker = {
             let shared = shared.clone();
@@ -113,6 +138,55 @@ impl UnityIndex {
 
     pub fn status(&self) -> UnityIndexStatus {
         *self.shared.status.lock()
+    }
+
+    fn query<T: Default>(&self, f: impl FnOnce(&graph::Query<'_>) -> T) -> T {
+        let Some(indexed) = self.shared.indexed.read().clone() else { return T::default() };
+        f(&graph::Query { graph: &indexed.graph, source: &*indexed.source, cache: &indexed.cache })
+    }
+
+    fn rel<'a>(&self, path: &'a Path) -> Option<std::borrow::Cow<'a, str>> {
+        let rel = path.strip_prefix(&self.shared.root).ok().or_else(|| path.is_relative().then_some(path))?;
+        let rel = rel.to_str()?;
+        Some(if std::path::MAIN_SEPARATOR == '/' { rel.into() } else { rel.replace('\\', "/").into() })
+    }
+
+    /// The GUID of the asset at `path` (absolute, or relative to the project).
+    pub fn guid_of(&self, path: &Path) -> Option<Guid> {
+        let rel = self.rel(path)?;
+        self.query(|q| q.graph.guid_of(&rel))
+    }
+
+    /// The asset with this GUID.
+    pub fn path_of(&self, guid: Guid) -> Option<PathBuf> {
+        self.query(|q| q.graph.rel_of(guid).map(|rel| self.shared.root.join(&**rel)))
+    }
+
+    /// Assets referring to `guid`.
+    pub fn referrers(&self, guid: Guid) -> Vec<PathBuf> {
+        self.query(|q| q.graph.referrers(guid).map(|rel| self.shared.root.join(&**rel)).collect())
+    }
+
+    /// Components using the script `script` (the GUID of its `.cs` file), directly or through
+    /// prefab instances.
+    pub fn script_usages(&self, script: Guid) -> Vec<ScriptUsage> {
+        self.query(|q| q.script_usages(script))
+    }
+
+    /// UnityEvent listeners and animation events calling `method` (of the class `type_name`, a
+    /// full name, when given).
+    pub fn method_bindings(&self, method: &str, type_name: Option<&str>) -> Vec<MethodBinding> {
+        self.query(|q| q.method_bindings(method, type_name))
+    }
+
+    /// The serialized field `field` on every component using `script`, overrides applied.
+    pub fn field_values(&self, script: Guid, field: &str) -> Vec<FieldValue> {
+        self.query(|q| q.field_values(script, field))
+    }
+
+    /// Heap held by the in-memory graph, roughly.
+    pub fn heap_bytes(&self) -> usize {
+        self.query(|q| q.graph.heap_bytes())
     }
 
     /// Blocks until the index is complete (tests, benchmarks). `false` on timeout.

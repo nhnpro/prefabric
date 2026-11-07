@@ -4756,6 +4756,8 @@ dependencies = [
  "ide-core",
  "memchr",
  "parking_lot",
+ "postcard",
+ "rayon",
  "redb",
  "serde",
  "specta",
