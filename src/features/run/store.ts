@@ -46,6 +46,7 @@ import { moveToReportedClasses } from "./testing/jvm";
 import { RubyTestOutput } from "./testing/ruby";
 import { TeamcityOutput } from "./testing/teamcity";
 import type { TestStdout } from "./testing/types";
+import { TRX_DIR, trxEvents, withTrxLogger } from "./testing/trx";
 import { recordTestStates } from "./testing/states";
 import { failedTestPaths, leafTestPaths, rerunFailedConfig, testsConfig } from "./testing/rerun";
 import { compoundChildren } from "./configs";
@@ -97,6 +98,8 @@ interface SessionRuntime {
   generation: number;
   /** Called with every complete output line (e.g. waiting for a JDWP agent). */
   lineListeners: Array<(text: string) => void>;
+  /** `dotnet test`: the folder its TRX reports go to. */
+  trxDir?: string;
   /** Called once the process exited (run executors: collect a coverage report…). */
   onExit?: (exitCode: number | null, stopped: boolean) => void;
   /** User input typed into the console, not yet sent (IDEA: Enter sends the line). */
@@ -811,7 +814,12 @@ export async function startRun(
     if ((options.launch || launch.isTest) && launch.emulateTerminal) launch = { ...launch, emulateTerminal: false };
     if (launch.emulateTerminal) rt.terminal = new TerminalOutput();
     patchSession(sessionId, { terminal: !!launch.emulateTerminal });
-    const started = launch.isTest ? await gradleTestLaunch(withTestReporting(launch)) : launch;
+    let started = launch.isTest ? await gradleTestLaunch(withTestReporting(launch)) : launch;
+    if (started.isTest && frameworkFor(started) === "dotnet") {
+      const base = started.cwd ?? useProject.getState().project?.root;
+      rt.trxDir = base ? `${base.replace(/[\\/]+$/, "")}/${TRX_DIR}` : undefined;
+      if (rt.trxDir) started = { ...started, args: withTrxLogger(started.args, rt.trxDir) };
+    }
     if (runtimes.get(sessionId)?.generation !== generation) return getSession(sessionId) ?? null;
     const processStarted = performance.now();
     const info = await startWithRemedies(started, () => call(commands.runStart(started, channel)));
@@ -939,6 +947,7 @@ function finishSession(sessionId: string, code: number | null) {
             reports.map((r) => r.className),
           );
         }
+        if (rt.trxDir) rt.tests.apply(await dotnetReports(rt.trxDir, session.startedAt));
         if (runtimes.get(sessionId) !== rt) return;
         rt.tests.finish(code);
         recordTestStates(rt.tests);
@@ -953,6 +962,25 @@ function finishSession(sessionId: string, code: number | null) {
       }
     })();
   }, 30);
+}
+
+/** Events of the TRX reports a run wrote into `dir` (since `since`), removing them once read. */
+async function dotnetReports(dir: string, since: number): Promise<TestEvent[]> {
+  if (!isTauri()) return [];
+  try {
+    const entries = await call(commands.fsReadDir(dir));
+    const reports = entries.filter(
+      (e) => e.kind === "file" && e.name.endsWith(".trx") && (e.mtimeMs ?? 0) >= since - 2000,
+    );
+    const events: TestEvent[] = [];
+    for (const report of reports) {
+      events.push(...trxEvents(await call(commands.fsReadText(report.path))));
+      void call(commands.fsDelete(report.path)).catch(() => undefined);
+    }
+    return events;
+  } catch {
+    return [];
+  }
 }
 
 async function jvmReports(session: RunSession): Promise<TestCaseReport[]> {

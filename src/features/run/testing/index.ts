@@ -23,7 +23,7 @@ export function combinedParser(parsers: TestOutputParser[]): TestOutputParser {
   };
 }
 
-export type Framework = "cargo" | "js" | "pytest" | "unittest" | "phpunit" | "go" | "jvm" | "ruby" | "auto";
+export type Framework = "cargo" | "js" | "pytest" | "unittest" | "phpunit" | "go" | "jvm" | "ruby" | "dotnet" | "auto";
 
 export function frameworkFor(config: Pick<RunConfig, "kind" | "command" | "args">): Framework {
   const cmd = [config.command, ...config.args].join(" ");
@@ -52,6 +52,8 @@ export function frameworkFor(config: Pick<RunConfig, "kind" | "command" | "args"
     case "rake":
     case "rspec":
       return "ruby";
+    case "dotnet-test":
+      return "dotnet";
   }
   if (/\bcargo\b/.test(cmd)) return "cargo";
   if (/\b(jest|vitest|npm|pnpm|yarn|bun|npx|deno)\b/.test(cmd)) return "js";
@@ -60,6 +62,7 @@ export function frameworkFor(config: Pick<RunConfig, "kind" | "command" | "args"
   if (/(^|[/\\\s])phpunit(\.phar|\.bat)?(\s|$)/.test(cmd)) return "phpunit";
   if (/\bgo\s+test\b/.test(cmd)) return "go";
   if (/\b(gradlew?|mvnw?)\b/.test(cmd)) return "jvm";
+  if (/\bdotnet(\.exe)?\s+test\b/.test(cmd)) return "dotnet";
   return "auto";
 }
 
@@ -126,6 +129,9 @@ export function createTestParser(config: Pick<RunConfig, "kind" | "command" | "a
       return jvmParser();
     case "ruby":
       return rubyParser();
+    case "dotnet":
+      // Results come from the TRX reports once the run ends (`trx.ts`).
+      return { feed: () => [] };
     default:
       return combinedParser([
         cargoParser(),

@@ -9,6 +9,7 @@ import { djangoTestsOf } from "../djangoTypes";
 import { goTestParts, withoutGoSelection } from "../goArguments";
 import { frameworkFor } from "./index";
 import { nodeStatus, type TestNode, type TestResults } from "./results";
+import { dotnetTestsConfig } from "./trx";
 
 /** Paths of failed tests: failed leaves, plus failed suites without any failed children reported. */
 export function failedTestPaths(results: Pick<TestResults, "roots">): string[][] {
@@ -174,6 +175,11 @@ export function testsConfig(config: RunConfig, paths: string[][], name: string):
     case "jvm":
       args = jvmArgs(config, paths);
       break;
+    case "dotnet": {
+      const selected = dotnetTestsConfig(config, paths);
+      if (!selected) return null;
+      return { ...config, ...selected, name, detected: true, env: { ...config.env } };
+    }
     default:
       args = null;
   }
