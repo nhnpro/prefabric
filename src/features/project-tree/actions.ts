@@ -8,6 +8,7 @@ import { maybeEditorService, menuGroupItems, toolWindowService } from "@/workben
 import { OPTION_LABELS, SORT_LABELS } from "./HeaderActions";
 import { newMenuItems, revealLabel } from "./contextMenu";
 import { openNewPopup } from "./newPopupModel";
+import { generateUnityProjectFiles, installUnityPackage } from "./unityPackage";
 import type { ProjectNode } from "./model";
 import {
   beginNew,
@@ -215,6 +216,22 @@ export function registerProjectActions(): () => void {
       when: OPEN,
       keywords: ["locate", "reveal", "scroll from source", "select opened file"],
       run: ({ arg }) => void selectInProjectView(typeof arg === "string" ? arg : null),
+    },
+    {
+      id: "unity.installPackage",
+      title: "Install Prefabric Unity Package",
+      category: "Unity",
+      when: `${OPEN} && unityProject`,
+      keywords: ["unity", "package", "external tools", "update"],
+      run: () => installUnityPackage(),
+    },
+    {
+      id: "unity.generateProjectFiles",
+      title: "Generate Unity Project Files",
+      category: "Unity",
+      when: `${OPEN} && unityProject`,
+      keywords: ["unity", "csproj", "sln", "solution", "regenerate"],
+      run: () => generateUnityProjectFiles(),
     },
     {
       id: "project.reveal",

@@ -36,5 +36,19 @@
   "For web requests: the XDEBUG_SESSION cookie or query parameter; point xdebug.client_host at this machine when PHP runs in a container": "For web requests: the XDEBUG_SESSION cookie or query parameter; point xdebug.client_host at this machine when PHP runs in a container",
   "e.g. /var/www/html": "e.g. /var/www/html",
   "Listening for Xdebug on port {port}": "Listening for Xdebug on port {port}",
-  "Port {port} is already in use: another IDE or debug session may be listening on it. Stop it or choose another port.": "Port {port} is already in use: another IDE or debug session may be listening on it. Stop it or choose another port."
+  "Port {port} is already in use: another IDE or debug session may be listening on it. Stop it or choose another port.": "Port {port} is already in use: another IDE or debug session may be listening on it. Stop it or choose another port.",
+  "Install Prefabric Unity Package": "Install Prefabric Unity Package",
+  "Generate Unity Project Files": "Generate Unity Project Files",
+  "Unity package installed. Unity loads it when you switch to it; then choose Prefabric in Preferences > External Tools.": "Unity package installed. Unity loads it when you switch to it; then choose Prefabric in Preferences > External Tools.",
+  "Cannot install the Unity package": "Cannot install the Unity package",
+  "C# project files generated": "C# project files generated",
+  "Cannot generate the C# project files": "Cannot generate the C# project files",
+  "Install Prefabric's Unity package so that Unity opens scripts in Prefabric and generates the C# project files.": "Install Prefabric's Unity package so that Unity opens scripts in Prefabric and generates the C# project files.",
+  "Installing…": "Installing…",
+  "Prefabric's Unity package {installed} is older than this version of Prefabric.": "Prefabric's Unity package {installed} is older than this version of Prefabric.",
+  "Updating…": "Updating…",
+  "Update Package": "Update Package",
+  "C# project files are missing. Generate them with Unity, or regenerate them in Unity's Preferences > External Tools.": "C# project files are missing. Generate them with Unity, or regenerate them in Unity's Preferences > External Tools.",
+  "Generating…": "Generating…",
+  "Generate Project Files": "Generate Project Files"
 }

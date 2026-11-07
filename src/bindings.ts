@@ -90,6 +90,10 @@ export const commands = {
 	 *  auto-detected from build files, overridden by Settings › Project Structure.
 	 */
 	projectRoots: () => typedError<ProjectRoots, IdeError>(__TAURI_INVOKE("project_roots")),
+	/**  Installs or updates Prefabric's Unity package in the project's `Packages/`. */
+	unityInstallPackage: () => typedError<ProjectInfo_Serialize, IdeError>(__TAURI_INVOKE("unity_install_package")),
+	/**  Generates the C# solution and projects with the project's Unity version in batch mode. */
+	unityGenerateProjectFiles: () => typedError<ProjectInfo_Serialize, IdeError>(__TAURI_INVOKE("unity_generate_project_files")),
 	cancelRequest: (id: RequestId) => __TAURI_INVOKE<void>("cancel_request", { id }),
 	/**
 	 *  Stops a background task the backend reported with `cancellable` set; false when it
@@ -7525,11 +7529,21 @@ export type UndoOutcome = {
 	conflicts: IpcPath[],
 };
 
+export type UnityPackageStatus = { state: "missing" } | 
+/**  The embedded copy is the app's version (or newer). */
+{ state: "current" } | 
+/**  The embedded copy is older than the app's. */
+{ state: "outdated"; installed: string } | 
+/**  Listed in `Packages/manifest.json`; updated by hand. */
+{ state: "manual"; source: string };
+
 export type UnityProjectInfo = {
 	editorVersion: string | null,
 	/**  File names relative to the Unity root, in stable order. */
 	solutions: string[],
 	projects: string[],
+	/**  Prefabric's Unity package in this project. */
+	package?: UnityPackageStatus | null,
 };
 
 export type UpdateCheck = {

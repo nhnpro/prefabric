@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { emitLocalIdeEvent } from "@/platform/ipc";
 import { installRepeatedDoubleClick } from "@/platform/doubleClick";
-import { getContext } from "@/platform/context";
+import { getContext, setContext } from "@/platform/context";
 import { provideEditorService, registerProjectViewRoot, type EditorService } from "@/workbench/contributions";
 import { activate } from "./index";
 import { setOsClipboardForTests } from "./clipboard";
@@ -21,6 +21,8 @@ const ipc = vi.hoisted(() => ({
   docOpen: vi.fn(),
   docClose: vi.fn(),
   docOutline: vi.fn(),
+  unityInstallPackage: vi.fn(),
+  unityGenerateProjectFiles: vi.fn(),
 }));
 vi.mock("@/bindings", async (orig) => {
   const real = await orig<typeof import("@/bindings")>();
@@ -126,7 +128,7 @@ describe("ProjectView", () => {
   it("shows Unity version and generation guidance, then updates when project files arrive", async () => {
     initProjectTree(ROOT, "Game", null, { editorVersion: "6000.0.62f1", projects: [], solutions: [] });
     const { row } = setup();
-    expect(screen.getByText(/C# project files are missing/)).toHaveAttribute("role", "status");
+    expect(screen.getByText(/C# project files are missing/).closest("[role=status]")).not.toBeNull();
     await waitFor(() => expect(row("Game")).toHaveTextContent("Unity 6000.0.62f1"));
     act(() => {
       useProjectTree.setState({
@@ -134,6 +136,29 @@ describe("ProjectView", () => {
       });
     });
     expect(screen.queryByText(/C# project files are missing/)).not.toBeInTheDocument();
+  });
+
+  it("offers to install or update Prefabric's Unity package, then to generate project files", async () => {
+    const unity = { editorVersion: "6000.0.62f1", projects: [], solutions: [] };
+    ipc.unityInstallPackage.mockResolvedValue(ok({ root: "/elsewhere" }));
+    ipc.unityGenerateProjectFiles.mockResolvedValue(ok({ root: "/elsewhere" }));
+    setContext("projectOpen", true);
+    initProjectTree(ROOT, "Game", null, { ...unity, package: { state: "missing" } });
+    setup();
+    act(() => setContext("unityProject", true));
+    expect(screen.getByText(/Install Prefabric's Unity package/).closest("[role=status]")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Install Package" }));
+    await waitFor(() => expect(ipc.unityInstallPackage).toHaveBeenCalledTimes(1));
+    act(() => useProjectTree.setState({ unity: { ...unity, package: { state: "outdated", installed: "0.0.9" } } }));
+    expect(screen.getByText(/package 0\.0\.9 is older/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update Package" })).toBeEnabled());
+    act(() => useProjectTree.setState({ unity: { ...unity, package: { state: "current" } } }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate Project Files" }));
+    await waitFor(() => expect(ipc.unityGenerateProjectFiles).toHaveBeenCalledTimes(1));
+    act(() =>
+      useProjectTree.setState({ unity: { ...unity, projects: ["Game.csproj"], package: { state: "current" } } }),
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("shows the root with its path and loads children lazily", async () => {

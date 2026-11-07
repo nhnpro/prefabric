@@ -32,6 +32,7 @@ pub mod spell;
 pub mod syntax;
 pub mod term;
 pub mod tools;
+pub mod unity;
 pub mod vcs;
 
 use crate::Host;
@@ -70,6 +71,7 @@ pub fn register_all(d: &mut crate::rpc::Dispatcher) {
     notebook::register(d);
     nav::register(d);
     refactor::register(d);
+    unity::register(d);
     analysis::register(d);
     syntax::register(d);
     spell::register(d);

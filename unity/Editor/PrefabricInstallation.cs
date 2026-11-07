@@ -16,6 +16,9 @@ namespace Prefabric.Unity.Editor
 	{
 		public const string DisplayName = "Prefabric";
 
+		/// <summary>The package without an app: still adds the analyzers to generated projects.</summary>
+		internal static readonly PrefabricInstallation Unlocated = new PrefabricInstallation { Name = DisplayName, Path = string.Empty, Version = new Version() };
+
 		public string Name { get; private set; }
 		public string Path { get; private set; }
 		public Version Version { get; private set; }

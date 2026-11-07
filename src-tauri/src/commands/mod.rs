@@ -43,6 +43,7 @@ pub mod ssh;
 pub mod syntax;
 pub mod term;
 pub mod tools;
+pub mod unity;
 pub mod vcs;
 pub mod web;
 pub mod window;
@@ -99,6 +100,8 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
         app::settings_import,
         app::project_rename,
         app::project_roots,
+        unity::unity_install_package,
+        unity::unity_generate_project_files,
         app::cancel_request,
         app::cancel_task,
         app::log_frontend,

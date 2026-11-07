@@ -29,6 +29,7 @@ import { useDetectedRoots, useEffectiveRoots } from "@/platform/projectRoots";
 import { macStroke, strokeOf } from "@/platform/keymap";
 import { OWNS_FILE_DROP, prepareMenuGroups, useFileDecoration } from "@/workbench/contributions";
 import {
+  Button,
   FILES_DRAG,
   HighlightedText,
   Icon,
@@ -58,6 +59,8 @@ import {
 } from "@/platform/projectPresentation";
 import { relativePath } from "@/platform/project";
 import { folderKind } from "./folderKind";
+import { useUnityPackageTask } from "./unityPackage";
+import type { UnityProjectInfo } from "@/bindings";
 import { useHomeDir } from "./home";
 import { keyLike, memberNodes, nodeKeyFor, visibleInfo, type ProjectNode } from "./model";
 import {
@@ -782,11 +785,7 @@ export function ProjectView() {
       onFocus={(e) => setContext("projectViewFocus", (e.target as HTMLElement).getAttribute("role") === "tree")}
       onBlur={() => setContext("projectViewFocus", false)}
     >
-      {mode === "unity" && unity && !unity.projects.length && (
-        <div className={styles.unityNotice} role="status">
-          {tx`C# project files are missing. In Unity, select an external script editor in Preferences > External Tools, then regenerate project files.`}
-        </div>
-      )}
+      {mode === "unity" && unity && <UnityNotice unity={unity} />}
       {!model.roots.length && (
         <div className={styles.empty}>
           {txTemplate(`Nothing to show in ${VIEW_MODES.find(([id]) => id === mode)?.[1] ?? "this view"}`)}
@@ -821,6 +820,38 @@ export function ProjectView() {
           </div>,
           document.body,
         )}
+    </div>
+  );
+}
+
+/** Prefabric's Unity package missing or outdated, or no C# project files yet: the fix, one click away. */
+function UnityNotice({ unity }: { unity: UnityProjectInfo }) {
+  const running = useUnityPackageTask((s) => s.running);
+  const pkg = unity.package;
+  let text: string;
+  let label: string;
+  let run: () => void;
+  if (pkg?.state === "missing") {
+    text = tx`Install Prefabric's Unity package so that Unity opens scripts in Prefabric and generates the C# project files.`;
+    label = running === "install" ? tx`Installing…` : tx`Install Package`;
+    run = () => void executeAction("unity.installPackage");
+  } else if (pkg?.state === "outdated") {
+    text = tx`Prefabric's Unity package ${pkg.installed} is older than this version of Prefabric.`;
+    label = running === "install" ? tx`Updating…` : tx`Update Package`;
+    run = () => void executeAction("unity.installPackage");
+  } else if (!unity.projects.length) {
+    text = tx`C# project files are missing. Generate them with Unity, or regenerate them in Unity's Preferences > External Tools.`;
+    label = running === "generate" ? tx`Generating…` : tx`Generate Project Files`;
+    run = () => void executeAction("unity.generateProjectFiles");
+  } else {
+    return null;
+  }
+  return (
+    <div className={styles.unityNotice} role="status">
+      <span>{text}</span>
+      <Button size="small" variant="primary" disabled={running !== null} onClick={run}>
+        {label}
+      </Button>
     </div>
   );
 }

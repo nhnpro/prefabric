@@ -3,6 +3,7 @@ import { onEditorEvent, openEditorPaths } from "@/editor/api";
 import { commands, isTauri, onIdeEvent } from "@/platform/ipc";
 import { useBuildModel } from "@/platform/buildModel";
 import { validateProjectStructure, type RootFolder } from "@/platform/languageSettings";
+import { setContext } from "@/platform/context";
 import { useProject } from "@/platform/project";
 import { initProjectRoots, useProjectRoots } from "@/platform/projectRoots";
 import { folderIconName } from "@/ui";
@@ -43,6 +44,7 @@ export function activate(): () => void {
   let unityGeneration = 0;
   const sync = () => {
     const p = useProject.getState().project;
+    setContext("unityProject", !!p?.unity);
     const s = useProjectTree.getState();
     if ((p?.root ?? null) !== s.root || p?.workspace?.projects !== (s.members ?? undefined))
       initProjectTree(p?.root ?? null, p?.name ?? "", p?.workspace?.projects ?? null, p?.unity ?? null);
@@ -70,6 +72,7 @@ export function activate(): () => void {
       const rel = p.slice(project.root.length + 1);
       return (
         /^(Assets|Packages|ProjectSettings)(\/ProjectVersion\.txt)?$/.test(rel) ||
+        /^Packages\/(manifest\.json|dev\.prefabric\.unity(\/package\.json)?)$/.test(rel) ||
         /^[^/]+\.(csproj|sln|slnx)$/i.test(rel)
       );
     });

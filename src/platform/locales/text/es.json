@@ -6,7 +6,6 @@
   "Unity": "Unity",
   "Show Meta Files": "Mostrar archivos meta",
   "Show Generated Files": "Mostrar archivos generados",
-  "C# project files are missing. In Unity, select an external script editor in Preferences > External Tools, then regenerate project files.": "Faltan los archivos de proyecto de C#. En Unity, selecciona un editor de scripts externo en Preferences > External Tools y luego regenera los archivos del proyecto.",
   "Edit {name}": "Editar {name}",
   "Whitespace-only changes": "Cambios solo en espacios en blanco",
   " · Whitespace-only changes": " · Cambios solo en espacios en blanco",

@@ -152,7 +152,7 @@ namespace Prefabric.Unity.Editor
 
 		private void RefreshCurrentInstallation()
 		{
-			m_CurrentInstallation = PrefabricEditor.CurrentInstallation;
+			m_CurrentInstallation = PrefabricEditor.GenerationInstallation;
 		}
 
 		static ProfilerMarker solutionSyncMarker = new ProfilerMarker("SolutionSynchronizerSync");

@@ -46,6 +46,11 @@ namespace Prefabric.Unity.Editor
 			}
 		}
 
+		/// <summary>What project generation uses for analyzers and the C# version: the chosen
+		/// installation, else any found one, else the package alone (batch mode, CI).</summary>
+		internal static PrefabricInstallation GenerationInstallation =>
+			CurrentInstallation ?? _installations.Values.FirstOrDefault() ?? PrefabricInstallation.Unlocated;
+
 		private static bool TryGetInstallation(string editorPath, out PrefabricInstallation installation)
 		{
 			if (string.IsNullOrEmpty(editorPath))
