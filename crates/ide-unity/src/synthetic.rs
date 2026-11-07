@@ -18,18 +18,52 @@ pub fn script_guid(i: usize) -> String {
     guid(1, i)
 }
 
-/// Writes a project with `scripts` scripts, `prefabs` prefabs (each a GameObject with a Transform,
-/// a child and a MonoBehaviour with a UnityEvent listener) and `scenes` scenes, each holding
-/// `instances` prefab instances with overrides. Returns the number of asset files.
-pub fn write_project(
-    root: &Path,
-    scripts: usize,
-    prefabs: usize,
-    scenes: usize,
-    instances: usize,
-) -> std::io::Result<usize> {
-    for dir in ["Assets/Scripts", "Assets/Prefabs", "Assets/Scenes", "ProjectSettings"] {
+/// The size of a generated project.
+#[derive(Clone, Copy, Debug)]
+pub struct Shape {
+    pub scripts: usize,
+    /// Each a GameObject with a Transform, a child and a MonoBehaviour with a UnityEvent listener.
+    pub prefabs: usize,
+    pub scenes: usize,
+    /// Prefab instances with overrides, per scene.
+    pub instances: usize,
+    /// Assets that aren't scanned (textures, audio…), with their `.meta`.
+    pub others: usize,
+}
+
+impl Shape {
+    pub fn assets(&self) -> usize {
+        self.scripts + self.prefabs + self.scenes + self.others
+    }
+}
+
+/// The GUID of the generated prefab `i`.
+pub fn prefab_guid(i: usize) -> String {
+    guid(2, i)
+}
+
+/// The path of the generated prefab `i`, relative to the root.
+pub fn prefab_path(i: usize) -> String {
+    format!("Assets/Prefabs/Group{}/Prefab{i}.prefab", i / 500)
+}
+
+/// Writes a project of `shape` at `root`; prefabs and others spread over folders of 500.
+/// Returns the number of asset files.
+pub fn write_project(root: &Path, shape: Shape) -> std::io::Result<usize> {
+    let Shape { scripts, prefabs, scenes, instances, others } = shape;
+    for dir in ["Assets/Scripts", "Assets/Scenes", "ProjectSettings"] {
         std::fs::create_dir_all(root.join(dir))?;
+    }
+    for i in 0..prefabs.div_ceil(500) {
+        std::fs::create_dir_all(root.join(format!("Assets/Prefabs/Group{i}")))?;
+    }
+    for i in 0..others.div_ceil(500) {
+        std::fs::create_dir_all(root.join(format!("Assets/Textures/Group{i}")))?;
+    }
+    for i in 0..others {
+        let path = root.join(format!("Assets/Textures/Group{}/Texture{i}.png", i / 500));
+        std::fs::write(&path, b"PNG")?;
+        meta(&path, &guid(4, i))?;
     }
     std::fs::write(root.join("ProjectSettings/ProjectVersion.txt"), "m_EditorVersion: 6000.0.0f1\n")?;
     for i in 0..scripts {
@@ -53,7 +87,7 @@ pub fn write_project(
              --- !u!4 &500\nTransform:\n  m_GameObject: {{fileID: 400}}\n  m_Children: []\n  m_Father: {{fileID: 200}}\n",
             s = p % scripts.max(1),
         );
-        let path = root.join(format!("Assets/Prefabs/Prefab{p}.prefab"));
+        let path = root.join(prefab_path(p));
         std::fs::write(&path, text)?;
         meta(&path, &guid(2, p))?;
     }
@@ -71,5 +105,5 @@ pub fn write_project(
         std::fs::write(&path, text)?;
         meta(&path, &guid(3, s))?;
     }
-    Ok(scripts + prefabs + scenes)
+    Ok(shape.assets())
 }

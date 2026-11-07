@@ -38,6 +38,13 @@ pub(crate) struct Record {
     pub problem: crate::problems::Problem,
 }
 
+/// Pages kept in memory: redb's default (1 GiB) would hold most of a large project's index.
+const CACHE_BYTES: usize = 32 << 20;
+
+fn create(file: &Path) -> std::result::Result<Database, redb::DatabaseError> {
+    Database::builder().set_cache_size(CACHE_BYTES).create(file)
+}
+
 pub(crate) struct Store {
     db: RwLock<Database>,
 }
@@ -52,7 +59,7 @@ impl Store {
             return None;
         }
         let file = dir.join("unity.redb");
-        let db = match Database::create(&file) {
+        let db = match create(&file) {
             Ok(db) => db,
             Err(redb::DatabaseError::DatabaseAlreadyOpen) => {
                 tracing::warn!("unity index {} is in use; indexing in memory only", file.display());
@@ -61,7 +68,7 @@ impl Store {
             Err(e) => {
                 tracing::warn!("unity index {} unreadable ({e}); rebuilding", file.display());
                 let _ = std::fs::remove_file(&file);
-                Database::create(&file).map_err(|e| tracing::warn!("unity index: {e}")).ok()?
+                create(&file).map_err(|e| tracing::warn!("unity index: {e}")).ok()?
             }
         };
         let store = Self { db: RwLock::new(db) };

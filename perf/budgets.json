@@ -1,5 +1,5 @@
 {
-  "$comment": "Upper bounds, lower is better. ui: `<scenario>.<metric>` from `pnpm perf` (medians of the measured runs; enforced at CPU 1x only). Latencies are input → start of the first frame showing the result, so ~16.7 ms is 'next frame'. rust: criterion bench id → mean in microseconds, from `pnpm perf:rust` (`plugins/…`: the plugin runtime budgets).",
+  "$comment": "Upper bounds, lower is better. ui: `<scenario>.<metric>` from `pnpm perf` (medians of the measured runs; enforced at CPU 1x only). Latencies are input → start of the first frame showing the result, so ~16.7 ms is 'next frame'. rust: criterion bench id → mean in microseconds, from `pnpm perf:rust` (`plugins/…`: the plugin runtime budgets); ids ending in `_kib` are memory in KiB, written by the benches to `target/perf/extra/`.",
   "regressionTolerance": 0.2,
   "regressionFloor": 1,
   "ui": {
@@ -92,6 +92,14 @@
 
     "plugins/load_50": 20000,
     "plugins/cold_activation": 30000,
-    "plugins/syntax_highlights_2k_lines": 50000
+    "plugins/syntax_highlights_2k_lines": 50000,
+    "unity_50k/full_scan_cold": 60000000,
+    "unity_50k/full_scan_warm": 60000000,
+    "unity_50k/update_saved_prefab": 50000,
+    "unity_50k/script_usages": 200000,
+    "unity_50k/field_values": 200000,
+    "unity_50k/method_bindings": 200000,
+    "unity_50k/referrers": 200000,
+    "unity_50k/index_heap_kib": 307200
   }
 }

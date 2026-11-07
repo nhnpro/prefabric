@@ -16,7 +16,7 @@ import { evaluate, loadBudgets, printReport, type ScenarioResult } from "./lib/r
 const ROOT = resolve(import.meta.dirname, "..");
 const TARGET = resolve(ROOT, process.env.CARGO_TARGET_DIR ?? "target");
 const OUT = join(ROOT, "target", "perf");
-const PACKAGES = ["ide-text", "ide-language", "ide-index", "ide-search", "ide-host"];
+const PACKAGES = ["ide-text", "ide-language", "ide-index", "ide-search", "ide-host", "ide-unity"];
 
 const { values: args } = parseArgs({
   options: {
@@ -57,6 +57,17 @@ function collect(dir: string, out: Record<string, number>) {
 
 const metrics: Record<string, number> = {};
 collect(join(TARGET, "criterion"), metrics);
+// Measurements criterion doesn't take (memory), written by the benches as `{ id: value }`; their
+// budgets are in the unit their id names (`…_kib`).
+const EXTRA = join(OUT, "extra");
+if (existsSync(EXTRA)) {
+  for (const name of readdirSync(EXTRA).filter((n) => n.endsWith(".json"))) {
+    const file = join(EXTRA, name);
+    if (args["no-run"] || statSync(file).mtimeMs >= started) {
+      Object.assign(metrics, JSON.parse(readFileSync(file, "utf8")) as Record<string, number>);
+    }
+  }
+}
 if (Object.keys(metrics).length === 0) throw new Error(`no criterion results under ${join(TARGET, "criterion")}`);
 
 mkdirSync(OUT, { recursive: true });

@@ -4753,6 +4753,7 @@ name = "ide-unity"
 version = "0.1.37"
 dependencies = [
  "blake3",
+ "criterion",
  "dunce",
  "ide-core",
  "memchr",
