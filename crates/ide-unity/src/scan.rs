@@ -71,6 +71,28 @@ pub struct Object {
     pub prefab_instance: Option<i64>,
     /// The object of the source prefab this one comes from (`m_CorrespondingSourceObject`).
     pub source: Option<ObjRef>,
+    /// A PrefabInstance's prefab.
+    pub source_prefab: Option<ObjRef>,
+    /// A PrefabInstance's parent Transform in this file.
+    pub transform_parent: Option<i64>,
+    /// A PrefabInstance's overrides, in file order.
+    pub modifications: Vec<Modification>,
+    /// Components and GameObjects of the prefab a PrefabInstance removes.
+    pub removed: Vec<ObjRef>,
+    /// A MonoBehaviour's serialized fields written on one line (`speed: 2`), in file order.
+    pub properties: Vec<(Box<str>, Box<str>)>,
+}
+
+/// An override of a PrefabInstance: `propertyPath` of `target` (an object of the source prefab) is
+/// `value`, or `objectReference` for a reference field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Modification {
+    pub target: ObjRef,
+    pub property_path: Box<str>,
+    pub value: Option<Box<str>>,
+    pub object_reference: Option<ObjRef>,
+    /// 0-based line of the `- target:` item.
+    pub line: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -84,6 +106,16 @@ enum List {
     None,
     Children,
     Components,
+    /// Inside a PrefabInstance's `m_Modification`.
+    Modification,
+}
+
+/// Which list of `m_Modification` the following four-space-indented `- ` items belong to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModList {
+    None,
+    Modifications,
+    Removed,
 }
 
 pub fn scan(bytes: &[u8]) -> ScannedFile {
@@ -91,6 +123,7 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
     let mut current: Option<Object> = None;
     let mut expect_type = false;
     let mut list = List::None;
+    let mut mod_list = ModList::None;
     for (number, line) in lines(bytes) {
         if let Some(rest) = line.strip_prefix(b"--- !u!") {
             file.objects.extend(current.take());
@@ -114,7 +147,10 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
             list = List::None;
             continue;
         };
-        if body.starts_with(b" ") {
+        if let Some(nested) = body.strip_prefix(b"  ") {
+            if list == List::Modification {
+                modification_line(object, nested, number, &mut mod_list);
+            }
             continue;
         }
         if let Some(item) = body.strip_prefix(b"- ") {
@@ -125,7 +161,7 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
                         object.components.push(r.file_id);
                     }
                 }
-                List::None => {}
+                List::None | List::Modification => {}
             }
             continue;
         }
@@ -133,6 +169,11 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
         let Some(colon) = memchr(b':', body) else { continue };
         let (key, value) = (&body[..colon], trim(&body[colon + 1..]));
         match key {
+            b"m_SourcePrefab" => object.source_prefab = reference(value),
+            b"m_Modification" if value.is_empty() => {
+                list = List::Modification;
+                mod_list = ModList::None;
+            }
             b"m_Name" => object.name = scalar(value),
             b"m_Script" => object.script = reference(value),
             b"m_GameObject" => object.game_object = reference(value).map(|r| r.file_id),
@@ -141,11 +182,65 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
             b"m_CorrespondingSourceObject" => object.source = reference(value),
             b"m_Children" if value.is_empty() => list = List::Children,
             b"m_Component" if value.is_empty() => list = List::Components,
+            _ if object.class_id == MONO_BEHAVIOUR && !value.is_empty() && !key.starts_with(b"m_") => {
+                if let Some(value) = scalar(value) {
+                    object.properties.push((String::from_utf8_lossy(key).into(), value));
+                }
+            }
             _ => {}
         }
     }
     file.objects.extend(current);
     file
+}
+
+const MONO_BEHAVIOUR: u32 = 114;
+
+/// A line of `m_Modification`, without its first four spaces of indentation.
+fn modification_line(object: &mut Object, line: &[u8], number: u32, list: &mut ModList) {
+    if let Some(item) = line.strip_prefix(b"- ") {
+        match *list {
+            ModList::Modifications => {
+                if let Some(target) = item.strip_prefix(b"target:").and_then(reference) {
+                    object.modifications.push(Modification {
+                        target,
+                        property_path: "".into(),
+                        value: None,
+                        object_reference: None,
+                        line: number,
+                    });
+                }
+            }
+            ModList::Removed => object.removed.extend(reference(item)),
+            ModList::None => {}
+        }
+        return;
+    }
+    if let Some(field) = line.strip_prefix(b"  ") {
+        // A property of the last `- target:` item.
+        if *list != ModList::Modifications || field.starts_with(b" ") {
+            return;
+        }
+        let Some(m) = object.modifications.last_mut() else { return };
+        let Some(colon) = memchr(b':', field) else { return };
+        let value = trim(&field[colon + 1..]);
+        match &field[..colon] {
+            b"propertyPath" => m.property_path = scalar(value).unwrap_or_default(),
+            b"value" => m.value = scalar(value),
+            b"objectReference" => m.object_reference = reference(value),
+            _ => {}
+        }
+        return;
+    }
+    *list = ModList::None;
+    let Some(colon) = memchr(b':', line) else { return };
+    let value = trim(&line[colon + 1..]);
+    match &line[..colon] {
+        b"m_TransformParent" => object.transform_parent = reference(value).map(|r| r.file_id),
+        b"m_Modifications" if value.is_empty() => *list = ModList::Modifications,
+        b"m_RemovedComponents" | b"m_RemovedGameObjects" if value.is_empty() => *list = ModList::Removed,
+        _ => {}
+    }
 }
 
 /// Lines without their ending (`\n` or `\r\n`), with their 0-based numbers.
