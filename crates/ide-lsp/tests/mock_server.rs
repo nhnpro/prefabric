@@ -1870,6 +1870,61 @@ async fn java_implementations_come_from_sources_first() {
     assert_eq!(s.requested("textDocument/implementation").len(), 3);
 }
 
+/// A provider of references beside the language servers (tests): what it returns for a file name.
+struct Provided {
+    file: &'static str,
+    title: Option<&'static str>,
+    line: u32,
+    exclusive: bool,
+}
+
+impl ide_lsp::reference_providers::ReferenceProvider for Provided {
+    fn references<'a>(
+        &'a self,
+        q: &'a ide_lsp::reference_providers::ReferenceQuery<'a>,
+    ) -> futures::future::BoxFuture<'a, ide_core::IdeResult<Option<ide_lsp::reference_providers::ProvidedReferences>>>
+    {
+        Box::pin(async move {
+            if q.path().file_name().and_then(|n| n.to_str()) != Some(self.file) {
+                return Ok(None);
+            }
+            Ok(Some(ide_lsp::reference_providers::ProvidedReferences {
+                title: self.title.map(Into::into),
+                locations: vec![ide_core::Location::file(q.path().to_owned(), rng(self.line, 0, self.line, 3))],
+                incomplete: None,
+                exclusive: self.exclusive,
+            }))
+        })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reference_providers_add_groups_merge_or_answer_alone() {
+    let h = harness(&[("mock", incremental_caps())]);
+    let (doc, path) = h.open("a.mk", "fn foo() {}\nfoo();\nfoo();\n");
+    h.wait_status("mock", ServerStatus::Ready).await;
+    let s = h.launcher.state("mock");
+    let uri = uri_of(&path);
+    let r = |l0: u32, c0: u32, l1: u32, c1: u32| json!({"start":{"line":l0,"character":c0},"end":{"line":l1,"character":c1}});
+    s.respond("textDocument/references", json!([{ "uri": uri, "range": r(1,0,1,3) }]));
+    // A group of its own, and locations merged with the server's (one of them the server's own).
+    h.mgr.add_reference_provider(Arc::new(Provided { file: "a.mk", title: Some("Assets"), line: 2, exclusive: false }));
+    h.mgr.add_reference_provider(Arc::new(Provided { file: "a.mk", title: None, line: 1, exclusive: false }));
+    h.mgr.add_reference_provider(Arc::new(Provided { file: "other.mk", title: None, line: 0, exclusive: true }));
+    let refs = h.mgr.references(doc, Pos::new(1, 1), true, true, Default::default()).await.unwrap();
+    assert_eq!(refs.locations, vec![ide_core::Location::file(path.clone(), rng(1, 0, 1, 3))]);
+    assert_eq!(refs.groups.len(), 1);
+    assert_eq!(refs.groups[0].title, "Assets");
+    assert_eq!(refs.groups[0].locations, vec![ide_core::Location::file(path.clone(), rng(2, 0, 2, 3))]);
+    assert_eq!(s.requested("textDocument/references").len(), 1);
+
+    // An exclusive answer: the server isn't asked.
+    let (other, other_path) = h.open("other.mk", "foo\n");
+    let refs = h.mgr.references(other, Pos::new(0, 1), true, true, Default::default()).await.unwrap();
+    assert_eq!(refs.locations, vec![ide_core::Location::file(other_path, rng(0, 0, 0, 3))]);
+    assert_eq!(s.requested("textDocument/references").len(), 1);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn navigation_rename_format_and_decorations() {
     let h = harness(&[("mock", incremental_caps())]);

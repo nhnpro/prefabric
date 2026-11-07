@@ -20,6 +20,7 @@ mod launch;
 mod library_source;
 mod loading;
 mod pull;
+pub mod reference_providers;
 mod roslyn;
 mod scope;
 mod server;
@@ -190,6 +191,8 @@ pub struct LspManager {
     execution_allowed: AtomicBool,
     java_usages_warned: AtomicBool,
     configuration_cache: Arc<Mutex<jdtls::configuration::ConfigurationCache>>,
+    /// Find Usages beyond the language servers.
+    reference_providers: RwLock<Vec<Arc<dyn reference_providers::ReferenceProvider>>>,
     /// `window/showMessage` texts already surfaced; servers repeat them on every restart/reconfigure.
     shown_messages: Mutex<HashSet<(String, String)>>,
     /// Virtual (non-`file:`) URIs a server returned, by the server that owns them.
@@ -380,6 +383,7 @@ impl LspManager {
             execution_allowed: AtomicBool::new(true),
             java_usages_warned: AtomicBool::new(false),
             configuration_cache: Arc::new(Mutex::new(Default::default())),
+            reference_providers: RwLock::new(vec![Arc::new(reference_providers::SpringConfiguration)]),
             shown_messages: Mutex::new(HashSet::new()),
             virtual_origins: Mutex::new(HashMap::new()),
             virtual_docs: Mutex::new(HashMap::new()),
@@ -1416,25 +1420,43 @@ impl LspManager {
         cancel: CancellationToken,
     ) -> IdeResult<References> {
         let snap = self.snapshot(doc)?;
-        // Scoped probes back code lenses and bulk analysis. Keep their native cost;
-        // configuration indexing is reserved for explicit, project-wide usages.
-        let configuration = if project_wide || snap.language.as_str() != "java" {
-            self.configuration_navigation(&snap, pos, true, include_declaration, &cancel).await?
-        } else {
-            None
+        let providers = self.reference_providers.read().clone();
+        let query = reference_providers::ReferenceQuery {
+            manager: self,
+            snap: &snap,
+            pos,
+            include_declaration,
+            project_wide,
+            cancel: &cancel,
         };
-        if snap.language.as_str() != "java"
-            && let Some(result) = configuration
-        {
-            return Ok(result);
+        let mut provided = Vec::new();
+        for found in futures::future::join_all(providers.iter().map(|p| p.references(&query))).await {
+            match found {
+                Ok(Some(found)) => provided.push(found),
+                Ok(None) => {}
+                Err(e) if e.kind == ErrorKind::Cancelled => return Err(e),
+                // The servers' answer still stands.
+                Err(e) => tracing::warn!("find usages: {}", e.message),
+            }
         }
-        let mut result = self.native_references(doc, pos, include_declaration, project_wide, cancel).await?;
-        if let Some(configuration) = configuration {
-            result.locations.extend(configuration.locations);
-            result.incomplete = result.incomplete.or(configuration.incomplete);
+        let mut result = if provided.iter().any(|p| p.exclusive) {
+            References::default()
+        } else {
+            self.native_references(doc, pos, include_declaration, project_wide, cancel.clone()).await?
+        };
+        let merged = provided.iter().any(|p| p.title.is_none());
+        for found in provided {
+            reference_providers::merge(&mut result, found);
+        }
+        if merged {
             convert::dedup_locations(&mut result.locations);
         }
         Ok(result)
+    }
+
+    /// Adds a source of references to Find Usages.
+    pub fn add_reference_provider(&self, provider: Arc<dyn reference_providers::ReferenceProvider>) {
+        self.reference_providers.write().push(provider);
     }
 
     async fn native_references(
@@ -1528,7 +1550,7 @@ impl LspManager {
                     .collect();
                 let locations: Vec<Location> = classified.iter().map(|r| r.location.clone()).collect();
                 self.note_virtual(&t.server, locations.iter().map(|l| l.uri.as_deref()));
-                Ok(References { locations, classified, incomplete: widened.incomplete })
+                Ok(References { locations, classified, incomplete: widened.incomplete, groups: Vec::new() })
             }
             .await;
             match classified {

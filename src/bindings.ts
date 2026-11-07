@@ -6158,6 +6158,11 @@ export type RefactoringProblem = {
 
 export type ReferenceAccess = "read" | "write" | "readWrite" | "unknown";
 
+export type ReferenceGroup = {
+	title: string,
+	locations: Location[],
+};
+
 export type ReferenceKind = "getter" | "setter" | "field" | "unknown";
 
 export type References = {
@@ -6165,6 +6170,8 @@ export type References = {
 	classified?: ClassifiedReference[],
 	locations: Location[],
 	incomplete: ReferencesIncomplete | null,
+	/**  References found by other providers than the language servers, shown as groups of their own. */
+	groups?: ReferenceGroup[],
 };
 
 /**  Why a references search may have missed usages. */

@@ -380,6 +380,17 @@ pub struct References {
     pub classified: Vec<ClassifiedReference>,
     pub locations: Vec<Location>,
     pub incomplete: Option<ReferencesIncomplete>,
+    /// References found by other providers than the language servers, shown as groups of their own.
+    #[serde(default)]
+    #[specta(optional)]
+    pub groups: Vec<ReferenceGroup>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceGroup {
+    pub title: String,
+    pub locations: Vec<Location>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
