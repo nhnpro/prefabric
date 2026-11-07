@@ -6374,5 +6374,7 @@
   "Color of the text outline.": "文本描边的颜色。",
   "Width of the text outline.": "文本描边的宽度。",
   "Where the ellipsis goes when text overflows.": "文本溢出时省略号的位置。",
-  "Font asset, as resource(…) or url(…).": "字体资源，写作 resource(…) 或 url(…)。"
+  "Font asset, as resource(…) or url(…).": "字体资源，写作 resource(…) 或 url(…)。",
+  "Attach .NET Debugger": "附加 .NET 调试器",
+  "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })": "将 netcoredbg 附加到等待中的 .NET 测试宿主（参数：{ name, pid, process, runConfig }）"
 }

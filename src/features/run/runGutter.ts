@@ -106,7 +106,8 @@ export function targetMenuItems(target: RunTarget, path: string, content: string
       ? { submenu: choiceItems(choices, debug).filter((i) => i.kind !== "header") }
       : { run: () => void launch(target, path, debug, content) };
   // Like IDEA, Debug only where a debugger can run it.
-  const debuggable = !p || !!(p.debug || p.config?.debugAdapter || p.missing);
+  // `dotnet test` debugs by attaching netcoredbg to its test host.
+  const debuggable = !p || !!(p.debug || p.config?.debugAdapter || p.config?.kind === "dotnet-test" || p.missing);
   return [
     { label: tx`Run '${name}'`, icon: "run", shortcut: shortcutLabel("run.runContext"), ...pick(false) } as MenuItem,
     ...(debuggable

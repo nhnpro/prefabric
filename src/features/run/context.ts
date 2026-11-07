@@ -23,12 +23,20 @@ export function fileRole(relPath: string, content?: string, windows = isWindows(
     /Test\.php$/.test(name) ||
     /_(spec|test)\.rb$|^test_.*\.rb$/.test(name) ||
     /(Test|Tests|Spec|IT)\.(kt|java|scala|groovy)$/.test(name) ||
-    (/(^|\/)tests\/[^/]+\.rs$/.test(relPath) && name !== "mod.rs")
+    (/(^|\/)tests\/[^/]+\.rs$/.test(relPath) && name !== "mod.rs") ||
+    /(Test|Tests)\.cs$/.test(name)
   )
     return "test";
   if (/(^|\/)src\/main\.rs$|(^|\/)src\/bin\/[^/]+\.rs$/.test(relPath)) return "main";
   if (/\.go$/.test(name) && content !== undefined && /^\s*package\s+main\b/m.test(content)) return "main";
   if (/\.(kt|java)$/.test(name) && content !== undefined && /\bfun\s+main\s*\(|static\s+void\s+main\s*\(/.test(content))
+    return "main";
+  // `static Main`, or `Program.cs` holding top-level statements.
+  if (
+    /\.cs$/.test(name) &&
+    (name === "Program.cs" ||
+      (content !== undefined && /\bstatic\s+(?:async\s+)?(?:void|int|Task(?:<int>)?)\s+Main\s*\(/.test(content)))
+  )
     return "main";
   if (/\.(py|rb|sh|bash|zsh|[cm]?js|ts)$/.test(name)) return "script";
   if (windows && /\.(bat|cmd)$/i.test(name)) return "script";
@@ -48,13 +56,23 @@ function testKinds(relPath: string): string[] {
   if (/\.go$/.test(relPath)) return ["go"];
   if (/\.rs$/.test(relPath)) return ["cargo"];
   if (/\.(kt|java|scala|groovy)$/.test(relPath)) return ["gradle", "maven"];
+  if (/\.cs$/.test(relPath)) return ["dotnet-test"];
   return [];
 }
 
 /** Configs whose working directory most specifically contains `relPath` (ties in their original order). */
+/** The folder a configuration covers: its working directory; a .NET project's folder. */
+function scopeOf(c: RunConfig): string {
+  if ((c.kind === "dotnet" || c.kind === "dotnet-test") && c.params?.project) {
+    const project = c.params.project.replace(/\\/g, "/");
+    return /\.\w+proj$/.test(project) ? dirOf(project) : project;
+  }
+  return c.kind === "go" ? (c.params?.module ?? c.cwd ?? "") : (c.cwd ?? "");
+}
+
 function allClosest(configs: RunConfig[], relPath: string): RunConfig[] {
   const score = (c: RunConfig) => {
-    const cwd = (c.kind === "go" ? (c.params?.module ?? c.cwd ?? "") : (c.cwd ?? ""))
+    const cwd = scopeOf(c)
       .replace(/^\.\/?/, "")
       .replace(/\/+$/, "");
     if (!cwd) return 0;
@@ -228,6 +246,15 @@ function mainConfigFor(relPath: string, configs: RunConfig[]): RunConfig | null 
     const hit = runs.find((c) => (c.cwd ?? "") === (base.cwd ?? "") && c.args[1] === target);
     if (hit) return hit;
     return derived(base, relPath, { args: ["run", target], name: `go run ${target}`, isTest: false });
+  }
+  if (relPath.endsWith(".cs")) {
+    // The project containing the file, without a launch profile.
+    return (
+      closest(
+        configs.filter((c) => c.kind === "dotnet" && !c.isTest && !c.params?.launchProfile),
+        relPath,
+      ) ?? null
+    );
   }
   if (/\.(kt|java)$/.test(relPath)) {
     // The build containing the file (builds nested in a folder of repositories carry a `:<dir>` suffix).

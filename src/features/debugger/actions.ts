@@ -1,6 +1,16 @@
 /** Debugger actions (ids match `keymaps/intellij-macos.ts`). */
 import { executeAction, getAction, registerActions, type Action } from "@/platform/actions";
-import { call, commands, isCancelled, isTauri, nextRequestId, type RunConfig, type RunId } from "@/platform/ipc";
+import {
+  call,
+  commands,
+  isCancelled,
+  isTauri,
+  nextRequestId,
+  type LaunchConfig,
+  type RunConfig,
+  type RunId,
+} from "@/platform/ipc";
+import { workflowSettings } from "@/platform/workflowSettings";
 import { downloadJdkActions } from "@/platform/jdk";
 import { useProject } from "@/platform/project";
 import { activeEditor } from "@/editor/api";
@@ -362,6 +372,27 @@ export function registerDebugActions(): () => void {
             await startSession(launch, {
               process: (arg.process ?? null) as RunId | null,
               runConfig: arg.runConfig,
+              rerunnable: false,
+            });
+          })(),
+        ),
+    },
+    {
+      id: "debug.attachDotnet",
+      title: "Attach .NET Debugger",
+      category: "Debug",
+      hidden: true,
+      description: "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })",
+      run: ({ arg }) =>
+        report(
+          tx("Cannot attach the debugger"),
+          (async () => {
+            const root = useProject.getState().project?.root;
+            const target = arg as { name?: unknown; pid?: unknown; process?: unknown; runConfig?: RunConfig } | null;
+            if (!root || typeof target?.pid !== "number") return;
+            await startSession(dotnetAttachConfig(String(target.name ?? "dotnet test"), target.pid, root), {
+              process: (target.process ?? null) as RunId | null,
+              runConfig: target.runConfig,
               rerunnable: false,
             });
           })(),
@@ -751,4 +782,18 @@ export function registerDebugActions(): () => void {
       run: () => toolWindowService().show("debug", true),
     },
   ]);
+}
+
+/** netcoredbg attaching to the .NET process `pid` (a test host waiting for a debugger). */
+export function dotnetAttachConfig(name: string, pid: number, cwd: string): LaunchConfig {
+  return {
+    name,
+    adapter: "netcoredbg",
+    request: "attach",
+    program: null,
+    args: [],
+    cwd,
+    env: {},
+    extraJson: JSON.stringify({ processId: pid, justMyCode: workflowSettings().debugger.skipLibraryCode }),
+  };
 }

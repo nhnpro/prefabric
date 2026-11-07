@@ -2,7 +2,8 @@
  * Run targets inside a file, for the gutter ▶ icons and "Run test" code lenses:
  * `fn main`, `#[test]` functions and `mod tests`, JS/TS `test`/`it`/`describe`,
  * pytest `def test_*` / `class Test*`, unittest `TestCase` subclasses, Go `func TestX(t *testing.T)`,
- * JUnit `@Test`, Minitest / Test::Unit classes, modules holding them and `def test_*`.
+ * JUnit `@Test`, Minitest / Test::Unit classes, modules holding them and `def test_*`, C# xUnit /
+ * NUnit / MSTest methods and classes, `Main` and top-level statements.
  * Line-based regex detection (cheap, no parser), plus the run configuration for
  * one target derived from the project's detected test configurations.
  */
@@ -15,6 +16,7 @@ import { djangoLabel, djangoTestsOf } from "./djangoTypes";
 import { scanJvmTargets, simpleClassName } from "./jvmTargets";
 import { escapeRegExp } from "./testing/rerun";
 import { phpunitArgs, phpunitFilter } from "./testing/phpunit";
+import { withDotnetFilter } from "./testing/trx";
 
 export type TargetKind = "main" | "test" | "suite" | "generate";
 
@@ -41,7 +43,7 @@ export interface RunTarget {
 /** Above this size we skip detection (generated / minified files). */
 export const MAX_SCAN = 400_000;
 
-type Lang = "rust" | "js" | "python" | "php" | "go" | "jvm" | "ruby" | null;
+type Lang = "rust" | "js" | "python" | "php" | "go" | "jvm" | "ruby" | "csharp" | null;
 
 export function targetLanguage(relPath: string): Lang {
   if (/\.rs$/.test(relPath)) return "rust";
@@ -51,6 +53,7 @@ export function targetLanguage(relPath: string): Lang {
   if (/\.go$/.test(relPath)) return "go";
   if (/\.(java|kt|kts|scala|groovy)$/.test(relPath)) return "jvm";
   if (/\.rb$/.test(relPath)) return "ruby";
+  if (/\.cs$/.test(relPath)) return "csharp";
   return null;
 }
 
@@ -392,6 +395,124 @@ function jvmTargets(lines: string[], relPath: string): RunTarget[] {
   return out;
 }
 
+/** xUnit `[Fact]` / `[Theory]`, NUnit `[Test]` / `[TestCase(…)]` / `[TestCaseSource]`, MSTest `[TestMethod]`. */
+const CS_TEST_ATTRIBUTE = /^(?:Fact|Theory|Test|TestCase|TestCaseSource|TestMethod|DataTestMethod)(?:Attribute)?$/;
+const CS_FIXTURE_ATTRIBUTE = /^(?:TestFixture|TestClass)(?:Attribute)?$/;
+
+/** Attribute names of a `[A, B(…)]` line (none if the line isn't only attributes). */
+function csAttributes(trimmed: string): string[] | null {
+  if (!trimmed.startsWith("[")) return null;
+  const names: string[] = [];
+  for (const m of trimmed.matchAll(/[[,]\s*(?:\w+\s*:\s*)?([\w.]+)/g)) {
+    // Inside an argument list: `[TestCase(1, 2)]` lists only TestCase.
+    const before = trimmed.slice(0, m.index);
+    if ((before.match(/\(/g) ?? []).length > (before.match(/\)/g) ?? []).length) continue;
+    names.push(m[1]!.split(".").pop()!);
+  }
+  return names;
+}
+
+/**
+ * C#: test methods and their classes (`[class, method]`, the class's full name with `+` for nested
+ * classes, as VSTest names it), `static Main` and a file of top-level statements.
+ */
+function csharpTargets(lines: string[]): RunTarget[] {
+  const out: RunTarget[] = [];
+  let namespace = "";
+  const blockNamespaces: Array<{ name: string; depth: number }> = [];
+  const classes: Array<{ name: string; depth: number; line: number; fixture: boolean; tests: number }> = [];
+  let depth = 0;
+  let pending: string[] = [];
+  let typeSeen = false;
+  let topLevel: number | null = null;
+  let inComment = false;
+  const fullName = () => {
+    const ns = [...blockNamespaces.map((n) => n.name), namespace].filter(Boolean).join(".");
+    return [ns, classes.map((c) => c.name).join("+")].filter(Boolean).join(".");
+  };
+  for (let i = 0; i < lines.length; i++) {
+    let line = codeOnly(lines[i]!);
+    if (inComment) {
+      const end = line.indexOf("*/");
+      if (end < 0) continue;
+      line = line.slice(end + 2);
+      inComment = false;
+    }
+    line = line.replace(/\/\*.*?\*\//g, "");
+    if (line.includes("/*")) {
+      inComment = true;
+      line = line.slice(0, line.indexOf("/*"));
+    }
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const attributes = csAttributes(trimmed);
+    if (attributes && /^\[.*\]$/.test(trimmed)) {
+      pending.push(...attributes);
+      continue;
+    }
+    const ns = /^namespace\s+([\w.]+)\s*(;|\{|$)/.exec(trimmed);
+    const type =
+      /^(?:(?:public|internal|private|protected|static|sealed|abstract|partial|file|unsafe|readonly|new)\s+)*(class|record|struct)\s+(\w+)/.exec(
+        trimmed.replace(/^\[.*?\]\s*/, ""),
+      );
+    const method =
+      /^(?:(?:public|internal|private|protected|static|async|virtual|override|sealed|unsafe|new|extern)\s+)*(?:[\w.<>,?[\]\s]+?)\s+(\w+)\s*(?:<[^>]*>)?\s*\(/.exec(
+        trimmed.replace(/^\[.*?\]\s*/, ""),
+      );
+    const inline = csAttributes(trimmed.match(/^(\[.*?\])\s*\S/)?.[1] ?? "") ?? [];
+    const attrs = [...pending, ...inline];
+    if (ns) {
+      if (ns[2] === ";") namespace = ns[1]!;
+      else blockNamespaces.push({ name: ns[1]!, depth });
+    } else if (type) {
+      typeSeen = true;
+      classes.push({
+        name: type[2]!,
+        depth,
+        line: i,
+        fixture: attrs.some((a) => CS_FIXTURE_ATTRIBUTE.test(a)),
+        tests: 0,
+      });
+    } else if (/^(?:using\b|global\s+using\b|#|extern\s+alias\b)/.test(trimmed)) {
+      // Directives before the first statement.
+    } else if (method && classes.length) {
+      const name = method[1]!;
+      if (attrs.some((a) => CS_TEST_ATTRIBUTE.test(a))) {
+        const owner = fullName();
+        out.push({ line: i, kind: "test", name, path: [owner, name], className: owner });
+        classes[classes.length - 1]!.tests++;
+      } else if (
+        name === "Main" &&
+        /\bstatic\b/.test(trimmed) &&
+        /^(?:[^(]*\s)?(?:void|int|Task(?:<int>)?)\s+Main\b/.test(trimmed.replace(/\basync\s+/, ""))
+      ) {
+        out.push({ line: i, kind: "main", name: "Main", path: [] });
+      }
+    } else if (!typeSeen && !classes.length && !blockNamespaces.length && !namespace && topLevel === null) {
+      // The first statement of a file of top-level statements.
+      if (!/^(?:enum|interface|delegate)\b/.test(trimmed)) topLevel = i;
+    }
+    if (!/^\[.*\]$/.test(trimmed)) pending = [];
+    for (const ch of line) {
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        while (classes.length && classes[classes.length - 1]!.depth >= depth) {
+          const c = classes.pop()!;
+          if (c.tests || c.fixture) {
+            const owner = [fullName(), c.name].filter(Boolean).join(classes.length ? "+" : ".");
+            out.push({ line: c.line, kind: "suite", name: c.name, path: [owner], className: owner });
+          }
+        }
+        while (blockNamespaces.length && blockNamespaces[blockNamespaces.length - 1]!.depth >= depth)
+          blockNamespaces.pop();
+      }
+    }
+  }
+  if (topLevel !== null) out.push({ line: topLevel, kind: "main", name: "Main", path: [] });
+  return out.sort((a, b) => a.line - b.line);
+}
+
 /**
  * Run targets of a file (relative path picks the language). `django`: a Django project, where
  * `tests.py` (Django's default test module) holds tests too.
@@ -420,6 +541,8 @@ export function detectRunTargets(text: string, relPath: string, django = false):
     case "ruby":
       // RSpec files (`spec/`) are not Minitest.
       return /(^|\/)test_[^/]*\.rb$|_test\.rb$|(^|\/)tests?\//.test(relPath) ? rubyTargets(lines) : [];
+    case "csharp":
+      return csharpTargets(lines);
     default:
       return [];
   }
@@ -523,6 +646,15 @@ export function targetConfig(
     case "cargo": {
       const path = target.path.join("::");
       return named(target.kind === "suite" ? [...file.args, "--", `${path}::`] : [...file.args, "--", path, "--exact"]);
+    }
+    case "dotnet-test": {
+      // A class runs everything under its name (nested classes too); a test, that one method.
+      const name = target.path.join(".").replace(/[\\()&|=!~]/g, "\\$&");
+      const filter =
+        target.kind === "suite"
+          ? `FullyQualifiedName~${name}.|FullyQualifiedName~${name}+`
+          : `FullyQualifiedName=${name}`;
+      return { ...named(file.args), ...withDotnetFilter(file, filter) };
     }
     case "gradle":
       return named(

@@ -32,6 +32,7 @@ import {
   runContextAction,
 } from "./contextRun";
 import { runWithExecutor } from "./executors";
+import { debugDotnetTest } from "./dotnetDebug";
 import { debugWithAgent, jdwpLaunch } from "./javaDebug";
 import { RunDialogsOverlay } from "./dialogs";
 import { registerExternalTools } from "./externalTools";
@@ -130,6 +131,11 @@ async function debugConfig(config: RunConfig, chain: readonly string[] = []) {
   const delegated = getAction("debug.attach") ? await gradleDelegation(config) : null;
   if (delegated) {
     await debugWithAgent(delegated);
+    return;
+  }
+  // dotnet test: the test host waits for netcoredbg to attach.
+  if (config.kind === "dotnet-test" && getAction("debug.attachDotnet")) {
+    await debugDotnetTest(config);
     return;
   }
   // Maven / Gradle: the build tool starts the JVM with a debug agent, the debugger attaches.

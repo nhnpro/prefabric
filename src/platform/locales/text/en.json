@@ -57,5 +57,7 @@
   "Add [FormerlySerializedAs(\"{name}\")] to keep saved values": "Add [FormerlySerializedAs(\"{name}\")] to keep saved values",
   "No assembly definition named '{name}' in this project": "No assembly definition named '{name}' in this project",
   "Unity saves this file: it opens read-only, as edits here can break references between its objects.": "Unity saves this file: it opens read-only, as edits here can break references between its objects.",
-  "Edit Anyway": "Edit Anyway"
+  "Edit Anyway": "Edit Anyway",
+  "Attach .NET Debugger": "Attach .NET Debugger",
+  "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })": "Attach netcoredbg to a waiting .NET test host (arg: { name, pid, process, runConfig })"
 }

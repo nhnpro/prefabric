@@ -119,7 +119,11 @@ export function dotnetTestsConfig(
   paths: readonly string[][],
 ): Pick<RunConfig, "args" | "params"> | null {
   const filter = dotnetFilter(paths);
-  if (!filter) return null;
+  return filter ? withDotnetFilter(config, filter) : null;
+}
+
+/** `config` running only the tests `filter` (a `--filter` expression) selects. */
+export function withDotnetFilter(config: RunConfig, filter: string): Pick<RunConfig, "args" | "params"> {
   if (config.kind !== "dotnet-test") return { args: filteredArgs(config.args, filter), params: config.params };
   const programArgs = formatArgs(filteredArgs(parseArgs(config.params?.programArgs ?? ""), filter));
   return { args: config.args, params: { ...config.params, programArgs } };
