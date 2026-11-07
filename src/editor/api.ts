@@ -32,6 +32,7 @@ import { GutterMarker, ViewPlugin, type EditorView } from "@codemirror/view";
 import type { LanguageDescription } from "@codemirror/language";
 import { create } from "zustand";
 import { maybeEditorService } from "@/workbench/contributions";
+import type { WorkspaceEdit } from "@/platform/ipc";
 
 /** Documents above this size (UTF-16 units) skip per-line decorations. */
 export const HEAVY_LIMIT = 8_000_000;
@@ -343,6 +344,30 @@ export type ContributedHover = (
   state: EditorState,
   pos: number,
 ) => { from: number; to: number; markdown: string } | null;
+
+/**
+ * Language-data key for rename extensions: given the server's rename, a feature offers optional
+ * additions shown as checkboxes in the rename preview (Unity: rename the script file too).
+ */
+export const CONTRIBUTED_RENAME = "openideaRename";
+
+export interface RenameExtension {
+  /** Checkbox text in the preview. */
+  label: string;
+  checked: boolean;
+  /** The rename's edit with this addition. */
+  extend: (edit: WorkspaceEdit) => WorkspaceEdit;
+}
+
+export type ContributedRename = (rename: {
+  state: EditorState;
+  path: string;
+  /** Offset of the caret, within the renamed name in `state`. */
+  pos: number;
+  oldName: string;
+  newName: string;
+  edit: WorkspaceEdit;
+}) => Promise<RenameExtension[]> | RenameExtension[];
 
 export function contributedAt<T>(state: EditorState, key: string, pos: number): T | undefined {
   return state.languageDataAt<T>(key, pos)[0];

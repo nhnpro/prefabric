@@ -6348,5 +6348,7 @@
   "Generating…": "正在生成…",
   "Generate Project Files": "生成项目文件",
   "Unity documentation": "Unity 文档",
-  "Unity event function {name} of {owner}": "{owner} 的 Unity 事件函数 {name}"
+  "Unity event function {name} of {owner}": "{owner} 的 Unity 事件函数 {name}",
+  "Rename file to {file}": "将文件重命名为 {file}",
+  "Add [FormerlySerializedAs(\"{name}\")] to keep saved values": "添加 [FormerlySerializedAs(\"{name}\")] 以保留已保存的值"
 }

@@ -3,11 +3,11 @@
 //!
 //! cargo test -p ide-host --test unity_package -- --ignored
 
-use ide_core::{IdeEvent, Pos};
+use ide_core::{FileEdit, IdeEvent, Pos, Range, RequestId, TextEdit};
 use ide_host::{Host, HostConfig, ops};
 use ide_lsp::types::HierarchyDirection;
 use ide_workspace::unity::UnityPackageStatus;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const WINDOW: &str = "main";
@@ -115,4 +115,94 @@ async fn installs_the_package_and_generates_project_files() {
         }
     };
     assert_eq!(supertypes("Assets/Scripts/Hero.cs", "Hero").await, ["Character"]);
+
+    // Unity-aware rename (what the editor's Unity rename extensions add to Roslyn's edits): the
+    // serialized `speed` becomes `velocity` with `[FormerlySerializedAs("speed")]`, then the
+    // `Player` MonoBehaviour becomes `Runner` with its file. The script keeps its GUID, and Unity
+    // still finds the component and its saved value in the prefab.
+    let player = root.join("Assets/Scripts/Player.cs");
+    let guid = |path: &Path| {
+        let mut meta = path.as_os_str().to_os_string();
+        meta.push(".meta");
+        std::fs::read_to_string(meta).unwrap().lines().find(|l| l.starts_with("guid:")).unwrap().to_owned()
+    };
+    let original_guid = guid(&player);
+    let prefab = root.join("Assets/Prefabs/Player.prefab");
+    let saved = std::fs::read_to_string(&prefab).unwrap();
+    assert!(saved.contains("  speed: 2\n"));
+    std::fs::write(&prefab, saved.replace("  speed: 2\n", "  speed: 7\n")).unwrap();
+
+    let rename = |file: PathBuf, find: &'static str, new_name: &'static str| {
+        let host = host.clone();
+        async move {
+            let doc = ops::doc::open(&host, WINDOW, file).await.unwrap().id;
+            let text = ops::doc::snapshot(&host, WINDOW, doc).await.unwrap().text;
+            let (line, content) = text.lines().enumerate().find(|(_, l)| l.contains(find)).unwrap();
+            let pos = Pos { line: line as u32, col: content.find(find).unwrap() as u32 };
+            let renamed =
+                ops::lsp::lsp_rename(&host, WINDOW, RequestId(77), doc, pos, new_name.to_owned()).await.unwrap();
+            (renamed.edit, line as u32)
+        }
+    };
+    let (mut edit, field_line) = rename(player.clone(), "speed = 2f", "velocity").await;
+    let attribute = |line: u32, text: &str| TextEdit {
+        range: Range { start: Pos { line, col: 0 }, end: Pos { line, col: 0 } },
+        new_text: text.to_owned(),
+    };
+    let Some(FileEdit::Edit { edits, .. }) =
+        edit.files.iter_mut().find(|f| matches!(f, FileEdit::Edit { path, .. } if path.ends_with("Player.cs")))
+    else {
+        panic!("no edit of Player.cs: {:?}", edit.files)
+    };
+    edits.push(attribute(field_line, "        [FormerlySerializedAs(\"speed\")]\n"));
+    edits.push(attribute(1, "using UnityEngine.Serialization;\n"));
+    ops::lsp::apply_workspace_edit(&host, WINDOW, edit).await.unwrap();
+
+    let (mut edit, _) = rename(player.clone(), "Player : MonoBehaviour", "Runner").await;
+    let runner = root.join("Assets/Scripts/Runner.cs");
+    edit.files.push(FileEdit::Rename { from: player.clone().into(), to: runner.clone().into() });
+    ops::lsp::apply_workspace_edit(&host, WINDOW, edit).await.unwrap();
+    assert!(!player.exists());
+    assert_eq!(guid(&runner), original_guid);
+    assert!(std::fs::read_to_string(&prefab).unwrap().contains(original_guid.trim_start_matches("guid: ")));
+    let source = std::fs::read_to_string(&runner).unwrap();
+    assert!(source.contains("public class Runner : MonoBehaviour"), "{source}");
+    assert!(
+        source.contains("[FormerlySerializedAs(\"speed\")]\n        [SerializeField] private float velocity"),
+        "{source}"
+    );
+    host.close_project(WINDOW);
+
+    std::fs::write(
+        root.join("Assets/Editor/RenameCheck.cs"),
+        r#"using System.IO;
+using UnityEditor;
+using UnityEngine;
+
+public static class RenameCheck
+{
+    public static void Run()
+    {
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Player.prefab");
+        var runner = prefab.GetComponent("Runner") as MonoBehaviour;
+        var velocity = runner == null ? null : new SerializedObject(runner).FindProperty("velocity");
+        File.WriteAllText("rename-check.txt", runner == null ? "no component" : velocity == null ? "no field" : runner.GetType().FullName + " " + velocity.floatValue);
+    }
+}
+"#,
+    )
+    .unwrap();
+    let version = ops::project::current(&host, WINDOW).and_then(|p| p.unity).and_then(|u| u.editor_version);
+    let version = version.unwrap_or_else(|| "6000.6.8f1".to_owned());
+    let editor = ide_workspace::unity::editor::find(&version).unwrap();
+    let status = std::process::Command::new(editor)
+        .args(["-batchmode", "-quit", "-nographics", "-projectPath"])
+        .arg(&root)
+        .args(["-executeMethod", "RenameCheck.Run", "-logFile"])
+        .arg(tmp.path().join("rename-check.log"))
+        .status()
+        .unwrap();
+    let log = std::fs::read_to_string(tmp.path().join("rename-check.log")).unwrap_or_default();
+    assert!(status.success(), "{}", log.lines().filter(|l| l.contains("error")).collect::<Vec<_>>().join("\n"));
+    assert_eq!(std::fs::read_to_string(root.join("rename-check.txt")).unwrap(), "Game.Runner 7");
 }

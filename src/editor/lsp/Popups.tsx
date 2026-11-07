@@ -529,7 +529,8 @@ function DefinitionPopup({ popup }: { popup: Extract<LspPopup, { kind: "definiti
 
 function PreviewDialog({ popup }: { popup: Extract<LspPopup, { kind: "preview" }> }) {
   const root = useProject((s) => s.project?.root ?? "");
-  const { summary } = popup;
+  const [checked, setChecked] = useState(() => popup.options?.map((o) => o.checked) ?? []);
+  const summary = useMemo(() => (popup.summaryFor ? popup.summaryFor(checked) : popup.summary), [popup, checked]);
   return (
     <Dialog
       open
@@ -543,7 +544,7 @@ function PreviewDialog({ popup }: { popup: Extract<LspPopup, { kind: "preview" }
           autoFocus: true,
           onClick: () => {
             closePopup();
-            popup.onConfirm();
+            popup.onConfirm(popup.options ? checked : undefined);
           },
         },
         { label: "Cancel", role: "cancel" },
@@ -554,6 +555,14 @@ function PreviewDialog({ popup }: { popup: Extract<LspPopup, { kind: "preview" }
           <Icon name="warning" size={14} />
           <span>{w}</span>
         </div>
+      ))}
+      {popup.options?.map((o, i) => (
+        <Checkbox
+          key={o.label}
+          label={o.label}
+          checked={checked[i] ?? false}
+          onChange={(on) => setChecked((c) => c.map((v, j) => (j === i ? on : v)))}
+        />
       ))}
       <div className={styles.previewSummary}>{describeSummary(summary)}</div>
       {popup.occurrences ? (

@@ -3,7 +3,8 @@ import { CompletionContext, type Completion } from "@codemirror/autocomplete";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { indentUnit } from "@codemirror/language";
-import type { HierarchyItem } from "@/platform/ipc";
+import type { HierarchyItem, TextEdit, WorkspaceEdit } from "@/platform/ipc";
+import { serializedFieldAt, unityRename } from "./rename";
 import { readFileSync } from "node:fs";
 import { Text } from "@codemirror/state";
 import { classAtMemberLevel, classes, codeOnly, declaredMethods, methodDeclarations, unityBaseInFile } from "./csharp";
@@ -215,5 +216,57 @@ describe("event function gutter", () => {
     expect(await eventFunctions("/p/Assets/Scripts/Player.cs", fixture, { ...deps, data: async () => null })).toEqual(
       [],
     );
+  });
+});
+
+describe("Unity-aware rename", () => {
+  const data = loadMessageData("6000.3.1f1");
+  const deps: UnityDeps = { data: () => data, supertypes: async () => [], text: async () => "" };
+  const fixture = readFileSync("fixtures/unity-sample/Assets/Scripts/Player.cs", "utf8");
+  const path = "/p/Assets/Scripts/Player.cs";
+  const empty: WorkspaceEdit = { files: [] };
+
+  function contribute(text: string, at: string, oldName: string, newName: string, file = path) {
+    const state = EditorState.create({ doc: text });
+    return unityRename(deps)({ state, path: file, pos: text.indexOf(at) + 2, oldName, newName, edit: empty });
+  }
+
+  it("renames a MonoBehaviour's file with the class", async () => {
+    const [ext] = await contribute(fixture, "Player : MonoBehaviour", "Player", "Hero");
+    expect(ext).toMatchObject({ label: "Rename file to Hero.cs", checked: true });
+    expect(ext!.extend(empty).files).toEqual([{ kind: "rename", from: path, to: "/p/Assets/Scripts/Hero.cs" }]);
+    // Not when the file is named otherwise, or for plain classes.
+    expect(await contribute(fixture, "Player : MonoBehaviour", "Player", "Hero", "/p/Assets/Scripts/Other.cs")).toEqual(
+      [],
+    );
+    expect(await contribute("class Player {}", "Player", "Player", "Hero")).toEqual([]);
+  });
+
+  it("offers FormerlySerializedAs for serialized fields only", async () => {
+    const [ext] = await contribute(fixture, "speed = 2f", "speed", "velocity");
+    expect(ext!.label).toBe('Add [FormerlySerializedAs("speed")] to keep saved values');
+    const doc = Text.of(fixture.split("\n"));
+    const edits = (ext!.extend(empty).files[0] as { edits: TextEdit[] }).edits;
+    const changes = edits.map((e) => ({
+      from: doc.line(e.range.start.line + 1).from + e.range.start.col,
+      insert: e.new_text,
+    }));
+    const result = EditorState.create({ doc: fixture }).update({ changes }).state.doc.toString();
+    expect(result).toContain("using UnityEngine;\nusing UnityEngine.Serialization;\n");
+    expect(result).toContain(
+      '        [FormerlySerializedAs("speed")]\n        [SerializeField] private float speed = 2f;',
+    );
+    // A property, a method and a non-serialized private field get nothing.
+    expect(await contribute(fixture, "Speed => speed", "Speed", "Velocity")).toEqual([]);
+    expect(await contribute(fixture, "AddCoin() =>", "AddCoin", "Add")).toEqual([]);
+    const plain = fixture.replace("[SerializeField] private int coins;", "private int coins;");
+    expect(await contribute(plain, "coins;", "coins", "count")).toEqual([]);
+  });
+
+  it("recognises public fields and skips static ones", () => {
+    const text =
+      "class A : MonoBehaviour {\n  /// <summary>Doc</summary>\n  public int hp = 3;\n  public static int count;\n}";
+    expect(serializedFieldAt(text, text.indexOf("hp"))?.declarationStart).toBe(text.indexOf("public int hp"));
+    expect(serializedFieldAt(text, text.indexOf("count"))).toBeNull();
   });
 });

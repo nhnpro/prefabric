@@ -52,5 +52,7 @@
   "Generating…": "Generating…",
   "Generate Project Files": "Generate Project Files",
   "Unity documentation": "Unity documentation",
-  "Unity event function {name} of {owner}": "Unity event function {name} of {owner}"
+  "Unity event function {name} of {owner}": "Unity event function {name} of {owner}",
+  "Rename file to {file}": "Rename file to {file}",
+  "Add [FormerlySerializedAs(\"{name}\")] to keep saved values": "Add [FormerlySerializedAs(\"{name}\")] to keep saved values"
 }

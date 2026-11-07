@@ -122,7 +122,11 @@ export type LspPopup =
       title: string;
       summary: WorkspaceEditSummary;
       confirmLabel: string;
-      onConfirm: () => void;
+      /** `checked`: the state of `options`, when given. */
+      onConfirm: (checked?: boolean[]) => void;
+      /** Optional additions (checkboxes); `summaryFor` describes the edit with the checked ones. */
+      options?: Array<{ label: string; checked: boolean }>;
+      summaryFor?: (checked: boolean[]) => WorkspaceEditSummary;
       /** Why confirmation is needed (shown as warnings above the changes). */
       warnings?: string[];
       /** Individual occurrences with line previews (single-file syntax-based renames). */

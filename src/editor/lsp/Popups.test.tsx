@@ -18,6 +18,7 @@ const { LspPopups, DocumentationWindow } = await import("./Popups");
 const { closePopup, openPopup, useLspPopup } = await import("./popupStore");
 const { useDocWindow, pushHistory, stepHistory, hoverCandidates } = await import("./docs");
 import popupStyles from "./Popups.module.css";
+import { summarizeWorkspaceEdit } from "./workspaceEdit";
 
 const loc = (path: string, line: number): Location => ({
   path,
@@ -242,5 +243,28 @@ describe("reformat dialog", () => {
     expect(body.firstElementChild!.querySelectorAll("fieldset")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     expect(onRun).toHaveBeenCalledWith({ selectionOnly: false, optimizeImports: false });
+  });
+});
+
+describe("preview dialog", () => {
+  it("lists optional additions and applies the checked ones", () => {
+    const onConfirm = vi.fn();
+    const base = { kind: "edit" as const, path: "/p/Player.cs", edits: [] };
+    const moved = { kind: "rename" as const, from: "/p/Player.cs", to: "/p/Hero.cs" };
+    openPopup({
+      kind: "preview",
+      title: "Rename 'Player' to 'Hero'",
+      summary: summarizeWorkspaceEdit({ files: [base] }),
+      options: [{ label: "Rename file to Hero.cs", checked: true }],
+      summaryFor: ([file]) => summarizeWorkspaceEdit({ files: file ? [base, moved] : [base] }),
+      confirmLabel: "Do Refactor",
+      onConfirm,
+    });
+    render(<LspPopups />);
+    expect(screen.getByText("→ Hero.cs")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Rename file to Hero.cs" }));
+    expect(screen.queryByText("→ Hero.cs")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Do Refactor" }));
+    expect(onConfirm).toHaveBeenCalledWith([false]);
   });
 });

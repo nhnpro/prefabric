@@ -23,10 +23,17 @@ import {
   type WorkspaceEdit,
 } from "@/platform/ipc";
 import { executeAction } from "@/platform/actions";
-import { whenAllSynced, whenSynced, type EditorDocContext } from "@/editor/api";
+import {
+  CONTRIBUTED_RENAME,
+  whenAllSynced,
+  whenSynced,
+  type ContributedRename,
+  type EditorDocContext,
+  type RenameExtension,
+} from "@/editor/api";
 import { structure } from "@/editor/structure";
 import { docOf, incompleteNote, isUnavailable, lspRequest, reportLspError } from "./lsp";
-import { comparePos, offsetToPos, rangeToOffsets } from "./positions";
+import { comparePos, offsetToPos, posToOffset, rangeToOffsets } from "./positions";
 import { showHint } from "./hint";
 import { caretAnchor, openPopup, type PreviewOccurrence } from "./popupStore";
 import { needsPreview, summarizeWorkspaceEdit } from "./workspaceEdit";
@@ -255,6 +262,22 @@ async function finishRename(view: EditorView, doc: EditorDocContext, pos: Pos, o
     else showHint(view, "Nothing to rename");
     return;
   }
+  const extensions = await renameExtensions(view, doc, pos, oldName, newName, edit);
+  if (extensions.length) {
+    const editFor = (checked: readonly boolean[]) =>
+      extensions.reduce((e, x, i) => (checked[i] ? x.extend(e) : e), edit);
+    openPopup({
+      kind: "preview",
+      title: tx`Rename '${oldName}' to '${newName}'`,
+      summary,
+      ...(note ? { warnings: [note] } : {}),
+      options: extensions.map((x) => ({ label: x.label, checked: x.checked })),
+      summaryFor: (checked) => summarizeWorkspaceEdit(editFor(checked)),
+      confirmLabel: note ? "Rename Anyway" : "Do Refactor",
+      onConfirm: (checked) => void applyEdit(view, editFor(checked ?? extensions.map((x) => x.checked))),
+    });
+    return;
+  }
   // An edit that may leave usages behind is never applied unseen.
   if (!note && !needsPreview(summary)) {
     await applyEdit(view, edit);
@@ -268,6 +291,28 @@ async function finishRename(view: EditorView, doc: EditorDocContext, pos: Pos, o
     confirmLabel: note ? "Rename Anyway" : "Do Refactor",
     onConfirm: () => void applyEdit(view, edit),
   });
+}
+
+/** What features add to the rename (`CONTRIBUTED_RENAME`); a failing contributor adds nothing. */
+async function renameExtensions(
+  view: EditorView,
+  doc: EditorDocContext,
+  pos: Pos,
+  oldName: string,
+  newName: string,
+  edit: WorkspaceEdit,
+): Promise<RenameExtension[]> {
+  const state = view.state;
+  const offset = posToOffset(state.doc, pos);
+  const out: RenameExtension[] = [];
+  for (const contribute of state.languageDataAt<ContributedRename>(CONTRIBUTED_RENAME, offset)) {
+    try {
+      out.push(...(await contribute({ state, path: doc.path, pos: offset, oldName, newName, edit })));
+    } catch (e) {
+      console.debug("[rename extension]", e);
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
