@@ -186,7 +186,20 @@ impl LspManager {
         enc: crate::text::Encoding,
     ) {
         let conv = self.conv(enc);
-        let items = items.into_iter().map(|d| convert::diagnostic(&conv, &path, d, &server.name)).collect();
+        let ignored: Vec<&ide_language::IgnoredDiagnostics> =
+            server.config.ignore_diagnostics.iter().filter(|i| i.applies_to(&path)).collect();
+        let items = items
+            .into_iter()
+            .filter(|d| !ignored.iter().any(|i| d.code.as_ref().is_some_and(|c| i.codes.iter().any(|x| code_is(c, x)))))
+            .map(|d| convert::diagnostic(&conv, &path, d, &server.name))
+            .collect();
         self.sink.emit(IdeEvent::Diagnostics { path: path.into(), source: server.name.clone(), items });
+    }
+}
+
+fn code_is(code: &lsp::NumberOrString, name: &str) -> bool {
+    match code {
+        lsp::NumberOrString::String(s) => s == name,
+        lsp::NumberOrString::Number(n) => n.to_string() == name,
     }
 }

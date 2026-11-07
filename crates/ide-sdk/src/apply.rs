@@ -803,6 +803,7 @@ fn custom_server(name: &str, ls: &LanguageServerSettings) -> LanguageServerConfi
         fallback: false,
         features: Vec::new(),
         code_action_kinds: Vec::new(),
+        ignore_diagnostics: Vec::new(),
         max_java: None,
         launch_error: None,
         tsserver_project: false,

@@ -13,3 +13,5 @@ command = "vscode-css-language-server"
 args = ["--stdio"]
 initialization-options = { provideFormatter = true, css = {}, scss = {}, less = {} }
 install-hint = "npm i -g vscode-langservers-extracted"
+# USS: `-unity-*` properties are Unity's own, not vendor prefixes of standard ones.
+ignore-diagnostics = [{ files = ["*.uss", "*.tss"], codes = ["vendorPrefix"] }]

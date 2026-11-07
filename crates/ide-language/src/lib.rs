@@ -95,6 +95,25 @@ pub struct IndentConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub struct IgnoredDiagnostics {
+    /// File names: `*.uss` (by extension, ignoring case) or an exact name.
+    pub files: Vec<String>,
+    /// Diagnostic codes, as the server reports them.
+    pub codes: Vec<String>,
+}
+
+impl IgnoredDiagnostics {
+    pub fn applies_to(&self, path: &std::path::Path) -> bool {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
+        self.files.iter().any(|f| match f.strip_prefix("*.") {
+            Some(ext) => path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(ext)),
+            None => f == name,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct LanguageServerConfig {
     /// Stable name, e.g. `rust-analyzer`.
     pub name: String,
@@ -144,6 +163,11 @@ pub struct LanguageServerConfig {
     /// (`refactor` keeps `refactor.extract`); empty keeps every kind.
     #[serde(default)]
     pub code_action_kinds: Vec<String>,
+    /// Diagnostics dropped by code in some files: a lint of the server that doesn't apply to a
+    /// dialect it serves (CSS's vendor-prefix lint on Unity's USS, whose `-unity-*` properties
+    /// have no standard counterpart).
+    #[serde(default)]
+    pub ignore_diagnostics: Vec<IgnoredDiagnostics>,
     /// Newest Java release the server runs on (kotlin-language-server: 21). A
     /// newer `JAVA_HOME` is replaced by the newest installed JDK that fits.
     #[serde(default)]
@@ -299,4 +323,20 @@ pub struct SymbolTag {
     /// Enclosing symbol, e.g. class name for a method.
     pub container: Option<String>,
     pub range: Range,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IgnoredDiagnostics;
+    use std::path::Path;
+
+    #[test]
+    fn ignored_diagnostics_match_by_extension_or_name() {
+        let ignored = IgnoredDiagnostics { files: vec!["*.uss".into(), "theme.css".into()], codes: vec![] };
+        assert!(ignored.applies_to(Path::new("/p/Assets/UI/Menu.uss")));
+        assert!(ignored.applies_to(Path::new("/p/Assets/UI/MENU.USS")));
+        assert!(ignored.applies_to(Path::new("/p/theme.css")));
+        assert!(!ignored.applies_to(Path::new("/p/site.css")));
+        assert!(!ignored.applies_to(Path::new("/p/uss")));
+    }
 }
