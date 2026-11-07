@@ -36,7 +36,7 @@ impl Stamp {
 }
 
 /// Unity skips hidden files and folders, and those ending in `~` (`Documentation~`).
-fn ignored(name: &str) -> bool {
+pub(crate) fn ignored(name: &str) -> bool {
     name.starts_with('.') || name.ends_with('~') || name.eq_ignore_ascii_case("cvs") || name.ends_with(".tmp")
 }
 
@@ -68,6 +68,28 @@ pub(crate) fn assets(root: &Path) -> Vec<Entry> {
             match entry.file_type() {
                 Ok(t) if t.is_dir() => stack.push((entry.path(), child)),
                 Ok(t) if t.is_file() && !name.ends_with(".meta") => out.push(Entry { rel: child, abs: entry.path() }),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// Asset files below the folder `dir` (`rel` relative to the root).
+pub(crate) fn files_under(dir: &Path, rel: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![(dir.to_owned(), rel.to_owned())];
+    while let Some((dir, rel)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if ignored(&name) {
+                continue;
+            }
+            let child = format!("{rel}/{name}");
+            match entry.file_type() {
+                Ok(t) if t.is_dir() => stack.push((entry.path(), child)),
+                Ok(t) if t.is_file() && !name.ends_with(".meta") => out.push(child),
                 _ => {}
             }
         }

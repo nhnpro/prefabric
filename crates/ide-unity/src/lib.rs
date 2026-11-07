@@ -42,6 +42,19 @@ pub struct UnityIndexStatus {
 pub type ReadyGate = Box<dyn Fn() -> bool + Send>;
 
 const GATE_POLL: Duration = Duration::from_millis(250);
+/// Changes are applied once no other arrives for this long (an editor's save writes several files).
+const SETTLE: Duration = Duration::from_millis(15);
+/// More changed assets than this (a branch switch, a reimport) make one batched rescan, once no
+/// change arrives for `BULK_SETTLE`.
+const BULK: usize = 256;
+const BULK_SETTLE: Duration = Duration::from_millis(300);
+
+#[derive(Default)]
+struct Pending {
+    /// Changed assets, relative to the root.
+    rels: std::collections::HashSet<String>,
+    last: Option<Instant>,
+}
 
 struct Shared {
     root: PathBuf,
@@ -52,10 +65,13 @@ struct Shared {
     cancelled: AtomicBool,
     /// The last complete scan; `None` until the first one ends.
     indexed: RwLock<Option<Arc<Indexed>>>,
+    pending: Mutex<Pending>,
+    /// Signalled when changes arrive or the index is cancelled.
+    wake: Condvar,
 }
 
 struct Indexed {
-    graph: graph::Graph,
+    graph: RwLock<graph::Graph>,
     source: Arc<dyn graph::Source>,
     cache: graph::Cache,
 }
@@ -86,8 +102,29 @@ impl Shared {
             return;
         }
         let store = store::Store::open(&store_dir, &self.root).map(Arc::new);
+        if !self.rescan(store.as_ref()) {
+            return;
+        }
+        while let Some(rels) = self.next_changes() {
+            if rels.len() > BULK {
+                let files = self.status.lock().files;
+                self.set(UnityIndexStatus { indexing: true, files });
+                if !self.rescan(store.as_ref()) {
+                    return;
+                }
+                continue;
+            }
+            let Some(indexed) = self.indexed.read().clone() else { continue };
+            build::apply(&self.root, &indexed.graph, &*indexed.source, &indexed.cache, rels);
+            let files = indexed.graph.read().file_count();
+            self.set(UnityIndexStatus { indexing: false, files });
+        }
+    }
+
+    /// A full scan replacing the index; `false` when cancelled.
+    fn rescan(&self, store: Option<&Arc<store::Store>>) -> bool {
         let started = Instant::now();
-        let Some((graph, source)) = build::full_scan(&self.root, store.as_ref(), &self.cancelled) else { return };
+        let Some((graph, source)) = build::full_scan(&self.root, store, &self.cancelled) else { return false };
         tracing::info!(
             "unity index: {} assets ({} scanned) in {} ms",
             graph.file_count(),
@@ -95,11 +132,33 @@ impl Shared {
             started.elapsed().as_millis()
         );
         let files = graph.file_count();
-        *self.indexed.write() = Some(Arc::new(Indexed { graph, source, cache: graph::Cache::default() }));
+        *self.indexed.write() =
+            Some(Arc::new(Indexed { graph: RwLock::new(graph), source, cache: graph::Cache::default() }));
         self.set(UnityIndexStatus { indexing: false, files });
-        let mut status = self.status.lock();
-        while !self.cancelled() {
-            self.changed.wait(&mut status);
+        true
+    }
+
+    /// Waits for changes, then until they settle; `None` when cancelled.
+    fn next_changes(&self) -> Option<Vec<String>> {
+        let mut pending = self.pending.lock();
+        loop {
+            if self.cancelled() {
+                return None;
+            }
+            match pending.last {
+                None => {
+                    self.wake.wait(&mut pending);
+                }
+                Some(last) => {
+                    let quiet = if pending.rels.len() > BULK { BULK_SETTLE } else { SETTLE };
+                    let waited = last.elapsed();
+                    if waited >= quiet {
+                        pending.last = None;
+                        return Some(pending.rels.drain().collect());
+                    }
+                    self.wake.wait_for(&mut pending, quiet - waited);
+                }
+            }
         }
     }
 }
@@ -121,6 +180,8 @@ impl UnityIndex {
             changed: Condvar::new(),
             cancelled: AtomicBool::new(false),
             indexed: RwLock::new(None),
+            pending: Mutex::new(Pending::default()),
+            wake: Condvar::new(),
         });
         let worker = {
             let shared = shared.clone();
@@ -142,7 +203,22 @@ impl UnityIndex {
 
     fn query<T: Default>(&self, f: impl FnOnce(&graph::Query<'_>) -> T) -> T {
         let Some(indexed) = self.shared.indexed.read().clone() else { return T::default() };
-        f(&graph::Query { graph: &indexed.graph, source: &*indexed.source, cache: &indexed.cache })
+        let graph = indexed.graph.read();
+        f(&graph::Query { graph: &graph, source: &*indexed.source, cache: &indexed.cache })
+    }
+
+    /// Files changed on disk (from the project's watcher): the assets among them are indexed
+    /// again in the background.
+    pub fn update(&self, changed: &[PathBuf], removed: &[PathBuf]) {
+        let rels: Vec<String> =
+            changed.iter().chain(removed).filter_map(|p| build::asset_rel(&self.shared.root, p)).collect();
+        if rels.is_empty() {
+            return;
+        }
+        let mut pending = self.shared.pending.lock();
+        pending.rels.extend(rels);
+        pending.last = Some(Instant::now());
+        self.shared.wake.notify_all();
     }
 
     fn rel<'a>(&self, path: &'a Path) -> Option<std::borrow::Cow<'a, str>> {
@@ -208,6 +284,10 @@ impl Drop for UnityIndex {
         {
             let _status = self.shared.status.lock();
             self.shared.changed.notify_all();
+        }
+        {
+            let _pending = self.shared.pending.lock();
+            self.shared.wake.notify_all();
         }
         if let Some(handle) = self.worker.lock().take() {
             let _ = handle.join();

@@ -6,6 +6,7 @@
 
 use crate::prefab::{self, Assets};
 use crate::scan::{Guid, Object, ScannedFile};
+use crate::store::Record;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -14,7 +15,9 @@ pub(crate) type FileIdx = u32;
 
 struct FileNode {
     rel: Arc<str>,
-    guid: Option<Guid>,
+    record: Record,
+    /// Removed since the last full scan (its index isn't reused until then).
+    removed: bool,
 }
 
 #[derive(Default)]
@@ -30,25 +33,52 @@ pub(crate) struct Graph {
     referrers: HashMap<Guid, Vec<FileIdx>>,
     /// UnityEvent method or animation event function → files calling it.
     methods: HashMap<Box<str>, Vec<FileIdx>>,
+    live_files: u32,
     scanned_files: u32,
 }
 
+/// Adds `file` unless this scan already did (the lists are filled one file at a time).
 fn push_unique(list: &mut Vec<FileIdx>, file: FileIdx) {
     if list.last() != Some(&file) {
         list.push(file);
     }
 }
 
+/// The method names a file's objects call.
+fn methods_of(scan: &ScannedFile) -> Vec<Box<str>> {
+    let mut out = Vec::new();
+    for o in &scan.objects {
+        out.extend(o.calls.iter().map(|c| c.method.clone()));
+        out.extend(o.animation_events.iter().map(|e| e.function.clone()));
+        out.extend(crate::events::override_calls(o).into_iter().map(|(_, c)| c.method));
+    }
+    out.retain(|m| !m.is_empty());
+    out
+}
+
 impl Graph {
-    /// Adds an asset; `scan` when its objects were scanned (summarised here, not kept).
-    pub(crate) fn add(&mut self, rel: &str, guid: Option<Guid>, scan: Option<&ScannedFile>) {
-        let idx = FileIdx::try_from(self.files.len()).unwrap_or(FileIdx::MAX);
-        let rel: Arc<str> = rel.into();
-        self.by_rel.insert(rel.clone(), idx);
-        if let Some(guid) = guid {
+    /// Adds an asset, or replaces what is known of it. `scan` when its objects were scanned
+    /// (summarised here, not kept); `old` is its previous scan, whose entries are dropped.
+    pub(crate) fn set(&mut self, rel: &str, record: Record, scan: Option<&ScannedFile>, old: Option<&ScannedFile>) {
+        let idx = match self.by_rel.get(rel) {
+            Some(&idx) => {
+                self.unlink(idx, old);
+                idx
+            }
+            None => {
+                let idx = FileIdx::try_from(self.files.len()).unwrap_or(FileIdx::MAX);
+                let rel: Arc<str> = rel.into();
+                self.by_rel.insert(rel.clone(), idx);
+                self.files.push(FileNode { rel, record, removed: false });
+                self.live_files += 1;
+                idx
+            }
+        };
+        let Some(node) = self.files.get_mut(idx as usize) else { return };
+        node.record = record;
+        if let Some(guid) = record.guid {
             self.by_guid.insert(guid, idx);
         }
-        self.files.push(FileNode { rel, guid });
         let Some(scan) = scan else { return };
         self.scanned_files += 1;
         for o in &scan.objects {
@@ -60,18 +90,12 @@ impl Graph {
             if let Some(prefab) = o.source_prefab.and_then(|p| p.guid) {
                 push_unique(self.instances.entry(prefab).or_default(), idx);
             }
-            let calls = o.calls.iter().map(|c| &*c.method);
-            let events = o.animation_events.iter().map(|e| &*e.function);
-            let overridden = crate::events::override_calls(o);
-            for method in calls.chain(events).chain(overridden.iter().map(|(_, c)| &*c.method)) {
-                if method.is_empty() {
-                    continue;
-                }
-                match self.methods.get_mut(method) {
-                    Some(list) => push_unique(list, idx),
-                    None => {
-                        self.methods.insert(method.into(), vec![idx]);
-                    }
+        }
+        for method in methods_of(scan) {
+            match self.methods.get_mut(&method) {
+                Some(list) => push_unique(list, idx),
+                None => {
+                    self.methods.insert(method, vec![idx]);
                 }
             }
         }
@@ -80,8 +104,68 @@ impl Graph {
         }
     }
 
+    /// Forgets an asset; `old` is its scan.
+    pub(crate) fn remove(&mut self, rel: &str, old: Option<&ScannedFile>) {
+        let Some(idx) = self.by_rel.remove(rel) else { return };
+        self.unlink(idx, old);
+        if let Some(node) = self.files.get_mut(idx as usize) {
+            node.removed = true;
+            self.live_files -= 1;
+        }
+    }
+
+    /// Drops the entries `old` (the file's scan) put in the maps, and its GUID.
+    fn unlink(&mut self, idx: FileIdx, old: Option<&ScannedFile>) {
+        let Some(node) = self.files.get(idx as usize) else { return };
+        if let Some(guid) = node.record.guid
+            && self.by_guid.get(&guid) == Some(&idx)
+        {
+            self.by_guid.remove(&guid);
+        }
+        let Some(old) = old else { return };
+        self.scanned_files = self.scanned_files.saturating_sub(1);
+        let drop_file = |list: &mut Vec<FileIdx>| list.retain(|&f| f != idx);
+        for o in &old.objects {
+            if let Some(list) = o.script.and_then(|s| s.guid).and_then(|g| self.scripts.get_mut(&g)) {
+                list.retain(|&(f, _)| f != idx);
+            }
+            if let Some(list) = o.source_prefab.and_then(|p| p.guid).and_then(|g| self.instances.get_mut(&g)) {
+                drop_file(list);
+            }
+        }
+        for method in methods_of(old) {
+            if let Some(list) = self.methods.get_mut(&method) {
+                drop_file(list);
+            }
+        }
+        for guid in &old.references {
+            if let Some(list) = self.referrers.get_mut(guid) {
+                drop_file(list);
+            }
+        }
+    }
+
+    /// New stamps for an asset whose content didn't change.
+    pub(crate) fn touch(&mut self, rel: &str, record: Record) {
+        if let Some(&idx) = self.by_rel.get(rel)
+            && let Some(node) = self.files.get_mut(idx as usize)
+        {
+            node.record = record;
+        }
+    }
+
+    /// Indexed assets below the folder `rel`.
+    pub(crate) fn rels_under(&self, rel: &str) -> Vec<String> {
+        let prefix = format!("{rel}/");
+        self.by_rel.keys().filter(|r| r.starts_with(&prefix)).map(|r| r.to_string()).collect()
+    }
+
+    pub(crate) fn record(&self, rel: &str) -> Option<Record> {
+        Some(self.files.get(*self.by_rel.get(rel)? as usize)?.record)
+    }
+
     pub(crate) fn file_count(&self) -> u32 {
-        u32::try_from(self.files.len()).unwrap_or(u32::MAX)
+        self.live_files
     }
 
     pub(crate) fn scanned_count(&self) -> u32 {
@@ -89,11 +173,11 @@ impl Graph {
     }
 
     pub(crate) fn rel(&self, file: FileIdx) -> Option<&Arc<str>> {
-        self.files.get(file as usize).map(|f| &f.rel)
+        self.files.get(file as usize).filter(|f| !f.removed).map(|f| &f.rel)
     }
 
     pub(crate) fn guid_of(&self, rel: &str) -> Option<Guid> {
-        self.files.get(*self.by_rel.get(rel)? as usize)?.guid
+        self.files.get(*self.by_rel.get(rel)? as usize)?.record.guid
     }
 
     pub(crate) fn rel_of(&self, guid: Guid) -> Option<&Arc<str>> {
@@ -124,9 +208,14 @@ impl Graph {
     }
 }
 
-/// Where scanned files are read back from.
+/// Where scanned files are kept and read back from.
 pub(crate) trait Source: Send + Sync {
     fn load(&self, rel: &str) -> Option<ScannedFile>;
+    /// Keeps an asset's record and scan (`None` drops a stored scan).
+    fn put(&self, rel: &str, record: Record, scan: Option<&ScannedFile>);
+    fn remove(&self, rel: &str);
+    /// Keeps an asset's record, leaving its scan as it is.
+    fn put_record(&self, rel: &str, record: Record);
 }
 
 const CACHE: usize = 256;
@@ -138,6 +227,11 @@ pub(crate) struct Cache {
 }
 
 impl Cache {
+    /// Forgets a file that changed.
+    pub(crate) fn remove(&self, rel: &str) {
+        self.entries.lock().retain(|(r, _)| &**r != rel);
+    }
+
     fn get(&self, rel: &Arc<str>, source: &dyn Source) -> Option<Arc<ScannedFile>> {
         {
             let mut entries = self.entries.lock();
@@ -242,7 +336,8 @@ impl Query<'_> {
             if !seen.insert(idx) || seen.len() > 512 {
                 continue;
             }
-            let (Some(guid), Some(file)) = (self.graph.files.get(idx as usize).and_then(|f| f.guid), self.file(idx))
+            let (Some(guid), Some(file)) =
+                (self.graph.files.get(idx as usize).filter(|f| !f.removed).and_then(|f| f.record.guid), self.file(idx))
             else {
                 continue;
             };
@@ -292,7 +387,7 @@ impl Query<'_> {
         out: &mut Vec<ScriptUsage>,
     ) {
         let Some(prefab_node) = self.graph.files.get(prefab as usize) else { return };
-        let (Some(prefab_guid), true) = (prefab_node.guid, depth < MAX_NESTING) else { return };
+        let (Some(prefab_guid), true) = (prefab_node.record.guid, depth < MAX_NESTING) else { return };
         let below_root = inner.get(1..).unwrap_or_default();
         for &idx in self.graph.instances.get(&prefab_guid).into_iter().flatten() {
             let (Some(file), Some(rel), Some(guid)) = (self.file(idx), self.graph.rel(idx), file_guid(self.graph, idx))
@@ -391,7 +486,7 @@ impl Query<'_> {
 }
 
 fn file_guid(graph: &Graph, idx: FileIdx) -> Option<Guid> {
-    graph.files.get(idx as usize)?.guid
+    graph.files.get(idx as usize).filter(|f| !f.removed)?.record.guid
 }
 
 /// The root GameObject of a prefab: the one whose Transform has no parent, or for a variant, the

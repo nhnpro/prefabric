@@ -314,6 +314,7 @@ impl Host {
             let repos = repos.clone();
             let settings = settings.clone();
             let index = index.clone();
+            let unity = unity.clone();
             let documents = documents.clone();
             let languages = languages.clone();
             let sink = sink.clone();
@@ -332,7 +333,12 @@ impl Host {
                 Box::new(move |batch| {
                     let changed: Vec<PathBuf> = batch.created.iter().chain(&batch.modified).cloned().collect();
                     let (ignored, ignored_gone) = ignored_changes(batch);
-                    index.update(&[&changed[..], &ignored].concat(), &[&batch.removed[..], &ignored_gone].concat());
+                    let all_changed = [&changed[..], &ignored].concat();
+                    let all_removed = [&batch.removed[..], &ignored_gone].concat();
+                    index.update(&all_changed, &all_removed);
+                    if let Some(unity) = &unity {
+                        unity.update(&all_changed, &all_removed);
+                    }
                     kotlin_bridge.files_changed(changed.iter().chain(&batch.removed));
                     phpstan.files_removed(batch.removed.iter());
                     lsp.project_files_changed(batch.created.iter().chain(&batch.removed));

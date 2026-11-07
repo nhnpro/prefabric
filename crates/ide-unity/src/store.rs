@@ -17,7 +17,7 @@ pub(crate) const FILES: TableDefinition<&str, &[u8]> = TableDefinition::new("fil
 const SCANS: TableDefinition<&str, &[u8]> = TableDefinition::new("scans");
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 /// Bump when a stored record or its encoding changes.
-const SCHEMA: &str = "prefabric-unity-2";
+const SCHEMA: &str = "prefabric-unity-3";
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -32,6 +32,8 @@ pub(crate) struct Record {
     pub meta: Stamp,
     pub guid: Option<Guid>,
     pub scanned: bool,
+    /// Hash of a scanned asset's content: a save that changes nothing isn't scanned again.
+    pub hash: u64,
 }
 
 pub(crate) struct Store {
@@ -119,6 +121,15 @@ impl Store {
         let txn = self.db.read().begin_read().map_err(err)?;
         let table = txn.open_table(SCANS).map_err(err)?;
         Ok(table.get(rel).map_err(err)?.and_then(|v| postcard::from_bytes(v.value()).ok()))
+    }
+
+    pub(crate) fn write_record(&self, rel: &str, record: Record) -> Result<()> {
+        let txn = self.db.read().begin_write().map_err(err)?;
+        {
+            let bytes = postcard::to_allocvec(&record).map_err(err)?;
+            txn.open_table(FILES).map_err(err)?.insert(rel, bytes.as_slice()).map_err(err)?;
+        }
+        txn.commit().map_err(err)
     }
 
     /// Stores `put` (a scan of `None` drops the stored one) and forgets `removed`, in one transaction.
