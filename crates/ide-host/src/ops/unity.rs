@@ -3,7 +3,7 @@
 
 use crate::Host;
 use crate::ops::project::{ProjectInfo, info};
-use ide_core::{IdeError, IdeResult};
+use ide_core::{CancellationToken, IdeError, IdeResult, RequestId};
 use ide_workspace::unity::{self, UnityPackageStatus, assemblies::AssemblyDefinition};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -34,10 +34,12 @@ pub async fn install_package(host: &Arc<Host>, window: &str) -> IdeResult<Projec
 
 /// Runs the project's Unity version in batch mode to write the solution and projects. Unity runs
 /// the project's editor code, so only in a trusted project; it fails while Unity has the project open.
-pub async fn generate_project_files(host: &Arc<Host>, window: &str) -> IdeResult<ProjectInfo> {
+/// Cancellable with `cancel_request(request)`, which stops Unity.
+pub async fn generate_project_files(host: &Arc<Host>, window: &str, request: RequestId) -> IdeResult<ProjectInfo> {
     let project = host.project(window)?;
     project.require_trust()?;
-    blocking(move || {
+    let token = host.begin_project_request(window, request);
+    let result = blocking(move || {
         let detected = unity::detect(&project.root).ok_or_else(|| IdeError::invalid("Not a Unity project"))?;
         if matches!(detected.package, Some(UnityPackageStatus::Missing)) {
             return Err(IdeError::invalid("Install Prefabric's Unity package first"));
@@ -45,13 +47,15 @@ pub async fn generate_project_files(host: &Arc<Host>, window: &str) -> IdeResult
         let version = detected.editor_version.ok_or_else(|| IdeError::invalid("Unknown Unity version"))?;
         let editor = unity::editor::find(&version)
             .ok_or_else(|| IdeError::unavailable(format!("Unity {version} is not installed (Unity Hub)")))?;
-        run_batch(&editor, &project.root)?;
+        run_batch(&editor, &project.root, &token)?;
         Ok(info(&project))
     })
-    .await
+    .await;
+    host.end_request(request);
+    result
 }
 
-fn run_batch(editor: &Path, root: &Path) -> IdeResult<()> {
+fn run_batch(editor: &Path, root: &Path, cancel: &CancellationToken) -> IdeResult<()> {
     let log = std::env::temp_dir().join(format!("prefabric-unity-{}-{}.log", std::process::id(), nonce()));
     let mut child = Command::new(editor)
         .args(["-batchmode", "-quit", "-nographics", "-projectPath"])
@@ -68,11 +72,16 @@ fn run_batch(editor: &Path, root: &Path) -> IdeResult<()> {
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        if started.elapsed() > GENERATE_TIMEOUT {
+        let cancelled = cancel.is_cancelled();
+        if cancelled || started.elapsed() > GENERATE_TIMEOUT {
             let _ = child.kill();
             let _ = child.wait();
             let _ = std::fs::remove_file(&log);
-            return Err(IdeError::internal("Unity did not finish generating the project files"));
+            return Err(if cancelled {
+                IdeError::cancelled()
+            } else {
+                IdeError::internal("Unity did not finish generating the project files")
+            });
         }
         std::thread::sleep(Duration::from_millis(250));
     };
@@ -115,7 +124,9 @@ pub async fn assembly_definitions(host: &Arc<Host>, window: &str) -> IdeResult<V
 pub fn register(d: &mut crate::rpc::Dispatcher) {
     d.add("unity_assembly_definitions", |c| async move { assembly_definitions(&c.host, &c.window).await });
     d.add("unity_install_package", |c| async move { install_package(&c.host, &c.window).await });
-    d.add("unity_generate_project_files", |c| async move { generate_project_files(&c.host, &c.window).await });
+    d.add("unity_generate_project_files", |c| async move {
+        generate_project_files(&c.host, &c.window, c.arg("request")?).await
+    });
 }
 
 #[cfg(test)]

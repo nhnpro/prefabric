@@ -816,8 +816,12 @@ export async function startRun(
     patchSession(sessionId, { terminal: !!launch.emulateTerminal });
     let started = launch.isTest ? await gradleTestLaunch(withTestReporting(launch)) : launch;
     if (started.isTest && frameworkFor(started) === "dotnet") {
-      const base = started.cwd ?? useProject.getState().project?.root;
-      rt.trxDir = base ? `${base.replace(/[\\/]+$/, "")}/${TRX_DIR}` : undefined;
+      // Absolute (a relative cwd is the project's), and one folder per run: runs may overlap.
+      const root = useProject.getState().project?.root;
+      const cwd = started.cwd && /^([\\/]|[A-Za-z]:)/.test(started.cwd) ? started.cwd : null;
+      const base = cwd ?? (root && started.cwd ? `${root.replace(/[\\/]+$/, "")}/${started.cwd}` : root);
+      const run = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      rt.trxDir = base ? `${base.replace(/[\\/]+$/, "")}/${TRX_DIR}/${run}` : undefined;
       if (rt.trxDir) started = { ...started, args: withTrxLogger(started.args, rt.trxDir) };
     }
     if (runtimes.get(sessionId)?.generation !== generation) return getSession(sessionId) ?? null;
@@ -947,7 +951,7 @@ function finishSession(sessionId: string, code: number | null) {
             reports.map((r) => r.className),
           );
         }
-        if (rt.trxDir) rt.tests.apply(await dotnetReports(rt.trxDir, session.startedAt));
+        if (rt.trxDir) rt.tests.apply(await dotnetReports(rt.trxDir));
         if (runtimes.get(sessionId) !== rt) return;
         rt.tests.finish(code);
         recordTestStates(rt.tests);
@@ -964,22 +968,19 @@ function finishSession(sessionId: string, code: number | null) {
   }, 30);
 }
 
-/** Events of the TRX reports a run wrote into `dir` (since `since`), removing them once read. */
-async function dotnetReports(dir: string, since: number): Promise<TestEvent[]> {
+/** Events of the TRX reports a run wrote into its own folder `dir`, removed once read. */
+async function dotnetReports(dir: string): Promise<TestEvent[]> {
   if (!isTauri()) return [];
   try {
     const entries = await call(commands.fsReadDir(dir));
-    const reports = entries.filter(
-      (e) => e.kind === "file" && e.name.endsWith(".trx") && (e.mtimeMs ?? 0) >= since - 2000,
-    );
     const events: TestEvent[] = [];
-    for (const report of reports) {
+    for (const report of entries.filter((e) => e.kind === "file" && e.name.endsWith(".trx")))
       events.push(...trxEvents(await call(commands.fsReadText(report.path))));
-      void call(commands.fsDelete(report.path)).catch(() => undefined);
-    }
     return events;
   } catch {
     return [];
+  } finally {
+    void call(commands.fsDelete(dir)).catch(() => undefined);
   }
 }
 

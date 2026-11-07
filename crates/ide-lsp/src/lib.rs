@@ -2893,7 +2893,11 @@ impl LspManager {
             let encoding = server.running().map(|r| r.caps.read().encoding).unwrap_or_default();
             let conv = self.conv(encoding);
             for (path, items) in server.diagnostics_by_path() {
-                let items = items.into_iter().map(|d| convert::diagnostic(&conv, &path, d, &server.name)).collect();
+                let items = server
+                    .without_ignored(&path, items)
+                    .into_iter()
+                    .map(|d| convert::diagnostic(&conv, &path, d, &server.name))
+                    .collect();
                 self.sink.emit(ide_core::IdeEvent::Diagnostics {
                     path: path.into(),
                     source: server.name.clone(),

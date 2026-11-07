@@ -160,13 +160,18 @@ fn detect_dir(dir: &Path, model: &BuildModel, root: &Path) -> Option<BuildSystem
         Some(BuildSystem::Go)
     } else if dotnet_target(dir).is_some() {
         Some(BuildSystem::DotNet)
-    } else if has(dir, &["tsconfig.json", "package.json"]) {
+    } else if has(dir, &["tsconfig.json"]) || (has(dir, &["package.json"]) && !is_unity_project(root)) {
+        // In a Unity project, `package.json` is a Unity package's manifest, not a Node project.
         Some(BuildSystem::TypeScript)
     } else if has(dir, &["CMakeLists.txt"]) {
         Some(BuildSystem::CMake)
     } else {
         None
     }
+}
+
+fn is_unity_project(root: &Path) -> bool {
+    root.join("ProjectSettings").join("ProjectVersion.txt").is_file()
 }
 
 /// Resolves a workspace-relative or absolute directory with native path separators.
@@ -418,7 +423,7 @@ fn dotnet_steps(dir: &Path, kind: BuildKind) -> Vec<BuildStep> {
     let Some(target) = dotnet_target(dir) else { return Vec::new() };
     // Full paths for the messages, no repeated summary, plain console output.
     let verb = if kind == BuildKind::Artifacts { "publish" } else { "build" };
-    let mut args = vec![verb, target.as_str(), "-nologo", "-tl:off", "-clp:NoSummary", "-p:GenerateFullPaths=true"];
+    let mut args = vec![verb, target.as_str(), "-nologo", "-clp:NoSummary", "-p:GenerateFullPaths=true"];
     match kind {
         BuildKind::Rebuild => args.push("--no-incremental"),
         BuildKind::Artifacts => args.extend(["-c", "Release"]),
@@ -427,6 +432,8 @@ fn dotnet_steps(dir: &Path, kind: BuildKind) -> Vec<BuildStep> {
     let mut s = BuildStep::new("dotnet", &args, dir, Format::MsBuild);
     s.env.insert("DOTNET_CLI_TELEMETRY_OPTOUT".into(), "1".into());
     s.env.insert("DOTNET_NOLOGO".into(), "1".into());
+    // Plain console output; an environment variable, as SDKs before 8 reject `-tl:off`.
+    s.env.insert("MSBUILDTERMINALLOGGER".into(), "off".into());
     vec![s]
 }
 
@@ -1089,11 +1096,18 @@ mod tests {
         write(&root, "src/Lib/Lib.csproj", "<Project />");
         write(&root, "src/Lib/A.cs", "");
         write(&root, "package.json", "{}");
+        write(&root, "ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 6000.6.8f1");
+        // A Unity package's manifest doesn't make its folder a Node project.
+        write(&root, "Packages/com.x/package.json", "{}");
+        write(&root, "Packages/com.x/Runtime/X.cs", "");
+        let x = root.join("Packages/com.x/Runtime/X.cs");
+        let p = plan(&root, &BuildModel::default(), BuildKind::Build, Some(&x), None).unwrap();
+        assert_eq!((p.system, p.steps[0].cwd.clone()), (BuildSystem::DotNet, root.clone()));
         let p = plan(&root, &BuildModel::default(), BuildKind::Rebuild, None, None).unwrap();
         assert_eq!(p.system, BuildSystem::DotNet);
         assert_eq!(
             p.steps[0].display(),
-            "dotnet build App.slnx -nologo -tl:off -clp:NoSummary -p:GenerateFullPaths=true --no-incremental"
+            "dotnet build App.slnx -nologo -clp:NoSummary -p:GenerateFullPaths=true --no-incremental"
         );
         let p = plan(&root, &BuildModel::default(), BuildKind::Build, Some(&root.join("src/Lib/A.cs")), None).unwrap();
         assert_eq!((p.steps[0].args[1].as_str(), p.steps[0].cwd.clone()), ("Lib.csproj", root.join("src/Lib")));

@@ -26,9 +26,11 @@ function posOf(text: string, offset: number): Pos {
   return { line, col: offset - (before.lastIndexOf("\n") + 1) };
 }
 
-/** `path#Class(bases)` → the Unity type it derives from, or when a "no" was answered (the server may be loading). */
-const resolvedBases = new Map<string, string | number>();
+/** `path#Class(bases)` → the answer (a Unity type, or null) and when it was found. */
+const resolvedBases = new Map<string, { base: string | null; at: number }>();
+/** A "no" is asked again soon (the server may still be loading); a "yes" after a while (a base in another file may change). */
 const RETRY_NO_AFTER_MS = 30_000;
+const RETRY_YES_AFTER_MS = 5 * 60_000;
 
 export function clearUnityBases() {
   resolvedBases.clear();
@@ -48,8 +50,7 @@ async function unityBaseFromServer(
 ): Promise<string | null> {
   const key = `${path}#${cls.name}(${cls.bases.join(",")})`;
   const known = resolvedBases.get(key);
-  if (typeof known === "string") return known;
-  if (known !== undefined && Date.now() - known < RETRY_NO_AFTER_MS) return null;
+  if (known && Date.now() - known.at < (known.base ? RETRY_YES_AFTER_MS : RETRY_NO_AFTER_MS)) return known.base;
   const seen = new Set<string>();
   const walk = async (itemPath: string, pos: Pos, depth: number): Promise<string | null> => {
     if (depth > MAX_DEPTH) return null;
@@ -70,7 +71,7 @@ async function unityBaseFromServer(
     return null;
   };
   const found = await walk(path, posOf(text, cls.nameAt), 0);
-  resolvedBases.set(key, found ?? Date.now());
+  resolvedBases.set(key, { base: found, at: Date.now() });
   return found;
 }
 

@@ -72,6 +72,32 @@ describe("C# run targets", () => {
     ]);
   });
 
+  it("a record without a body doesn't hold the tests after it", () => {
+    const text = [
+      "namespace App.Tests;",
+      "public record Item(string Title);",
+      "public class ItemTests",
+      "{",
+      "    private record Row(int A);",
+      "    [Fact] public void Adds() { }",
+      "}",
+    ].join("\n");
+    expect(pick(detectRunTargets(text, "ItemTests.cs"))).toEqual([
+      [2, "suite", "App.Tests.ItemTests"],
+      [5, "test", "App.Tests.ItemTests/Adds"],
+    ]);
+  });
+
+  it("declarations in the global namespace aren't top-level statements", () => {
+    for (const text of [
+      "public interface IStore { }",
+      "public enum Color { Red }",
+      "public delegate void H();",
+      "public readonly ref struct Span2 { }",
+    ])
+      expect(detectRunTargets(text, "A.cs"), text).toEqual([]);
+  });
+
   it("Main and top-level statements", () => {
     expect(
       pick(
@@ -96,7 +122,7 @@ describe("C# run targets", () => {
     const test = targetConfig({ line: 9, kind: "test", name: "Adds", path: [C, "Adds"] }, rel, CONFIGS)!;
     expect(test.kind).toBe("dotnet-test");
     expect(test.params?.project).toBe("tests/Tasks.Tests/Tasks.Tests.csproj");
-    expect(test.params?.programArgs).toBe(`--filter FullyQualifiedName=${C}.Adds`);
+    expect(test.params?.programArgs).toBe(`--filter 'FullyQualifiedName=${C}.Adds|FullyQualifiedName~${C}.Adds\\('`);
     expect(test.name).toBe("Adds");
     const suite = targetConfig({ line: 6, kind: "suite", name: "TaskStoreTests", path: [C] }, rel, CONFIGS)!;
     expect(suite.params?.programArgs).toBe(`--filter FullyQualifiedName~${C}.|FullyQualifiedName~${C}+`);

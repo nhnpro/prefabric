@@ -274,6 +274,78 @@ describe("Unity-aware rename", () => {
   });
 });
 
+describe("Unity-aware rename: what isn't a serialized field", () => {
+  const data = loadMessageData("6000.3.1f1");
+  const deps: UnityDeps = { data: () => data, supertypes: async () => [], text: async () => "" };
+  const empty: WorkspaceEdit = { files: [] };
+  const rename = (text: string, at: string, oldName: string, newName: string, path = "/p/A.cs") =>
+    unityRename(deps)({
+      state: EditorState.create({ doc: text }),
+      path,
+      pos: text.indexOf(at),
+      oldName,
+      newName,
+      edit: empty,
+    });
+
+  it("skips parameters, names in initializers and multi-field declarations", () => {
+    const text = [
+      "class A : MonoBehaviour {",
+      "  public void TakeDamage(int amount, Vector3 hit, int speed = 1) { }",
+      "  public Vector3 offset = new Vector3(0, Height, 0);",
+      "  public int a, b;",
+      "  [SerializeField, Range(0, 1)] private float volume;",
+      "  public Dictionary<int, string> names;",
+      "}",
+    ].join("\n");
+    expect(serializedFieldAt(text, text.indexOf("amount"))).toBeNull();
+    expect(serializedFieldAt(text, text.indexOf("hit"))).toBeNull();
+    expect(serializedFieldAt(text, text.indexOf("speed"))).toBeNull();
+    expect(serializedFieldAt(text, text.indexOf("Height"))).toBeNull();
+    expect(serializedFieldAt(text, text.indexOf("a,"))).toBeNull();
+    expect(serializedFieldAt(text, text.indexOf("b;"))).toBeNull();
+    expect(serializedFieldAt(text, text.indexOf("volume"))).not.toBeNull();
+    expect(serializedFieldAt(text, text.indexOf("names"))).not.toBeNull();
+  });
+
+  it("adds the using after the header's unconditional usings", async () => {
+    const text = [
+      "using UnityEngine;",
+      "#if UNITY_EDITOR",
+      "using UnityEditor;",
+      "#endif",
+      "",
+      "class A : MonoBehaviour {",
+      "  public int hp;",
+      "  void M() { using var r = Open(); }",
+      "}",
+    ].join("\n");
+    const [ext] = await rename(text, "hp;", "hp", "health");
+    const edits = (ext!.extend(empty).files[0] as { edits: TextEdit[] }).edits;
+    const doc = Text.of(text.split("\n"));
+    const changes = edits.map((e) => ({
+      from: doc.line(e.range.start.line + 1).from + e.range.start.col,
+      insert: e.new_text,
+    }));
+    const result = EditorState.create({ doc: text }).update({ changes }).state.doc.toString();
+    expect(result.startsWith("using UnityEngine;\nusing UnityEngine.Serialization;\n#if UNITY_EDITOR")).toBe(true);
+  });
+
+  it("renames the file when the class is renamed from a use in its file", async () => {
+    const text = "class Player : MonoBehaviour {\n  Player other;\n}";
+    const [ext] = await rename(text, "Player other", "Player", "Hero", "/p/Player.cs");
+    expect(ext?.label).toBe("Rename file to Hero.cs");
+  });
+
+  it("asks the server about bases that only look like interfaces", async () => {
+    const types = unityTypeNames(await data);
+    const text = "class Shop : IAPStoreBase {}";
+    expect(unityBaseInFile(text, classes(text)[0]!, types)).toBeUndefined();
+    const plain = "class Shop : IDisposable {}";
+    expect(unityBaseInFile(plain, classes(plain)[0]!, types)).toBeNull();
+  });
+});
+
 describe("assembly definition references", () => {
   const tests = readFileSync("fixtures/unity-sample/Assets/Tests/EditMode/Game.Tests.EditMode.asmdef", "utf8");
   const asmdef = "/p/Assets/Tests/Game.Tests.asmdef";

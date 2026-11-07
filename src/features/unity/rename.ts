@@ -59,6 +59,11 @@ export function serializedFieldAt(text: string, pos: number): { declarationStart
   const after = code.slice(pos).match(/^\w+\s*(=>|[=;,[{(])/);
   if (!after || after[1] === "{" || after[1] === "(" || after[1] === "=>") return null;
   const head = code.slice(start, pos);
+  // Not a parameter or a name in an initializer (`(` or `=` before it), and one field per
+  // declaration: an attribute on `int a, b;` would apply to both.
+  let type = head.replace(/\[[^\]]*\]/g, " ");
+  while (/<[^<>]*>/.test(type)) type = type.replace(/<[^<>]*>/g, " ");
+  if (/[(=,]/.test(type) || after[1] === ",") return null;
   const attributes = [...head.matchAll(/\[([^\]]*)\]/g)].map((m) => m[1]!).join(",");
   const words = head
     .replace(/\[[^\]]*\]/g, " ")
@@ -72,11 +77,25 @@ export function serializedFieldAt(text: string, pos: number): { declarationStart
   return { declarationStart: firstCode };
 }
 
-/** Where `using UnityEngine.Serialization;` goes: after the last top-level `using`, else the top. */
+/**
+ * Where `using UnityEngine.Serialization;` goes: after the last `using` directive of the file's
+ * header that isn't inside an `#if` (an editor-only `using` sits in `#if UNITY_EDITOR`), else the top.
+ */
 function usingInsertion(text: string): { offset: number; prefix: string } {
   const code = codeOnly(text);
   let offset = 0;
-  for (const m of code.matchAll(/^[ \t]*using\s+(?!\()[\w.=\s]+;[ \t]*$/gm)) offset = m.index + m[0].length;
+  let conditional = 0;
+  let at = 0;
+  for (const line of code.split("\n")) {
+    const end = at + line.length;
+    const t = line.trim();
+    at = end + 1;
+    if (/^#\s*if\b/.test(t)) conditional++;
+    else if (/^#\s*endif\b/.test(t)) conditional = Math.max(0, conditional - 1);
+    else if (/^using\s+(?!var\b|\()(?:static\s+)?[\w.]+(?:\s*=\s*[\w.<>,\s]+)?\s*;$/.test(t)) {
+      if (!conditional) offset = end;
+    } else if (t && !t.startsWith("#") && !/^global\s+using\b|^extern\s+alias\b|^\[assembly:/.test(t)) break;
+  }
   return offset ? { offset, prefix: "\n" } : { offset: 0, prefix: "" };
 }
 
@@ -116,7 +135,9 @@ export function unityRename(deps: UnityDeps): ContributedRename {
     const text = state.doc.toString();
     const out: RenameExtension[] = [];
 
-    const cls = classes(text).find((c) => c.nameAt === pos && c.name === oldName);
+    // The class itself, renamed from its declaration or a use in its file (a member can't share
+    // its class's name, CS0542).
+    const cls = classes(text).find((c) => c.name === oldName);
     if (cls) {
       const { dir, name } = split(path);
       const base = name === `${oldName}.cs` ? await unityBaseOf(path, text, cls, unityTypes, deps) : null;

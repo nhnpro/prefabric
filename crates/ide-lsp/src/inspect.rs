@@ -167,7 +167,11 @@ impl LspManager {
             };
             raw.map(|items| {
                 let conv = self.conv(t.enc());
-                items.into_iter().map(|d| convert::diagnostic(&conv, &snap.path, d, &t.server.name)).collect::<Vec<_>>()
+                t.server
+                    .without_ignored(&snap.path, items)
+                    .into_iter()
+                    .map(|d| convert::diagnostic(&conv, &snap.path, d, &t.server.name))
+                    .collect::<Vec<_>>()
             })
         });
         let mut out = Vec::new();

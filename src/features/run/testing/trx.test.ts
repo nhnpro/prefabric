@@ -72,6 +72,12 @@ describe("TRX reports", () => {
     expect(tree.counts()).toMatchObject({ passed: 2, failed: 1, skipped: 1 });
   });
 
+  it("splits a test name without its definition before the arguments", () => {
+    const xml = `<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010"><Results>
+      <UnitTestResult testId="x" testName="Ns.C.Add(x: 1.5)" outcome="Passed" /></Results></TestRun>`;
+    expect(trxEvents(xml).find((e) => e.type === "result")?.path).toEqual(["Ns.C", "Add", "Add(x: 1.5)"]);
+  });
+
   it("ignores files that aren't XML", () => {
     expect(trxEvents("not xml")).toEqual([]);
   });
@@ -98,10 +104,11 @@ describe("TRX reports", () => {
 
 describe("rerunning failed .NET tests", () => {
   it("filters by fully qualified name; a case reruns its method", () => {
+    const exact = (n: string) => `FullyQualifiedName=${n}|FullyQualifiedName~${n}\\(`;
     expect(dotnetFilter([[C, "A"], [C, "B", "B(x: 1)"], [C, "B", "B(x: 2)"], [C]])).toBe(
-      `FullyQualifiedName=${C}.A|FullyQualifiedName=${C}.B`,
+      `${exact(`${C}.A`)}|${exact(`${C}.B`)}`,
     );
-    expect(dotnetFilter([["N.C", "M=x"]])).toBe("FullyQualifiedName=N.C.M\\=x");
+    expect(dotnetFilter([["N.C", "M=x"]])).toBe(exact("N.C.M\\=x"));
   });
 
   it("puts the filter in a dotnet-test configuration's test arguments, replacing an old one", () => {
@@ -109,11 +116,18 @@ describe("rerunning failed .NET tests", () => {
       [C, "SearchIgnoresCase"],
     ]);
     expect(rerun?.name).toBe("Failed: Tests");
-    expect(rerun?.params?.programArgs).toBe(`-v n --filter FullyQualifiedName=${C}.SearchIgnoresCase`);
+    expect(rerun?.params?.programArgs).toBe(
+      `-v n --filter 'FullyQualifiedName=${C}.SearchIgnoresCase|FullyQualifiedName~${C}.SearchIgnoresCase\\('`,
+    );
   });
 
   it("adds the filter to a plain dotnet test command", () => {
     const rerun = rerunFailedConfig(config({ kind: "shell", args: ["test", "x.sln", "--filter=Old"] }), [[C, "A"]]);
-    expect(rerun?.args).toEqual(["test", "x.sln", "--filter", `FullyQualifiedName=${C}.A`]);
+    expect(rerun?.args).toEqual([
+      "test",
+      "x.sln",
+      "--filter",
+      `FullyQualifiedName=${C}.A|FullyQualifiedName~${C}.A\\(`,
+    ]);
   });
 });

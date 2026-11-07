@@ -72,18 +72,18 @@ async fn installs_the_package_and_generates_project_files() {
     let info = ops::project::current(&host, WINDOW).unwrap().unity.unwrap();
     assert_eq!(info.package, Some(UnityPackageStatus::Missing));
     // Generating needs the package, and runs project code: not in Restricted Mode.
-    assert!(ops::unity::generate_project_files(&host, WINDOW).await.is_err());
+    assert!(ops::unity::generate_project_files(&host, WINDOW, RequestId::next()).await.is_err());
 
     let info = ops::unity::install_package(&host, WINDOW).await.unwrap().unity.unwrap();
     assert_eq!(info.package, Some(UnityPackageStatus::Current));
-    let Err(err) = ops::unity::generate_project_files(&host, WINDOW).await else {
+    let Err(err) = ops::unity::generate_project_files(&host, WINDOW, RequestId::next()).await else {
         panic!("generated in Restricted Mode")
     };
     assert!(err.message.contains("Restricted Mode"), "{err:?}");
 
     host.set_project_trust(&root, true, false).await.unwrap();
     let started = std::time::Instant::now();
-    let info = ops::unity::generate_project_files(&host, WINDOW).await.unwrap().unity.unwrap();
+    let info = ops::unity::generate_project_files(&host, WINDOW, RequestId::next()).await.unwrap().unity.unwrap();
     eprintln!("generated in {:?}", started.elapsed());
     assert_eq!(info.solutions, ["unity-sample.slnx"]);
     assert!(info.projects.contains(&"Game.Runtime.csproj".to_owned()), "{:?}", info.projects);

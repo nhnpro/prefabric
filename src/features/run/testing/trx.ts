@@ -7,7 +7,7 @@ import { parseArgs, formatArgs } from "@/platform/commandLine";
 import type { RunConfig } from "@/platform/ipc";
 import type { TestEvent, TestStatus } from "./types";
 
-/** Results folder of a run, relative to its working directory. */
+/** Results folder of the runs, relative to their working directory; each run writes a subfolder. */
 export const TRX_DIR = "TestResults/prefabric";
 
 /** `dotnet test` arguments plus the TRX logger writing into `dir` (before any `--` RunSettings arguments). */
@@ -66,8 +66,10 @@ export function trxEvents(xml: string): TestEvent[] {
   for (const result of doc.getElementsByTagName("UnitTestResult")) {
     const testName = result.getAttribute("testName") ?? "";
     const method = methods.get(result.getAttribute("testId") ?? "");
-    const className = method?.className || testName.slice(0, Math.max(0, testName.lastIndexOf(".")));
-    const name = method?.name || testName.slice(className.length + 1);
+    // Without a definition: the class is what precedes the method (`Ns.C.Add(x: 1.5)` → `Ns.C`).
+    const bare = testName.split("(")[0]!;
+    const className = method?.className || bare.slice(0, Math.max(0, bare.lastIndexOf(".")));
+    const name = method?.name || bare.slice(className.length + 1);
     if (!className || !name) continue;
     // The display name, without the class: `Search(text: "a")` for a case of `Search`.
     const display = testName.startsWith(`${className}.`) ? testName.slice(className.length + 1) : testName;
@@ -90,7 +92,8 @@ export function dotnetFilter(paths: readonly string[][]): string | null {
   const names = [...new Set(paths.filter((p) => p.length >= 2).map((p) => `${p[0]}.${p[1]}`))];
   if (!names.length) return null;
   const escape = (s: string) => s.replace(/[\\()&|=!~]/g, "\\$&");
-  return names.map((n) => `FullyQualifiedName=${escape(n)}`).join("|");
+  // NUnit puts a case's arguments in its name (`Ns.C.Search("a")`): those match by prefix.
+  return names.map((n) => `FullyQualifiedName=${escape(n)}|FullyQualifiedName~${escape(n)}\\(`).join("|");
 }
 
 /** Arguments with any `--filter` replaced by one selecting `paths`. */

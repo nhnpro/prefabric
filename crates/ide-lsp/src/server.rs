@@ -608,6 +608,23 @@ impl Server {
         self.published.lock().get(path).copied()
     }
 
+    /// `items` without those the language's `ignore-diagnostics` rules hide for `path`.
+    pub(crate) fn without_ignored(&self, path: &Path, items: Vec<lsp::Diagnostic>) -> Vec<lsp::Diagnostic> {
+        let ignored: Vec<&ide_language::IgnoredDiagnostics> =
+            self.config.ignore_diagnostics.iter().filter(|i| i.applies_to(path)).collect();
+        if ignored.is_empty() {
+            return items;
+        }
+        items
+            .into_iter()
+            .filter(|d| {
+                !ignored
+                    .iter()
+                    .any(|i| i.codes.iter().any(|x| x == "*" || d.code.as_ref().is_some_and(|c| code_is(c, x))))
+            })
+            .collect()
+    }
+
     pub fn diagnostics_for(&self, path: &Path) -> Vec<lsp::Diagnostic> {
         self.diagnostics.lock().get(path).cloned().unwrap_or_default()
     }
@@ -667,6 +684,13 @@ fn is_error_headline(line: &str) -> bool {
     let head = l.split(':').next().unwrap_or_default();
     let named = (head.ends_with("Error") || head.ends_with("Exception")) && !head.contains(' ') && head.len() < l.len();
     named || l.starts_with("Exception in thread") || l.starts_with("thread '") && l.contains("panicked")
+}
+
+fn code_is(code: &lsp::NumberOrString, name: &str) -> bool {
+    match code {
+        lsp::NumberOrString::String(s) => s == name,
+        lsp::NumberOrString::Number(n) => n.to_string() == name,
+    }
 }
 
 #[cfg(test)]

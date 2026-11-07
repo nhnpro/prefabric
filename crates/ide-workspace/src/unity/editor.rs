@@ -50,7 +50,8 @@ pub fn find(version: &str) -> Option<PathBuf> {
     let config = if cfg!(target_os = "macos") {
         home.join("Library/Application Support")
     } else if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)?
+        // Without APPDATA, only Unity Hub's custom folder is unknown; the default one is still searched.
+        std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| home.join("AppData").join("Roaming"))
     } else {
         std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"))
     };

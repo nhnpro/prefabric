@@ -452,7 +452,7 @@ function csharpTargets(lines: string[]): RunTarget[] {
     }
     const ns = /^namespace\s+([\w.]+)\s*(;|\{|$)/.exec(trimmed);
     const type =
-      /^(?:(?:public|internal|private|protected|static|sealed|abstract|partial|file|unsafe|readonly|new)\s+)*(class|record|struct)\s+(\w+)/.exec(
+      /^(?:(?:public|internal|private|protected|static|sealed|abstract|partial|file|unsafe|readonly|ref|new)\s+)*(class|record|struct)\s+(\w+)/.exec(
         trimmed.replace(/^\[.*?\]\s*/, ""),
       );
     const method =
@@ -466,13 +466,15 @@ function csharpTargets(lines: string[]): RunTarget[] {
       else blockNamespaces.push({ name: ns[1]!, depth });
     } else if (type) {
       typeSeen = true;
-      classes.push({
-        name: type[2]!,
-        depth,
-        line: i,
-        fixture: attrs.some((a) => CS_FIXTURE_ATTRIBUTE.test(a)),
-        tests: 0,
-      });
+      // A declaration without a body (`record Row(int A);`) holds no tests.
+      if (!(/;\s*$/.test(trimmed) && !trimmed.includes("{")))
+        classes.push({
+          name: type[2]!,
+          depth,
+          line: i,
+          fixture: attrs.some((a) => CS_FIXTURE_ATTRIBUTE.test(a)),
+          tests: 0,
+        });
     } else if (/^(?:using\b|global\s+using\b|#|extern\s+alias\b)/.test(trimmed)) {
       // Directives before the first statement.
     } else if (method && classes.length) {
@@ -490,7 +492,9 @@ function csharpTargets(lines: string[]): RunTarget[] {
       }
     } else if (!typeSeen && !classes.length && !blockNamespaces.length && !namespace && topLevel === null) {
       // The first statement of a file of top-level statements.
-      if (!/^(?:enum|interface|delegate)\b/.test(trimmed)) topLevel = i;
+      const declaration =
+        /^(?:(?:public|internal|private|protected|static|sealed|abstract|partial|file|unsafe|readonly|ref|new)\s+)*(?:enum|interface|delegate)\b/;
+      if (!declaration.test(trimmed)) topLevel = i;
     }
     if (!/^\[.*\]$/.test(trimmed)) pending = [];
     for (const ch of line) {
@@ -653,7 +657,8 @@ export function targetConfig(
       const filter =
         target.kind === "suite"
           ? `FullyQualifiedName~${name}.|FullyQualifiedName~${name}+`
-          : `FullyQualifiedName=${name}`;
+          : // NUnit puts a case's arguments in its name: `Ns.C.Search("a")`.
+            `FullyQualifiedName=${name}|FullyQualifiedName~${name}\\(`;
       return { ...named(file.args), ...withDotnetFilter(file, filter) };
     }
     case "gradle":

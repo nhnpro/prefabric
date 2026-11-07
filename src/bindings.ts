@@ -92,8 +92,11 @@ export const commands = {
 	projectRoots: () => typedError<ProjectRoots, IdeError>(__TAURI_INVOKE("project_roots")),
 	/**  Installs or updates Prefabric's Unity package in the project's `Packages/`. */
 	unityInstallPackage: () => typedError<ProjectInfo_Serialize, IdeError>(__TAURI_INVOKE("unity_install_package")),
-	/**  Generates the C# solution and projects with the project's Unity version in batch mode. */
-	unityGenerateProjectFiles: () => typedError<ProjectInfo_Serialize, IdeError>(__TAURI_INVOKE("unity_generate_project_files")),
+	/**
+	 *  Generates the C# solution and projects with the project's Unity version in batch mode;
+	 *  `cancel_request(request)` stops Unity.
+	 */
+	unityGenerateProjectFiles: (request: RequestId) => typedError<ProjectInfo_Serialize, IdeError>(__TAURI_INVOKE("unity_generate_project_files", { request })),
 	/**  The project's assembly definitions (`.asmdef`), with their GUIDs. */
 	unityAssemblyDefinitions: () => typedError<AssemblyDefinition[], IdeError>(__TAURI_INVOKE("unity_assembly_definitions")),
 	cancelRequest: (id: RequestId) => __TAURI_INVOKE<void>("cancel_request", { id }),

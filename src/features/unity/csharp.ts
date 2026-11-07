@@ -149,7 +149,7 @@ export function unityBaseInFile(
       if (local) {
         const found = visit(local);
         if (found) return found;
-      } else if (!/^I[A-Z]/.test(base)) unknown = true;
+      } else if (!/^I[A-Z][a-z]/.test(base)) unknown = true; // `IDamageable`, not `IAPStoreBase`
     }
     return null;
   };

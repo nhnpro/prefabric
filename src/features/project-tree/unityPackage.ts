@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { call, commands } from "@/platform/ipc";
+import { call, commands, nextRequestId } from "@/platform/ipc";
 import { tx } from "@/platform/i18n";
 import { useProject } from "@/platform/project";
 import { notifications } from "@/workbench/contributions";
@@ -44,7 +44,7 @@ export function installUnityPackage(): Promise<void> {
 export function generateUnityProjectFiles(): Promise<void> {
   return runTask(
     "generate",
-    () => call(commands.unityGenerateProjectFiles()),
+    () => call(commands.unityGenerateProjectFiles(nextRequestId())),
     tx`C# project files generated`,
     tx`Cannot generate the C# project files`,
   );

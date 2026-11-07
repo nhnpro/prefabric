@@ -185,6 +185,10 @@ pub fn install(root: &Path) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::NotFound, "Packages folder not found"));
     }
     let target = embedded_dir(root);
+    // A package developed in place (a git checkout) is never replaced.
+    if target.join(".git").exists() {
+        return Err(io::Error::other(format!("{} is a git checkout; update it with git", target.display())));
+    }
     let staging = root.join("Packages").join(format!(".{NAME}.installing"));
     let _ = std::fs::remove_dir_all(&staging);
     let written = (|| {
@@ -201,10 +205,26 @@ pub fn install(root: &Path) -> io::Result<()> {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(e);
     }
-    if target.exists() {
-        std::fs::remove_dir_all(&target)?;
+    // Swap by renames, so a file held open (Unity, the language server) leaves the old package
+    // whole rather than half deleted.
+    let previous = root.join("Packages").join(format!(".{NAME}.previous"));
+    let _ = std::fs::remove_dir_all(&previous);
+    if target.exists()
+        && let Err(e) = std::fs::rename(&target, &previous)
+    {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e);
     }
-    std::fs::rename(&staging, &target)
+    if let Err(e) = std::fs::rename(&staging, &target) {
+        if previous.exists() {
+            let _ = std::fs::rename(&previous, &target);
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+    // Best effort: what can't be deleted now (a file still open) is retried on the next install.
+    let _ = std::fs::remove_dir_all(&previous);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -276,6 +296,12 @@ mod tests {
         assert_eq!(installed(root), Some(Installed::Embedded(BUNDLED_VERSION.into())));
         assert!(!embedded_dir(root).join("Editor/Removed.cs").exists());
         assert!(!root.join("Packages").join(format!(".{NAME}.installing")).exists());
+        assert!(!root.join("Packages").join(format!(".{NAME}.previous")).exists());
+        // A git checkout of the package is never replaced.
+        std::fs::create_dir_all(embedded_dir(root).join(".git")).unwrap();
+        std::fs::write(embedded_dir(root).join("Editor/Mine.cs"), "").unwrap();
+        assert!(install(root).is_err());
+        assert!(embedded_dir(root).join("Editor/Mine.cs").exists());
     }
 
     #[test]
