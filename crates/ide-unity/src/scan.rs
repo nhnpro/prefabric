@@ -81,6 +81,40 @@ pub struct Object {
     pub removed: Vec<ObjRef>,
     /// A MonoBehaviour's serialized fields written on one line (`speed: 2`), in file order.
     pub properties: Vec<(Box<str>, Box<str>)>,
+    /// A MonoBehaviour's UnityEvent listeners set in the Inspector (`m_PersistentCalls`).
+    pub calls: Vec<EventCall>,
+    /// An AnimationClip's events.
+    pub animation_events: Vec<AnimationEvent>,
+    /// An Animator's controller.
+    pub controller: Option<ObjRef>,
+    /// An AnimatorState's clip (or blend tree).
+    pub motion: Option<ObjRef>,
+}
+
+/// A UnityEvent listener: `method` of `target`, when the event `field` is raised.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EventCall {
+    /// The UnityEvent field, as a path of serialized names (`onEnter`, `events.onClick`).
+    pub field: Box<str>,
+    pub target: Option<ObjRef>,
+    /// `m_TargetAssemblyTypeName`: `Game.Player, Game.Runtime`.
+    pub target_type: Option<Box<str>>,
+    pub method: Box<str>,
+    /// `m_Mode`: how the argument is passed (0 event-defined, 1 none, 2 object, 3 int…).
+    pub mode: u8,
+    /// `m_CallState`: 0 off, 1 editor and runtime, 2 runtime only.
+    pub call_state: u8,
+    /// 0-based line of the `- m_Target:` item.
+    pub line: u32,
+}
+
+/// An AnimationClip event: `function` is called on the animated GameObject's scripts at `time`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnimationEvent {
+    pub time: Box<str>,
+    pub function: Box<str>,
+    /// 0-based line of the `- time:` item.
+    pub line: u32,
 }
 
 /// An override of a PrefabInstance: `propertyPath` of `target` (an object of the source prefab) is
@@ -108,6 +142,19 @@ enum List {
     Components,
     /// Inside a PrefabInstance's `m_Modification`.
     Modification,
+    /// An AnimationClip's `m_Events`.
+    AnimationEvents,
+}
+
+/// Where a MonoBehaviour's lines are, for its UnityEvents: the serialized names enclosing the
+/// current line, and the `m_Calls` list being read.
+#[derive(Default)]
+struct EventState {
+    /// (indent, name) of the open mappings.
+    path: Vec<(usize, Box<str>)>,
+    /// Indent of the `m_Calls:` key whose items follow.
+    calls_indent: Option<usize>,
+    in_call: bool,
 }
 
 /// Which list of `m_Modification` the following four-space-indented `- ` items belong to.
@@ -124,12 +171,14 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
     let mut expect_type = false;
     let mut list = List::None;
     let mut mod_list = ModList::None;
+    let mut events = EventState::default();
     for (number, line) in lines(bytes) {
         if let Some(rest) = line.strip_prefix(b"--- !u!") {
             file.objects.extend(current.take());
             current = header(rest, number);
             expect_type = current.is_some();
             list = List::None;
+            events = EventState::default();
             continue;
         }
         let Some(object) = current.as_mut() else { continue };
@@ -147,9 +196,20 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
             list = List::None;
             continue;
         };
+        if object.class_id == MONO_BEHAVIOUR {
+            event_line(&mut events, object, line, number);
+        }
         if let Some(nested) = body.strip_prefix(b"  ") {
-            if list == List::Modification {
-                modification_line(object, nested, number, &mut mod_list);
+            match list {
+                List::Modification => modification_line(object, nested, number, &mut mod_list),
+                List::AnimationEvents => {
+                    if let Some(event) = object.animation_events.last_mut()
+                        && let Some(v) = nested.strip_prefix(b"functionName:")
+                    {
+                        event.function = scalar(v).unwrap_or_default();
+                    }
+                }
+                _ => {}
             }
             continue;
         }
@@ -159,6 +219,15 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
                 List::Components => {
                     if let Some(r) = item.strip_prefix(b"component:").and_then(reference) {
                         object.components.push(r.file_id);
+                    }
+                }
+                List::AnimationEvents => {
+                    if let Some(time) = item.strip_prefix(b"time:") {
+                        object.animation_events.push(AnimationEvent {
+                            time: scalar(time).unwrap_or_default(),
+                            function: "".into(),
+                            line: number,
+                        });
                     }
                 }
                 List::None | List::Modification => {}
@@ -182,6 +251,9 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
             b"m_CorrespondingSourceObject" => object.source = reference(value),
             b"m_Children" if value.is_empty() => list = List::Children,
             b"m_Component" if value.is_empty() => list = List::Components,
+            b"m_Events" if value.is_empty() && object.class_id == ANIMATION_CLIP => list = List::AnimationEvents,
+            b"m_Controller" => object.controller = reference(value),
+            b"m_Motion" => object.motion = reference(value),
             _ if object.class_id == MONO_BEHAVIOUR && !value.is_empty() && !key.starts_with(b"m_") => {
                 if let Some(value) = scalar(value) {
                     object.properties.push((String::from_utf8_lossy(key).into(), value));
@@ -195,6 +267,68 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
 }
 
 const MONO_BEHAVIOUR: u32 = 114;
+const ANIMATION_CLIP: u32 = 74;
+
+/// A line of a MonoBehaviour (indented at least two spaces): its UnityEvent listeners.
+fn event_line(state: &mut EventState, object: &mut Object, line: &[u8], number: u32) {
+    let mut indent = line.iter().take_while(|&&b| b == b' ').count();
+    let mut rest = &line[indent..];
+    if let Some(calls) = state.calls_indent {
+        if indent == calls && rest.starts_with(b"- ") {
+            state.in_call = false;
+            if let Some(target) = rest[2..].strip_prefix(b"m_Target:") {
+                let field = state.path.iter().map(|(_, k)| &**k).filter(|k| *k != "m_PersistentCalls");
+                object.calls.push(EventCall {
+                    field: field.collect::<Vec<_>>().join(".").into(),
+                    target: reference(target),
+                    target_type: None,
+                    method: "".into(),
+                    mode: 0,
+                    call_state: 0,
+                    line: number,
+                });
+                state.in_call = true;
+            }
+            return;
+        }
+        if indent > calls {
+            if indent == calls + 2
+                && state.in_call
+                && let Some(call) = object.calls.last_mut()
+                && let Some(colon) = memchr(b':', rest)
+            {
+                let value = trim(&rest[colon + 1..]);
+                let small = || std::str::from_utf8(value).ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+                match &rest[..colon] {
+                    b"m_TargetAssemblyTypeName" => call.target_type = scalar(value),
+                    b"m_MethodName" => call.method = scalar(value).unwrap_or_default(),
+                    b"m_Mode" => call.mode = small(),
+                    b"m_CallState" => call.call_state = small(),
+                    _ => {}
+                }
+            }
+            return;
+        }
+        state.calls_indent = None;
+        state.in_call = false;
+    }
+    // An item of another list holding a mapping: its first key sits two columns further in.
+    if let Some(item) = rest.strip_prefix(b"- ") {
+        rest = item;
+        indent += 2;
+    }
+    let Some(colon) = memchr(b':', rest) else { return };
+    let (key, value) = (&rest[..colon], trim(&rest[colon + 1..]));
+    state.path.retain(|(i, _)| *i < indent);
+    if !value.is_empty() {
+        return;
+    }
+    if key == b"m_Calls" {
+        state.calls_indent = Some(indent);
+    } else {
+        state.path.push((indent, String::from_utf8_lossy(key).into()));
+    }
+}
 
 /// A line of `m_Modification`, without its first four spaces of indentation.
 fn modification_line(object: &mut Object, line: &[u8], number: u32, list: &mut ModList) {

@@ -6,6 +6,7 @@
 //! competes with opening the project. Queries answer from what is indexed so far;
 //! `IdeEvent::UnityIndexState` tells the UI when it is complete.
 
+pub mod events;
 pub mod prefab;
 pub mod scan;
 mod store;
