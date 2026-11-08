@@ -105,6 +105,11 @@ export const commands = {
 	indexing: boolean,
 	/**  Indexed asset files. */
 	files: number,
+	/**
+	 *  Counts the times the index got new content (a scan, saved assets): what was derived from
+	 *  it (code lenses…) is out of date when it changes.
+	 */
+	revision: number,
 } | null, IdeError>(__TAURI_INVOKE("unity_index_status")),
 	/**
 	 *  The scenes, prefabs and clips using the C# class, method or serialized field at `pos`;
@@ -114,6 +119,8 @@ export const commands = {
 	symbol: string,
 	usages: AssetUsage[],
 } | null, IdeError>(__TAURI_INVOKE("unity_asset_usages", { doc, pos })),
+	/**  Code Vision of a C# file: how assets use its script class, methods and serialized fields. */
+	unityLenses: (doc: DocId) => typedError<UnityLens[], IdeError>(__TAURI_INVOKE("unity_lenses", { doc })),
 	cancelRequest: (id: RequestId) => __TAURI_INVOKE<void>("cancel_request", { id }),
 	/**
 	 *  Stops a background task the backend reported with `cancellable` set; false when it
@@ -4332,7 +4339,9 @@ cancellable: boolean } |
 /**  Project indexing state changed (dumb mode on/off). */
 { type: "indexState"; indexing: boolean; files: number; symbols: number } | 
 /**  Unity asset index state changed (Unity projects only). */
-{ type: "unityIndexState"; indexing: boolean; files: number } | 
+{ type: "unityIndexState"; indexing: boolean; files: number; 
+/**  Bumped whenever the index gets new content. */
+revision: number } | 
 /**  Git status / branch information should be refreshed. */
 { type: "vcsChanged"; root: IpcPath } | { type: "languageServer"; server: ServerId; name: string; status: ServerStatus; message: string | null } | 
 /**  A running server lacks a capability; the UI offers the managed tool as a replacement. */
@@ -4975,6 +4984,20 @@ export type LaunchConfig = {
 	 */
 	extraJson: string | null,
 };
+
+export type LensSummary = 
+/**  Prefabs, scenes and other assets with a component of the class. */
+{ kind: "class"; prefabs: number; scenes: number; other: number } | 
+/**
+ *  UnityEvent listeners and animation events calling the method; `files`: the assets' names,
+ *  at most a few, out of `file_count`.
+ */
+{ kind: "method"; unityEvents: number; animationEvents: number; files: string[]; fileCount: number } | 
+/**
+ *  The serialized field's distinct values on the script's own components (the Inspector's),
+ *  and how many prefab instances override it.
+ */
+{ kind: "field"; values: string[]; overrides: number };
 
 /**  One SDK or library with its source folders (`< Python 3.12 (.venv) >`). */
 export type LibraryGroup = {
@@ -7600,6 +7623,18 @@ export type UnityIndexStatus = {
 	indexing: boolean,
 	/**  Indexed asset files. */
 	files: number,
+	/**
+	 *  Counts the times the index got new content (a scan, saved assets): what was derived from
+	 *  it (code lenses…) is out of date when it changes.
+	 */
+	revision: number,
+};
+
+/**  One declaration's summary, at its name (0-based line, UTF-16 column). */
+export type UnityLens = {
+	line: number,
+	col: number,
+	summary: LensSummary,
 };
 
 export type UnityPackageStatus = { state: "missing" } | 

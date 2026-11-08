@@ -1,4 +1,5 @@
-/** Unity code insight for C#: event function completion and gutter icons, Unity-aware rename;
+/** Unity code insight for C#: event function completion and gutter icons, Unity-aware rename,
+ * Code Vision from the asset index;
  * navigation in assembly definitions; Unity properties in USS; Unity YAML read-only. */
 import { EditorState } from "@codemirror/state";
 import { CONTRIBUTED_RENAME, registerEditorContribution } from "@/editor/api";
@@ -8,6 +9,7 @@ import { clearUnityBases, unityDeps } from "./bases";
 import { assemblyDefinitionSupport } from "./asmdef";
 import { unityMessageSource } from "./completion";
 import { eventFunctionGutter } from "./gutter";
+import { unityLenses } from "./lenses";
 import { unityRename } from "./rename";
 import { unityYamlBanner, unityYamlLock } from "./unityYaml";
 import { ussSupport } from "./uss";
@@ -30,6 +32,7 @@ export function activate() {
               { openideaCompletion: unityMessageSource(ctx.path, deps), [CONTRIBUTED_RENAME]: rename },
             ]),
             eventFunctionGutter(ctx.path, deps),
+            useProject.getState().project?.unity ? unityLenses(ctx.doc) : [],
           ]
         : ctx.language === "json" && !ctx.virtual
           ? assemblyDefinitionSupport(ctx.path)

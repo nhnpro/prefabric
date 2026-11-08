@@ -164,6 +164,7 @@ fn a_saved_prefab_updates_the_queries() {
     let prefab = root.join("Assets/Prefabs/Player.prefab");
     let original = std::fs::read_to_string(&prefab).unwrap();
     let mut times = Vec::new();
+    let revision = index.status().revision;
     for speed in 10..20 {
         std::fs::write(&prefab, original.replace("  speed: 2\n", &format!("  speed: {speed}\n"))).unwrap();
         index.update(std::slice::from_ref(&prefab), &[]);
@@ -171,6 +172,8 @@ fn a_saved_prefab_updates_the_queries() {
         // An override still wins over the new value.
         assert_eq!(speed_of(&index, "Hero").as_deref(), Some("7"));
     }
+    // Each save is a new revision (code lenses refresh on it).
+    until(|| index.status().revision >= revision + 10);
     times.sort();
     let median = times[times.len() / 2];
     eprintln!("prefab save → query: median {median:?}, max {:?}", times.last().unwrap());

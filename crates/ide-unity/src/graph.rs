@@ -485,16 +485,24 @@ impl Query<'_> {
 
     /// The value of the serialized field `field` on every component using `script`.
     pub(crate) fn field_values(&self, script: Guid, field: &str) -> Vec<FieldValue> {
+        self.fields_values(script, &[field]).pop().unwrap_or_default()
+    }
+
+    /// [`Self::field_values`] of several fields, finding the script's components once.
+    pub(crate) fn fields_values(&self, script: Guid, fields: &[&str]) -> Vec<Vec<FieldValue>> {
         let usages = self.script_usages(script);
         let mut by_file: HashMap<Arc<str>, Loaded> = HashMap::new();
-        let mut out = Vec::new();
+        let mut out = vec![Vec::new(); fields.len()];
         for usage in usages {
             let Some(&idx) = self.graph.by_rel.get(&usage.rel) else { continue };
             let Some(guid) = file_guid(self.graph, idx) else { continue };
             let loaded = by_file.entry(usage.rel.clone()).or_insert_with(|| self.load([idx]));
-            let Some(value) = prefab::property(loaded, guid, usage.component, field) else { continue };
-            let overridden_at = value.overridden_at.and_then(|(g, line)| Some((self.graph.rel_of(g)?.clone(), line)));
-            out.push(FieldValue { usage, value: value.value, overridden_at });
+            for (field, values) in fields.iter().zip(&mut out) {
+                let Some(value) = prefab::property(loaded, guid, usage.component, field) else { continue };
+                let overridden_at =
+                    value.overridden_at.and_then(|(g, line)| Some((self.graph.rel_of(g)?.clone(), line)));
+                values.push(FieldValue { usage: usage.clone(), value: value.value, overridden_at });
+            }
         }
         out
     }

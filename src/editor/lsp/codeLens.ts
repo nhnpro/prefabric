@@ -9,9 +9,10 @@ import { EditorSelection, MapMode, StateEffect, StateField, type Extension, type
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { codeLenses, type CodeLens } from "@/editor/api";
 import { executeAction } from "@/platform/actions";
-import { commands, nextRequestId, type OutlineItem, type RequestId, type SymbolKind } from "@/platform/ipc";
+import { call, commands, nextRequestId, type OutlineItem, type RequestId, type SymbolKind } from "@/platform/ipc";
+import type { CodeLens as ServerLens } from "@/bindings";
 import { useProject } from "@/platform/project";
-import { debounce, docOf, isUnavailable, lspRequest } from "./lsp";
+import { debounce, docOf, isUnavailable, lspRequest, reportLspError } from "./lsp";
 import { posToOffset } from "./positions";
 import { featureBackoff, onLspRefresh, onServerSettled } from "./availability";
 import { editorPrefs } from "@/platform/editorSettings";
@@ -254,4 +255,94 @@ function sameLenses(a: readonly CodeLens[], b: readonly CodeLens[]) {
 
 export function usagesLensExtension(): Extension {
   return [lensField, ViewPlugin.fromClass(UsagesLensPlugin)];
+}
+
+/**
+ * The server's own code lenses (`textDocument/codeLens`), for languages whose servers have
+ * lenses worth showing. A reference count is the usages lens's job: it is dropped while that
+ * lens is on, and opens Show Usages otherwise. Other lenses run their command on the server.
+ */
+const SERVER_LENS_LANGUAGES = new Set(["csharp"]);
+
+const isReferenceLens = (l: ServerLens) => /references/i.test(l.command?.command ?? "");
+
+/** Server lenses worth showing, in document order. Exported for tests. */
+export function serverLensesShown(lenses: readonly ServerLens[], usagesLens: boolean): ServerLens[] {
+  return lenses
+    .filter((l) => l.command?.title.trim() && !(usagesLens && isReferenceLens(l)))
+    .sort((a, b) => a.range.start.line - b.range.start.line || a.range.start.col - b.range.start.col);
+}
+
+const setServerLenses = StateEffect.define<CodeLens[]>();
+
+const serverLensField = StateField.define<CodeLens[]>({
+  create: () => [],
+  update(lenses, tr) {
+    for (const e of tr.effects) if (e.is(setServerLenses)) return e.value;
+    if (!tr.docChanged || !lenses.length) return lenses;
+    const out: CodeLens[] = [];
+    for (const l of lenses) {
+      const pos = tr.changes.mapPos(l.pos, -1, MapMode.TrackDel);
+      if (pos !== null) out.push({ ...l, pos });
+    }
+    return out;
+  },
+  provide: (f) => codeLenses.from(f),
+});
+
+class ServerLensPlugin {
+  private schedule = debounce(() => void this.run(), 900);
+  private generation = 0;
+  private offRefresh: () => void;
+  private offSettled: () => void;
+
+  constructor(private view: EditorView) {
+    this.schedule();
+    this.offRefresh = onLspRefresh("codeLens", () => this.schedule());
+    this.offSettled = onServerSettled(() => this.schedule());
+  }
+
+  update(u: ViewUpdate) {
+    if (u.docChanged) this.schedule();
+  }
+
+  private async run() {
+    const view = this.view;
+    const doc = docOf(view);
+    if (!view.dom.isConnected || !doc || doc.virtual || !SERVER_LENS_LANGUAGES.has(doc.language)) return;
+    const gen = ++this.generation;
+    const text = view.state.doc;
+    let found: ServerLens[] = [];
+    try {
+      found = await call(commands.lspCodeLens(doc.doc));
+    } catch (e) {
+      if (!isUnavailable(e)) console.debug("[lsp] code lens", e);
+    }
+    if (gen !== this.generation || view.state.doc !== text) return;
+    const lenses: CodeLens[] = serverLensesShown(found, usagesEnabled()).map((l, i) => {
+      const pos = posToOffset(text, l.range.start);
+      const command = l.command!;
+      return {
+        pos,
+        title: command.title,
+        order: 30 + i,
+        run: (v) => {
+          if (isReferenceLens(l)) openUsages(v, Math.min(pos, v.state.doc.length));
+          else void call(commands.lspExecuteCommand(doc.doc, command)).catch((e) => reportLspError(v, e, true));
+        },
+      };
+    });
+    if (!sameLenses(view.state.field(serverLensField), lenses)) view.dispatch({ effects: setServerLenses.of(lenses) });
+  }
+
+  destroy() {
+    this.schedule.cancel();
+    this.generation++;
+    this.offRefresh();
+    this.offSettled();
+  }
+}
+
+export function serverLensExtension(): Extension {
+  return [serverLensField, ViewPlugin.fromClass(ServerLensPlugin)];
 }

@@ -204,3 +204,21 @@ describe("background usage counts", () => {
     }
   });
 });
+
+describe("server code lenses", () => {
+  const lens = (line: number, title: string, command: string) => ({
+    range: { start: { line, col: 4 }, end: { line, col: 10 } },
+    command: { title, command, arguments: [] },
+  });
+
+  it("drop reference counts while the usages lens is on, and untitled lenses", async () => {
+    const { serverLensesShown } = await import("./codeLens");
+    const found = [
+      lens(5, "Run Test", "dotnet.test.run"),
+      lens(2, "3 references", "roslyn.client.peekReferences"),
+      { range: lens(7, "", "").range, command: null },
+    ];
+    expect(serverLensesShown(found, true).map((l) => l.command!.title)).toEqual(["Run Test"]);
+    expect(serverLensesShown(found, false).map((l) => l.command!.title)).toEqual(["3 references", "Run Test"]);
+  });
+});

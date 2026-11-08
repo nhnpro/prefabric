@@ -67,5 +67,19 @@
   "Code usages": "Code usages",
   "UnityEvent {field}": "UnityEvent {field}",
   "Animation event at {time} s": "Animation event at {time} s",
-  "Overridden: {value}": "Overridden: {value}"
+  "Overridden: {value}": "Overridden: {value}",
+  "1 prefab": "1 prefab",
+  "{count} prefabs": "{count} prefabs",
+  "1 scene": "1 scene",
+  "{count} scenes": "{count} scenes",
+  "1 asset": "1 asset",
+  "{count} assets": "{count} assets",
+  "Used in {places}": "Used in {places}",
+  "Event handler in {where}": "Event handler in {where}",
+  "Animation event in {where}": "Animation event in {where}",
+  "Inspector: {value}": "Inspector: {value}",
+  "Inspector: several values": "Inspector: several values",
+  "1 override": "1 override",
+  "{count} overrides": "{count} overrides",
+  "Show usages in Unity assets": "Show usages in Unity assets"
 }

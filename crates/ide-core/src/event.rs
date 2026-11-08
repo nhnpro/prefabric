@@ -85,6 +85,8 @@ pub enum IdeEvent {
     UnityIndexState {
         indexing: bool,
         files: u32,
+        /// Bumped whenever the index gets new content.
+        revision: u32,
     },
     /// Git status / branch information should be refreshed.
     VcsChanged {

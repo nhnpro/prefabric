@@ -6384,5 +6384,19 @@
   "Code usages": "代码中的用法",
   "UnityEvent {field}": "UnityEvent {field}",
   "Animation event at {time} s": "{time} 秒处的动画事件",
-  "Overridden: {value}": "已覆盖：{value}"
+  "Overridden: {value}": "已覆盖：{value}",
+  "1 prefab": "1 个预制体",
+  "{count} prefabs": "{count} 个预制体",
+  "1 scene": "1 个场景",
+  "{count} scenes": "{count} 个场景",
+  "1 asset": "1 个资源",
+  "{count} assets": "{count} 个资源",
+  "Used in {places}": "用于 {places}",
+  "Event handler in {where}": "{where} 中的事件处理程序",
+  "Animation event in {where}": "{where} 中的动画事件",
+  "Inspector: {value}": "Inspector：{value}",
+  "Inspector: several values": "Inspector：多个值",
+  "1 override": "1 处覆盖",
+  "{count} overrides": "{count} 处覆盖",
+  "Show usages in Unity assets": "显示在 Unity 资源中的用法"
 }

@@ -228,6 +228,25 @@ async fn finds_asset_usages_of_the_symbol_at_the_caret() {
             ("Assets/Scenes/Main.unity".to_owned(), Some("7"), true),
         ]
     );
+    let lenses = ops::unity::lenses(&host, "main", doc).await.unwrap();
+    let summary = |needle: &str| {
+        let line = at(needle).line;
+        lenses.iter().find(|l| l.line == line).map(|l| l.summary.clone())
+    };
+    use ide_unity::lenses::LensSummary;
+    assert_eq!(summary("class Player"), Some(LensSummary::Class { prefabs: 3, scenes: 1, other: 0 }));
+    assert_eq!(
+        summary("void OnFootstep"),
+        Some(LensSummary::Method {
+            unity_events: 0,
+            animation_events: 1,
+            files: vec!["Walk.anim".into()],
+            file_count: 1
+        })
+    );
+    assert!(matches!(summary("void OnTriggerZoneEntered"), Some(LensSummary::Method { unity_events: 1, .. })));
+    assert_eq!(summary("speed = 2f"), Some(LensSummary::Field { values: vec!["2".into()], overrides: 2 }));
+    assert_eq!(summary("void Update"), None);
     // A local variable isn't a symbol assets use.
     assert!(ops::unity::asset_usages(&host, "main", doc, at("var unused")).await.unwrap().is_none());
     host.close_project("main");

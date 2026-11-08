@@ -9,6 +9,7 @@
 mod build;
 pub mod events;
 mod graph;
+pub mod lenses;
 pub mod prefab;
 pub mod problems;
 pub mod scan;
@@ -38,6 +39,9 @@ pub struct UnityIndexStatus {
     pub indexing: bool,
     /// Indexed asset files.
     pub files: u32,
+    /// Counts the times the index got new content (a scan, saved assets): what was derived from
+    /// it (code lenses…) is out of date when it changes.
+    pub revision: u32,
 }
 
 /// Whether the index may start (the editor is ready); polled until it says yes.
@@ -93,11 +97,14 @@ struct Indexed {
 }
 
 impl Shared {
-    fn set(&self, status: UnityIndexStatus) {
+    /// The index is `indexing`, or got new content (bumping the revision).
+    fn set(&self, indexing: bool, files: u32) {
         let mut current = self.status.lock();
+        let revision = if indexing { current.revision } else { current.revision.wrapping_add(1) };
+        let status = UnityIndexStatus { indexing, files, revision };
         if *current != status {
             *current = status;
-            self.sink.emit(IdeEvent::UnityIndexState { indexing: status.indexing, files: status.files });
+            self.sink.emit(IdeEvent::UnityIndexState { indexing, files, revision });
         }
         self.changed.notify_all();
     }
@@ -125,7 +132,7 @@ impl Shared {
         while let Some(rels) = self.next_changes() {
             if rels.len() > BULK {
                 let files = self.status.lock().files;
-                self.set(UnityIndexStatus { indexing: true, files });
+                self.set(true, files);
                 if !self.rescan(store.as_ref()) {
                     return;
                 }
@@ -135,7 +142,7 @@ impl Shared {
             let Some(indexed) = self.indexed.read().clone() else { continue };
             build::apply(&self.root, &indexed.graph, &*indexed.source, &indexed.cache, rels);
             let files = indexed.graph.read().file_count();
-            self.set(UnityIndexStatus { indexing: false, files });
+            self.set(false, files);
             self.report(store.as_deref());
         }
     }
@@ -199,7 +206,7 @@ impl Shared {
         let files = graph.file_count();
         *self.indexed.write() =
             Some(Arc::new(Indexed { graph: RwLock::new(graph), source, cache: graph::Cache::default() }));
-        self.set(UnityIndexStatus { indexing: false, files });
+        self.set(false, files);
         true
     }
 
@@ -241,7 +248,7 @@ impl UnityIndex {
         let shared = Arc::new(Shared {
             root,
             sink,
-            status: Mutex::new(UnityIndexStatus { indexing: true, files: 0 }),
+            status: Mutex::new(UnityIndexStatus { indexing: true, files: 0, revision: 0 }),
             changed: Condvar::new(),
             cancelled: AtomicBool::new(false),
             indexed: RwLock::new(None),
@@ -325,6 +332,11 @@ impl UnityIndex {
     /// The serialized field `field` on every component using `script`, overrides applied.
     pub fn field_values(&self, script: Guid, field: &str) -> Vec<FieldValue> {
         self.query(|q| q.field_values(script, field))
+    }
+
+    /// [`Self::field_values`] of several fields of `script`, in the order of `fields`.
+    pub fn fields_values(&self, script: Guid, fields: &[&str]) -> Vec<Vec<FieldValue>> {
+        self.query(|q| q.fields_values(script, fields))
     }
 
     /// Assets the index can't read: binary ones, and ones with merge conflicts.

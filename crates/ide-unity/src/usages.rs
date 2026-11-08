@@ -172,12 +172,12 @@ fn find_class<'a>(
     None
 }
 
-fn is_class(i: &OutlineItem) -> bool {
+pub(crate) fn is_class(i: &OutlineItem) -> bool {
     matches!(i.kind, SymbolKind::Class | SymbolKind::Struct)
 }
 
 /// `item` declared under `parents` (outermost first).
-fn symbol(parents: &[&OutlineItem], item: &OutlineItem, stem: &str) -> Option<CodeSymbol> {
+pub(crate) fn symbol(parents: &[&OutlineItem], item: &OutlineItem, stem: &str) -> Option<CodeSymbol> {
     let (class_parents, class, member) = if is_class(item) {
         (parents, item, Member::Class)
     } else {

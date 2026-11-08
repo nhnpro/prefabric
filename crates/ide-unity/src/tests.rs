@@ -21,17 +21,17 @@ fn waits_for_the_editor_then_reports_its_state() {
         UnityIndex::open(project.path(), store.path(), sink, Box::new(move || ready.load(Ordering::Acquire))).unwrap()
     };
     assert!(!index.wait_idle(Duration::from_millis(400)));
-    assert_eq!(index.status(), UnityIndexStatus { indexing: true, files: 0 });
+    assert_eq!(index.status(), UnityIndexStatus { indexing: true, files: 0, revision: 0 });
     assert!(!store.path().join("unity.redb").exists(), "nothing is read before the editor is ready");
     ready.store(true, Ordering::Release);
     assert!(index.wait_idle(Duration::from_secs(5)));
-    assert_eq!(index.status(), UnityIndexStatus { indexing: false, files: 0 });
+    assert_eq!(index.status(), UnityIndexStatus { indexing: false, files: 0, revision: 1 });
     assert!(store.path().join("unity.redb").exists());
     let states: Vec<_> = events
         .lock()
         .iter()
         .filter_map(|e| match e {
-            IdeEvent::UnityIndexState { indexing, files } => Some((*indexing, *files)),
+            IdeEvent::UnityIndexState { indexing, files, .. } => Some((*indexing, *files)),
             _ => None,
         })
         .collect();

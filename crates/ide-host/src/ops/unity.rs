@@ -5,6 +5,7 @@ use crate::Host;
 use crate::ops::project::{ProjectInfo, info};
 use ide_core::{CancellationToken, DocId, IdeError, IdeResult, Pos, RequestId};
 use ide_unity::UnityIndexStatus;
+use ide_unity::lenses::UnityLens;
 use ide_unity::usages::{AssetUsage, symbol_at};
 use ide_workspace::unity::{self, UnityPackageStatus, assemblies::AssemblyDefinition};
 use std::path::Path;
@@ -155,7 +156,25 @@ pub async fn asset_usages(host: &Host, window: &str, doc: DocId, pos: Pos) -> Id
     .await
 }
 
+/// Code Vision of a C# file: how assets use its script class, methods and serialized fields.
+/// Empty outside Unity projects and C# files.
+pub async fn lenses(host: &Host, window: &str, doc: DocId) -> IdeResult<Vec<UnityLens>> {
+    let project = host.project(window)?;
+    let Some(index) = project.unity.clone() else { return Ok(Vec::new()) };
+    blocking(move || {
+        let snap = project.documents.text_snapshot(doc)?;
+        if snap.large || snap.language.as_str() != "csharp" {
+            return Ok(Vec::new());
+        }
+        let (path, _) = project.documents.identity(doc)?;
+        let outline = project.syntax.outline(doc, &snap.language, snap.version, &snap.text);
+        Ok(index.lenses(&path, &outline))
+    })
+    .await
+}
+
 pub fn register(d: &mut crate::rpc::Dispatcher) {
+    d.add("unity_lenses", |c| async move { lenses(&c.host, &c.window, c.arg("doc")?).await });
     d.add(
         "unity_asset_usages",
         |c| async move { asset_usages(&c.host, &c.window, c.arg("doc")?, c.arg("pos")?).await },

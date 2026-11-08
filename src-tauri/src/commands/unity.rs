@@ -3,6 +3,7 @@ use ide_core::{DocId, IdeResult, Pos, RequestId};
 use ide_host::ops::project::ProjectInfo;
 use ide_host::ops::unity::UnityAssetUsages;
 use ide_unity::UnityIndexStatus;
+use ide_unity::lenses::UnityLens;
 use ide_workspace::unity::assemblies::AssemblyDefinition;
 use tauri::{State, Window};
 
@@ -53,4 +54,11 @@ pub async fn unity_asset_usages(
     pos: Pos,
 ) -> IdeResult<Option<UnityAssetUsages>> {
     ide_host::ops::unity::asset_usages(&state.host, window.label(), doc, pos).await
+}
+
+/// Code Vision of a C# file: how assets use its script class, methods and serialized fields.
+#[tauri::command]
+#[specta::specta]
+pub async fn unity_lenses(window: Window, state: State<'_, AppState>, doc: DocId) -> IdeResult<Vec<UnityLens>> {
+    ide_host::ops::unity::lenses(&state.host, window.label(), doc).await
 }
