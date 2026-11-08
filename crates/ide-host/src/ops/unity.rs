@@ -5,6 +5,7 @@ use crate::Host;
 use crate::ops::project::{ProjectInfo, info};
 use ide_core::{CancellationToken, DocId, IdeError, IdeResult, Pos, RequestId};
 use ide_unity::UnityIndexStatus;
+use ide_unity::hierarchy::Hierarchy;
 use ide_unity::lenses::UnityLens;
 use ide_unity::search::UnitySearch;
 use ide_unity::usages::{AssetUsage, symbol_at};
@@ -181,7 +182,19 @@ pub async fn search(host: &Host, window: &str, query: String, limit: u32) -> Ide
     blocking(move || Ok(index.search(&query, limit.min(1_000) as usize))).await
 }
 
+/// The GameObject tree of a scene or prefab of the project, as saved.
+pub async fn hierarchy(host: &Host, window: &str, path: ide_core::IpcPath) -> IdeResult<Hierarchy> {
+    let project = host.project(window)?;
+    let Some(index) = project.unity.clone() else { return Ok(Hierarchy { roots: Vec::new(), unreadable: true }) };
+    let path = std::path::PathBuf::from(path);
+    if !path.starts_with(index.root()) {
+        return Err(IdeError::invalid(format!("{} is outside the Unity project", path.display())));
+    }
+    blocking(move || ide_unity::hierarchy::read(&index, &path).map_err(|e| IdeError::internal(e.to_string()))).await
+}
+
 pub fn register(d: &mut crate::rpc::Dispatcher) {
+    d.add("unity_hierarchy", |c| async move { hierarchy(&c.host, &c.window, c.arg("path")?).await });
     d.add("unity_search", |c| async move { search(&c.host, &c.window, c.arg("query")?, c.arg("limit")?).await });
     d.add("unity_lenses", |c| async move { lenses(&c.host, &c.window, c.arg("doc")?).await });
     d.add(

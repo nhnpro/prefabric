@@ -1,8 +1,9 @@
 use crate::state::AppState;
-use ide_core::{DocId, IdeResult, Pos, RequestId};
+use ide_core::{DocId, IdeResult, IpcPath, Pos, RequestId};
 use ide_host::ops::project::ProjectInfo;
 use ide_host::ops::unity::UnityAssetUsages;
 use ide_unity::UnityIndexStatus;
+use ide_unity::hierarchy::Hierarchy;
 use ide_unity::lenses::UnityLens;
 use ide_unity::search::UnitySearch;
 use ide_workspace::unity::assemblies::AssemblyDefinition;
@@ -74,4 +75,11 @@ pub async fn unity_search(
     limit: u32,
 ) -> IdeResult<UnitySearch> {
     ide_host::ops::unity::search(&state.host, window.label(), query, limit).await
+}
+
+/// The GameObject tree of a scene or prefab (its Hierarchy view).
+#[tauri::command]
+#[specta::specta]
+pub async fn unity_hierarchy(window: Window, state: State<'_, AppState>, path: IpcPath) -> IdeResult<Hierarchy> {
+    ide_host::ops::unity::hierarchy(&state.host, window.label(), path).await
 }

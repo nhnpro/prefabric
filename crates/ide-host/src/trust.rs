@@ -185,6 +185,7 @@ pub fn restricted_command_allowed(cmd: &str) -> bool {
             | "unity_asset_usages"
             | "unity_lenses"
             | "unity_search"
+            | "unity_hierarchy"
             | "app_log_location"
             | "app_check_update"
             | "app_startup_update_check"

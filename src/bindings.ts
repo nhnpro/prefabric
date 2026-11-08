@@ -123,6 +123,8 @@ export const commands = {
 	unityLenses: (doc: DocId) => typedError<UnityLens[], IdeError>(__TAURI_INVOKE("unity_lenses", { doc })),
 	/**  GameObjects, prefab instances and assets matching `query` (Search Everywhere's Unity tab). */
 	unitySearch: (query: string, limit: number) => typedError<UnitySearch, IdeError>(__TAURI_INVOKE("unity_search", { query, limit })),
+	/**  The GameObject tree of a scene or prefab (its Hierarchy view). */
+	unityHierarchy: (path: IpcPath) => typedError<Hierarchy, IdeError>(__TAURI_INVOKE("unity_hierarchy", { path })),
 	cancelRequest: (id: RequestId) => __TAURI_INVOKE<void>("cancel_request", { id }),
 	/**
 	 *  Stops a background task the backend reported with `cancellable` set; false when it
@@ -4126,6 +4128,12 @@ export type GradleTask = {
 	description: string | null,
 };
 
+export type Hierarchy = {
+	roots: HierarchyNode[],
+	/**  Not a text-serialized scene or prefab. */
+	unreadable: boolean,
+};
+
 export type HierarchyChoice = {
 	id: string,
 	makeAbstract: boolean,
@@ -4137,6 +4145,15 @@ export type HierarchyClass = {
 	name: string,
 	qualifiedName: string,
 	interface: boolean,
+};
+
+export type HierarchyComponent = {
+	/**  `Transform`, `BoxCollider`… or a script's class (its file name) for a MonoBehaviour. */
+	name: string,
+	/**  The script file of a MonoBehaviour. */
+	script: IpcPath | null,
+	/**  0-based line in this file; `None` for a prefab's object. */
+	line: number | null,
 };
 
 export type HierarchyDirection = 
@@ -4159,6 +4176,10 @@ export type HierarchyItem = {
 	fromRanges: Range[],
 };
 
+export type HierarchyKind = "gameObject" | "prefabInstance" | 
+/**  An object of an instanced prefab (it lives in the prefab, not in this file). */
+"fromPrefab";
+
 export type HierarchyMember = {
 	id: string,
 	/**  `name(Params) : Type`, as the server renders it. */
@@ -4180,6 +4201,27 @@ export type HierarchyMembers = {
 	className: string,
 	targets: HierarchyClass[],
 	members: HierarchyMember[],
+};
+
+export type HierarchyNode = {
+	kind: HierarchyKind,
+	name: string,
+	/**  0-based line in this file of the GameObject or instance (an instance's for a prefab's object). */
+	line: number,
+	/**  The instanced prefab. */
+	prefab: IpcPath | null,
+	components: HierarchyComponent[],
+	overrides: HierarchyOverride[],
+	children: HierarchyNode[],
+};
+
+export type HierarchyOverride = {
+	property: string,
+	/**  The new value, or the referenced object (`{fileID: …, guid: …}`) as written. */
+	value: string,
+	/**  The instanced object it changes, by name when known. */
+	target: string | null,
+	line: number,
 };
 
 /**  A checked refactoring: what the server found, and the edit unless a problem is fatal. */

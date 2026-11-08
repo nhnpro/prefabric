@@ -107,6 +107,7 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
         unity::unity_asset_usages,
         unity::unity_lenses,
         unity::unity_search,
+        unity::unity_hierarchy,
         app::cancel_request,
         app::cancel_task,
         app::log_frontend,

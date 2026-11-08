@@ -82,5 +82,13 @@
   "1 override": "1 override",
   "{count} overrides": "{count} overrides",
   "Show usages in Unity assets": "Show usages in Unity assets",
-  "Unity": "Unity"
+  "Unity": "Unity",
+  "Scene view": "Scene view",
+  "Hierarchy": "Hierarchy",
+  "(unnamed)": "(unnamed)",
+  "Overrides ({count})": "Overrides ({count})",
+  "Loading…": "Loading…",
+  "Not a text-serialized scene or prefab": "Not a text-serialized scene or prefab",
+  "No GameObjects": "No GameObjects",
+  "YAML Source": "YAML Source"
 }

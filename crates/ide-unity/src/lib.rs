@@ -9,6 +9,7 @@
 mod build;
 pub mod events;
 mod graph;
+pub mod hierarchy;
 pub mod lenses;
 pub mod prefab;
 pub mod problems;
