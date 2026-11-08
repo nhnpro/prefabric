@@ -1,5 +1,5 @@
 //! Find Usages beyond the language servers: providers that know of other references to a symbol
-//! (Spring configuration keys, Unity assets…) add them to the servers' answer, merged with it or
+//! (Unity assets…) add them to the servers' answer, merged with it or
 //! as a group of their own.
 
 use crate::types::{ReferenceGroup, ReferencesIncomplete};
@@ -47,32 +47,6 @@ pub struct ProvidedReferences {
 pub trait ReferenceProvider: Send + Sync + 'static {
     /// `None` when the provider has nothing to say about this symbol.
     fn references<'a>(&'a self, query: &'a ReferenceQuery<'a>) -> BoxFuture<'a, IdeResult<Option<ProvidedReferences>>>;
-}
-
-/// Spring configuration: `@Value("${key}")`, `getProperty("key")` and configuration properties
-/// classes, with the keys in `application.properties` / `.yml` (see [`crate::jdtls::configuration`]).
-pub(crate) struct SpringConfiguration;
-
-impl ReferenceProvider for SpringConfiguration {
-    fn references<'a>(&'a self, q: &'a ReferenceQuery<'a>) -> BoxFuture<'a, IdeResult<Option<ProvidedReferences>>> {
-        Box::pin(async move {
-            let java = q.language().as_str() == "java";
-            // Scoped probes back code lenses and bulk analysis. Keep their native cost;
-            // configuration indexing is reserved for explicit, project-wide usages.
-            if java && !q.project_wide {
-                return Ok(None);
-            }
-            let found =
-                q.manager.configuration_navigation(q.snap, q.pos, true, q.include_declaration, q.cancel).await?;
-            Ok(found.map(|r| ProvidedReferences {
-                title: None,
-                locations: r.locations,
-                incomplete: r.incomplete,
-                // A configuration file has no language server references.
-                exclusive: !java,
-            }))
-        })
-    }
 }
 
 /// Puts what providers found into a references answer.

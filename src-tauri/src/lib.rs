@@ -17,7 +17,12 @@ mod logging;
 #[cfg(target_os = "macos")]
 mod macos;
 mod menu;
+#[cfg(target_os = "macos")]
+mod page_swipe;
 mod plugin_web;
+#[cfg(target_os = "macos")]
+mod relaunch;
+mod remote_container;
 mod remote_dev;
 mod remote_wsl;
 
@@ -99,13 +104,14 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     let app = app.plugin(linux_window_state::plugin());
     #[cfg(not(target_os = "linux"))]
-    let app = app.plugin(
-        tauri_plugin_window_state::Builder::default()
-            .with_state_flags(window_state_flags())
-            // One remembered geometry per kind of auxiliary window (all projects' settings windows share one).
-            .map_label(windows::state_key)
-            .build(),
-    );
+    let window_state = tauri_plugin_window_state::Builder::default()
+        .with_state_flags(window_state_flags())
+        // One remembered geometry per kind of auxiliary window (all projects' settings windows share one).
+        .map_label(windows::state_key);
+    #[cfg(target_os = "macos")]
+    let window_state = window_state.with_filter(windows::keeps_window_state);
+    #[cfg(not(target_os = "linux"))]
+    let app = app.plugin(window_state.build());
     let app = app
         // Inert until an endpoint is configured (see `commands::window::app_check_update`).
         .plugin(tauri_plugin_updater::Builder::new().build());
@@ -162,18 +168,33 @@ pub fn run() {
         builder.mount_events(app);
         let state = AppState::new(app.handle().clone())?;
         let windows = WindowsState::default();
-        let args = std::env::args().collect::<Vec<_>>();
-        let mut cli_paths = std::env::current_dir().map(|cwd| windows::cli_paths(&args, &cwd)).unwrap_or_default();
-        windows::remember_cli_position(&windows, &args, &cli_paths);
-        if let [path] = cli_paths.as_slice() {
-            windows.set_launch("main", windows::path_launch(path.clone()));
-            cli_paths.clear();
+        // A project and its file (`prefabric <project> --line 12 <file>`) open together, below.
+        let mut cli_paths = Vec::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            let args = std::env::args().collect::<Vec<_>>();
+            match windows::cli_launch(&args, &cwd) {
+                Some(windows::CliLaunch::Path(path)) => {
+                    windows::remember_cli_position(&windows, &args, std::slice::from_ref(&path));
+                    windows.set_launch("main", windows::path_launch(path));
+                }
+                Some(windows::CliLaunch::Paths(paths)) => {
+                    windows::remember_cli_position(&windows, &args, &paths);
+                    cli_paths = paths;
+                }
+                // `openidea diff a.txt b.txt`: the main window opens the pair in the diff viewer.
+                Some(windows::CliLaunch::Diff(diff)) => {
+                    windows.set_launch("main", windows::Launch { diff: Some(Box::new(diff)), ..Default::default() });
+                }
+                None => {}
+            }
         }
         let menu_state = menu::MenuState::default();
         menu::install(app.handle(), &menu_state, &state.recent.list());
         app.manage(state);
         app.manage(windows);
         app.manage(application_focus::ApplicationFocus::default());
+        #[cfg(target_os = "macos")]
+        macos::intercept_system_quit(app.handle());
         #[cfg(target_os = "macos")]
         application_focus::observe(app.handle());
         app.manage(menu_state);
@@ -205,14 +226,15 @@ pub fn run() {
         tauri::WindowEvent::Destroyed => {
             #[cfg(target_os = "macos")]
             {
+                page_swipe::forget(window.label());
                 titlebar::forget(window);
-                macos::forget_fullscreen(window.label());
             }
             if windows::auxiliary_parent(window.label()).is_none() {
                 window_groups::destroyed(window.app_handle(), window.label());
                 windows::close_auxiliary_windows(window.app_handle(), window.label());
                 if let Some(state) = window.try_state::<AppState>() {
                     state.close_project(window.label());
+                    state.plugins.forget_client(window.label());
                 }
             }
             if let Some(w) = window.try_state::<WindowsState>() {
@@ -240,11 +262,15 @@ pub fn run() {
         let _ = &early_opens;
         if let tauri::RunEvent::Exit = event {
             if let Some(state) = app.try_state::<AppState>() {
+                state.host.stop_processes_on_exit();
                 state.host.clear_workspace_edit_history_on_exit();
                 state.host.shutdown_notebooks_on_exit();
             }
             // Cleanup must finish before update/restart replaces this process.
             if app.try_state::<WindowsState>().is_some_and(|w| w.restart_requested()) {
+                #[cfg(target_os = "macos")]
+                relaunch::restart(&app.env());
+                #[cfg(not(target_os = "macos"))]
                 tauri::process::restart(&app.env());
             }
         }
@@ -254,12 +280,25 @@ pub fn run() {
 #[cfg(not(target_os = "linux"))]
 fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
     use tauri_plugin_window_state::StateFlags;
-    StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN
+    #[cfg(target_os = "windows")]
+    {
+        // Start at the configured size, centered, instead of restoring geometry after the
+        // window is visible (Windows briefly showed the default position before that move).
+        StateFlags::MAXIMIZED | StateFlags::FULLSCREEN
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED | StateFlags::FULLSCREEN
+    }
 }
 
 /// Routes IDE menu items to the focused window's frontend (`executeAction`).
 fn on_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
-    let id = event.id().as_ref();
+    dispatch_menu_action(app, event.id().as_ref());
+}
+
+/// Runs menu item `id` as if it were chosen: in the focused window's frontend, or here without one.
+pub(crate) fn dispatch_menu_action(app: &tauri::AppHandle, id: &str) {
     let Some(route) = menu::route(&menu::spec(menu::Os::current()), id) else { return };
     match windows::target_window(app) {
         Some(w) => {
@@ -267,7 +306,10 @@ fn on_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
             // nothing else gets through. Others handle their own items; Close Tab closes the window.
             let label = match windows::auxiliary(w.label()) {
                 Some((_, parent))
-                    if matches!(route.action.as_str(), "app.quit" | "file.settings" | "file.newProjectsSettings") =>
+                    if matches!(
+                        route.action.as_str(),
+                        "app.quit" | "file.settings" | "file.projectStructure" | "file.newProjectsSettings"
+                    ) =>
                 {
                     parent
                 }

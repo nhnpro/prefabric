@@ -39,6 +39,12 @@ vi.mock("@/platform/ipc", async (orig) => {
     },
   };
 });
+vi.mock("@tauri-apps/api/core", async (orig) => ({
+  ...(await orig<object>()),
+  Channel: class {
+    onmessage = () => {};
+  },
+}));
 vi.mock("./ipc", async (orig) => ({
   ...(await orig<typeof import("./ipc")>()),
   lspRequest: () => new Promise<References>((resolve) => (answerServer = resolve)),
@@ -53,7 +59,7 @@ const caret = { doc: 1, path: "/p/Assets/Scripts/Player.cs", line: 5, col: 18, w
 describe("asset usages in Find Usages", () => {
   it("arrive before the server's references and are listed first", async () => {
     const early = vi.fn();
-    const done = fetchUsages(caret, 1, early);
+    const done = fetchUsages(caret, 1, undefined, false, early);
     await vi.waitFor(() => expect(early).toHaveBeenCalled());
     const [groups] = early.mock.calls[0]!;
     expect(groups.map((g: { path: string; section?: string }) => [g.path, g.section])).toEqual([

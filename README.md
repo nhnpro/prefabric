@@ -55,6 +55,12 @@ The first build compiles about a thousand crates and can take a while; later bui
 incremental. Contributor notes are in [`CLAUDE.md`](CLAUDE.md) and
 [`CONTRIBUTING.md`](CONTRIBUTING.md). Plugin docs: [`plugins/README.md`](plugins/README.md).
 
+### Contributors
+
+<a href="https://github.com/l0ng-ai/openidea/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=l0ng-ai/openidea&max=100" alt="OpenIDEA contributors">
+</a>
+
 ## License
 
 [Apache 2.0](LICENSE). Prefabric is based on OpenIDEA; see [`NOTICE`](NOTICE) for
