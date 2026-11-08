@@ -110,6 +110,26 @@ export const LANGUAGE_PAGES: PageSpec[] = [
     component: NodePage,
   },
   {
+    // Global: Roslyn installs into the IDE's tools folder.
+    id: "languages.csharp",
+    title: "C#",
+    group: LANGUAGES_GROUP,
+    order: 389.5,
+    keywords: ["c#", "csharp", ".net", "dotnet", "unity", "roslyn", "language server", "install"],
+    sections: [
+      {
+        options: [
+          {
+            kind: "toggle",
+            key: "languages.csharp.autoInstallRoslyn",
+            label: "Install Roslyn automatically",
+            hint: "When a C# or Unity project needs it, download the C# language server (about 300 MB) into the IDE's tools folder, with progress in the status bar",
+          },
+        ],
+      },
+    ],
+  },
+  {
     // Global only, like IDEA's application-level Markdown settings.
     id: "languages.markdown",
     title: "Markdown",

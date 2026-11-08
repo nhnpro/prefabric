@@ -2045,6 +2045,12 @@ export type CMakeSettings_Serialize = {
 	profiles?: CMakeProfile[] | null,
 };
 
+/**  Languages & Frameworks › C#. Application-level: the install goes to the IDE's tools folder. */
+export type CSharpSettings = {
+	/**  Install Roslyn (the C# language server) when a C# or Unity project needs it. */
+	autoInstallRoslyn?: boolean,
+};
+
 export type CallHierarchy = {
 	items: HierarchyItem[],
 	incomplete: ReferencesIncomplete | null,
@@ -4983,6 +4989,7 @@ export type LanguagesSettings = {
 	java?: JavaSettings,
 	ruby?: RubySettings,
 	markdown?: MarkdownSettings,
+	csharp?: CSharpSettings,
 };
 
 /**  What a freshly opened window should do once its frontend is up. */

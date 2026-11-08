@@ -7,7 +7,14 @@ import { useTasks } from "@/workbench/tasks";
 import { MemoryToolsBackend, sampleTools, setToolsBackend } from "../backend";
 import { cancelInstall, installTool, refreshTools, uninstallTool, useTools } from "../store";
 import { filterTools, LanguageServersPage } from "../LanguageServersPage";
-import { installMissingServerPrompts, installServerWarningPrompts, missingKey, promptInstall } from "../missing";
+import {
+  autoInstallForProject,
+  installMissingServerPrompts,
+  installServerWarningPrompts,
+  missingKey,
+  promptInstall,
+} from "../missing";
+import { useProject } from "@/platform/project";
 import { resetTestForm, stagedFor, TestSettingsForm } from "./settingsForm";
 
 type Note = Parameters<NotificationService["notify"]>[0];
@@ -100,6 +107,57 @@ describe("tools store", () => {
       "typescript-language-server",
     ]);
     expect(filterTools(tools, "kotlin", "missing").map((t) => t.name)).toEqual(["kotlin-lsp"]);
+  });
+});
+
+describe("Roslyn auto-install", () => {
+  const roslyn = () => {
+    backend.tools.push({
+      ...sampleTools()[0]!,
+      name: "roslyn",
+      displayName: "Roslyn (C#)",
+      command: "roslyn-language-server",
+      status: "missing",
+      installMethod: "NuGet package",
+      languages: ["C#"],
+      version: null,
+      path: null,
+    });
+  };
+  const withSetting = (on: boolean | undefined, unity = false) =>
+    useProject.setState({
+      project: { trusted: true, root: "/p", name: "p", isGit: false, unity: unity ? {} : null } as never,
+      settings: { languages: { csharp: on === undefined ? undefined : { autoInstallRoslyn: on } } } as never,
+    });
+  afterEach(() => useProject.setState({ project: null, settings: null }));
+
+  it("installs a missing Roslyn without asking while the setting is on (the default)", async () => {
+    roslyn();
+    withSetting(undefined);
+    const off = installMissingServerPrompts();
+    emitLocalIdeEvent({ type: "languageServer", server: 1, name: "roslyn", status: "missing", message: null });
+    await waitFor(() => expect(backend.restarted).toEqual(["roslyn"]));
+    expect(notes.map((n) => n.title)).toEqual(["Roslyn (C#) installed"]);
+    off();
+  });
+
+  it("asks instead when the setting is off", async () => {
+    roslyn();
+    withSetting(false);
+    const off = installMissingServerPrompts();
+    emitLocalIdeEvent({ type: "languageServer", server: 1, name: "roslyn", status: "missing", message: null });
+    await waitFor(() => expect(notes).toHaveLength(1));
+    expect(notes[0]!.title).toBe("Roslyn (C#) is not installed");
+    expect(backend.restarted).toEqual([]);
+    off();
+  });
+
+  it("installs when a trusted Unity project opens", async () => {
+    roslyn();
+    withSetting(true, true);
+    const off = autoInstallForProject();
+    await waitFor(() => expect(notes.map((n) => n.title)).toEqual(["Roslyn (C#) installed"]));
+    off();
   });
 });
 

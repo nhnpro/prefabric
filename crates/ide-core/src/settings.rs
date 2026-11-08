@@ -616,6 +616,7 @@ pub struct LanguagesSettings {
     pub java: JavaSettings,
     pub ruby: RubySettings,
     pub markdown: MarkdownSettings,
+    pub csharp: CSharpSettings,
 }
 
 impl Default for LanguagesSettings {
@@ -636,6 +637,7 @@ impl Default for LanguagesSettings {
             java: JavaSettings::default(),
             ruby: RubySettings::default(),
             markdown: MarkdownSettings::default(),
+            csharp: CSharpSettings::default(),
         }
     }
 }
@@ -646,6 +648,20 @@ impl Default for LanguagesSettings {
 pub struct MarkdownSettings {
     /// Preview (and notebook Markdown cell) font size in px; unset follows the editor font size.
     pub preview_font_size: Option<u32>,
+}
+
+/// Languages & Frameworks › C#. Application-level: the install goes to the IDE's tools folder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CSharpSettings {
+    /// Install Roslyn (the C# language server) when a C# or Unity project needs it.
+    pub auto_install_roslyn: bool,
+}
+
+impl Default for CSharpSettings {
+    fn default() -> Self {
+        Self { auto_install_roslyn: true }
+    }
 }
 
 impl LanguagesSettings {

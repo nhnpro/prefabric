@@ -6,6 +6,7 @@
  */
 import { executeAction } from "@/platform/actions";
 import { onIdeEvent } from "@/platform/ipc";
+import { useProject } from "@/platform/project";
 import { notifications } from "@/workbench/contributions";
 import { installTool, refreshTools, SETTINGS_PAGE_ID, toolByName, useTools } from "./store";
 import { tx } from "@/platform/i18n";
@@ -59,6 +60,35 @@ export async function promptInstall(
   return true;
 }
 
+/** Servers installed without asking while their setting is on (Roslyn: C# and Unity projects). */
+const AUTO_INSTALL: Record<string, () => boolean> = {
+  roslyn: () => useProject.getState().settings?.languages?.csharp?.autoInstallRoslyn !== false,
+};
+
+/** Installs `name` without asking when its setting allows; false when it doesn't apply. */
+export async function autoInstall(name: string): Promise<boolean> {
+  if (!AUTO_INSTALL[name]?.()) return false;
+  if (!useTools.getState().loaded) await refreshTools();
+  const tool = toolByName(name);
+  if (!tool?.canInstall || tool.status !== "missing") return false;
+  // The install shows its progress as a background task, cancellable there.
+  void installTool(name);
+  return true;
+}
+
+/** A trusted Unity project gets Roslyn as soon as it opens, before a script is opened. */
+export function autoInstallForProject(): () => void {
+  const done = new Set<string>();
+  const check = () => {
+    const p = useProject.getState().project;
+    if (!p?.trusted || !p.unity || done.has(p.root)) return;
+    done.add(p.root);
+    void autoInstall("roslyn").catch(() => {});
+  };
+  check();
+  return useProject.subscribe(check);
+}
+
 export function installMissingServerPrompts(): () => void {
   const prompted = new Set<string>();
   const offered = new Set<string>();
@@ -71,7 +101,7 @@ export function installMissingServerPrompts(): () => void {
     // Async on purpose: lands after the synchronous generic notice and replaces it.
     queue = queue
       .then(async () => {
-        if (await promptInstall(e.name, true, offered)) offered.add(e.name);
+        if ((await autoInstall(e.name)) || (await promptInstall(e.name, true, offered))) offered.add(e.name);
       })
       .catch(() => {});
   });

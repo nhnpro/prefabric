@@ -9,7 +9,12 @@ import { lazyComponent } from "@/ui";
 import { executeAction, registerActions } from "@/platform/actions";
 import { registerSettingsPage } from "@/workbench/contributions";
 import { installJdkPrompts, registerJdkActions } from "./jdk";
-import { installMissingServerPrompts, installServerWarningPrompts, promptInstall } from "./missing";
+import {
+  autoInstallForProject,
+  installMissingServerPrompts,
+  installServerWarningPrompts,
+  promptInstall,
+} from "./missing";
 import { installTool, refreshTools, SETTINGS_PAGE_ID, toolByName, useTools } from "./store";
 
 /** The Language Servers page (also used by the Settings window). */
@@ -84,6 +89,7 @@ export function activate(): () => void {
       },
     ]),
     installMissingServerPrompts(),
+    autoInstallForProject(),
     installServerWarningPrompts(),
     registerJdkActions(),
     installJdkPrompts(),

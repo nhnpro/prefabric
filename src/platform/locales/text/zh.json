@@ -6404,5 +6404,7 @@
   "Overrides ({count})": "覆盖 ({count})",
   "Not a text-serialized scene or prefab": "不是文本序列化的场景或预制体",
   "No GameObjects": "没有 GameObject",
-  "YAML Source": "YAML 源码"
+  "YAML Source": "YAML 源码",
+  "Install Roslyn automatically": "自动安装 Roslyn",
+  "When a C# or Unity project needs it, download the C# language server (about 300 MB) into the IDE's tools folder, with progress in the status bar": "当 C# 或 Unity 项目需要时，将 C# 语言服务器（约 300 MB）下载到 IDE 的工具文件夹，进度显示在状态栏中"
 }

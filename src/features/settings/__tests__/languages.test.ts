@@ -176,6 +176,7 @@ describe("language pages", () => {
     expect(tree.map((n) => n.title)).toEqual(["Project Structure", "Languages & Frameworks"]);
     const langs = tree.find((n) => n.title === "Languages & Frameworks")!;
     expect(langs.children.map((n) => n.title)).toEqual([
+      "C#",
       "Go",
       "Java",
       "Markdown",

@@ -90,5 +90,7 @@
   "Loading…": "Loading…",
   "Not a text-serialized scene or prefab": "Not a text-serialized scene or prefab",
   "No GameObjects": "No GameObjects",
-  "YAML Source": "YAML Source"
+  "YAML Source": "YAML Source",
+  "Install Roslyn automatically": "Install Roslyn automatically",
+  "When a C# or Unity project needs it, download the C# language server (about 300 MB) into the IDE's tools folder, with progress in the status bar": "When a C# or Unity project needs it, download the C# language server (about 300 MB) into the IDE's tools folder, with progress in the status bar"
 }
