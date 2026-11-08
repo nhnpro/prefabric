@@ -339,6 +339,26 @@ pub async fn debug_attachable_processes(_host: &Host, _window: &str) -> IdeResul
         .map_err(|e| ide_core::IdeError::internal(format!("listing processes failed: {e}")))?
 }
 
+/// Unity development players: announced on the local network (about 1.5 s) and on USB devices.
+pub async fn debug_unity_players(_host: &Host, _window: &str) -> IdeResult<Vec<attach::AttachableProcess>> {
+    let failed =
+        |e: tokio::task::JoinError| ide_core::IdeError::internal(format!("discovering Unity players failed: {e}"));
+    let network =
+        tokio::task::spawn_blocking(|| ide_dap::unity::discover_players(std::time::Duration::from_millis(1500)));
+    let devices = tokio::task::spawn_blocking(ide_dap::unity_devices::discover);
+    let mut players = network.await.map_err(failed)?;
+    players.extend(devices.await.map_err(failed)?);
+    Ok(players)
+}
+
+/// Forwards a Unity player's debugger port on a USB device (`adb:`/`usb:` host) to a local port.
+pub async fn debug_unity_forward(host: &Host, window: &str, target: String, port: u16) -> IdeResult<u16> {
+    host.require_trust(window)?;
+    tokio::task::spawn_blocking(move || ide_dap::unity_devices::forward(&target, port))
+        .await
+        .map_err(|e| ide_core::IdeError::internal(format!("port forwarding failed: {e}")))?
+}
+
 /// Remote JVM Debug in listen mode: waits (cancellable through `request`) for the remote
 /// JVM to connect to `host:port`; returns the loopback port java-debug attaches to.
 pub async fn debug_listen_for_jvm(
@@ -480,6 +500,10 @@ pub(crate) fn register(d: &mut Dispatcher) {
         .await
     });
     d.add("debug_attachable_processes", |c| async move { debug_attachable_processes(&c.host, &c.window).await });
+    d.add("debug_unity_players", |c| async move { debug_unity_players(&c.host, &c.window).await });
+    d.add("debug_unity_forward", |c| async move {
+        debug_unity_forward(&c.host, &c.window, c.arg("target")?, c.arg("port")?).await
+    });
     d.add("debug_listen_for_jvm", |c| async move {
         debug_listen_for_jvm(&c.host, &c.window, c.arg("request")?, c.arg("host")?, c.arg("port")?).await
     });

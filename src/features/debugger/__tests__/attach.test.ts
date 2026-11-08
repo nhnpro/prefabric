@@ -14,12 +14,28 @@ vi.mock("../java", () => ({
   })),
 }));
 
+const forward = vi.hoisted(() =>
+  vi.fn((_target: string, _port: number) => Promise.resolve({ status: "ok" as const, data: 61234 })),
+);
+vi.mock("@/platform/ipc", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/platform/ipc")>();
+  return { ...real, commands: { ...real.commands, debugUnityForward: forward } };
+});
+
 import { attachConfig, attachDetail, attachRows, matchesFilter } from "../attach";
 
 const proc = (p: Partial<AttachableProcess> & Pick<AttachableProcess, "pid" | "kind">): AttachableProcess => ({
   name: p.kind,
   commandLine: `${p.kind} app`,
-  adapter: { java: "java-debug", node: "js-debug", python: "debugpy", go: "delve", native: "codelldb" }[p.kind],
+  adapter: {
+    java: "java-debug",
+    node: "js-debug",
+    python: "debugpy",
+    unityMono: "unity-debugger",
+    dotnet: "netcoredbg",
+    go: "delve",
+    native: "codelldb",
+  }[p.kind],
   host: null,
   port: null,
   ...p,
@@ -38,12 +54,14 @@ const list = [
   }),
   proc({ pid: 25, kind: "node", name: "node", commandLine: "node server.js" }),
   proc({ pid: 26, kind: "go", name: "gosrv", commandLine: "./gosrv" }),
+  proc({ pid: 345, kind: "unityMono", name: "Unity Editor — Game", commandLine: "Unity -projectPath /g", port: 56345 }),
 ];
 
 describe("Attach to Process popup model", () => {
   it("groups processes by debugger in IDEA's order with counts", () => {
     const rows = attachRows(list, "");
     expect(rows.filter((r) => r.kind === "group").map((r) => r.kind === "group" && `${r.label}:${r.count}`)).toEqual([
+      "Unity (Mono):1",
       "Java (JDWP):1",
       "Node.js:1",
       "Python (debugpy):2",
@@ -51,7 +69,7 @@ describe("Attach to Process popup model", () => {
       "Native (LLDB):1",
     ]);
     expect(rows[0]!.kind).toBe("group");
-    expect(rows[1]!.kind === "process" && rows[1]!.process.pid).toBe(10);
+    expect(rows[1]!.kind === "process" && rows[1]!.process.pid).toBe(345);
   });
 
   it("filters on pid, name and command line (all words)", () => {
@@ -86,5 +104,17 @@ describe("Attach to Process popup model", () => {
     const native = await attachConfig(list[0]!, "/proj");
     expect(native).toMatchObject({ adapter: "codelldb", request: "attach", name: "a.out (30)", cwd: "/proj" });
     expect(JSON.parse(native.extraJson!)).toEqual({ pid: 30 });
+    // Unity: the Editor's or player's Mono debugger port.
+    expect(await extra(list[6]!)).toEqual({ address: "127.0.0.1", port: 56345 });
+    expect(await extra(proc({ pid: 7, kind: "unityMono", host: "192.168.1.20", port: 56609 }))).toEqual({
+      address: "192.168.1.20",
+      port: 56609,
+    });
+    expect(await extra(proc({ pid: 31, kind: "dotnet" }))).toMatchObject({ processId: 31 });
+    // A player on a USB device: forward its port first, then connect locally.
+    const android = proc({ pid: 8, kind: "unityMono", host: "adb:R58M123ABC", port: 56742 });
+    expect(attachDetail(android)).toBe("USB:56742");
+    expect(await extra(android)).toEqual({ address: "127.0.0.1", port: 61234 });
+    expect(forward).toHaveBeenCalledWith("adb:R58M123ABC", 56742);
   });
 });

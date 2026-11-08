@@ -289,6 +289,25 @@ pub async fn debug_attachable_processes(state: State<'_, AppState>) -> IdeResult
     ide_host::ops::debug::debug_attachable_processes(&state.host, "").await
 }
 
+/// Attach to Process: Unity development players on the local network.
+#[tauri::command]
+#[specta::specta]
+pub async fn debug_unity_players(state: State<'_, AppState>) -> IdeResult<Vec<attach::AttachableProcess>> {
+    ide_host::ops::debug::debug_unity_players(&state.host, "").await
+}
+
+/// Attach to Process: forwards a USB device's Unity player port to a local port.
+#[tauri::command]
+#[specta::specta]
+pub async fn debug_unity_forward(
+    window: Window,
+    state: State<'_, AppState>,
+    target: String,
+    port: u16,
+) -> IdeResult<u16> {
+    ide_host::ops::debug::debug_unity_forward(&state.host, window.label(), target, port).await
+}
+
 /// Remote JVM Debug in listen mode: waits (cancellable through `request`) for the remote
 /// JVM to connect to `host:port`; returns the loopback port java-debug attaches to.
 #[tauri::command]

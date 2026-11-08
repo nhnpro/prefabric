@@ -35,6 +35,8 @@ pub struct Project {
     pub index: Arc<ProjectIndex>,
     /// The asset index of a Unity project (`None` elsewhere).
     pub unity: Option<Arc<ide_unity::UnityIndex>>,
+    /// The link to the Unity Editor that has the project open (`None` outside Unity projects).
+    pub unity_link: Option<ide_unity::link::UnityLink>,
     pub lsp: Arc<LspManager>,
     /// Git repositories: the one containing the project root and those nested below it.
     pub repos: Arc<RwLock<Repos>>,
@@ -135,6 +137,8 @@ impl Host {
         )?;
         mark("index");
         let unity = unity_index(&self.local_data_dir, &root, &project_key, &index, &sink);
+        let unity_link =
+            ide_workspace::unity::is_project(&root).then(|| ide_unity::link::UnityLink::start(&root, sink.clone()));
         let lsp = LspManager::new(root.clone(), languages.clone(), sink.clone());
         lsp.set_execution_allowed(trusted.load(Ordering::Acquire));
         lsp.set_content_roots(extra_roots.clone());
@@ -549,6 +553,7 @@ impl Host {
             moves: FileMoves::new(),
             index,
             unity,
+            unity_link,
             lsp,
             repos,
             external_log_repos: RwLock::default(),
@@ -700,6 +705,7 @@ impl Host {
             moves: FileMoves::new(),
             index,
             unity: None,
+            unity_link: None,
             lsp,
             repos: Arc::default(),
             external_log_repos: RwLock::default(),

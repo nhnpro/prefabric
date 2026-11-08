@@ -3,6 +3,7 @@
 pub mod assemblies;
 pub(crate) mod assets;
 pub mod editor;
+pub mod merge;
 pub mod package;
 
 use serde::{Deserialize, Serialize};

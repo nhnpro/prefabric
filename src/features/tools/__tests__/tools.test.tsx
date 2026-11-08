@@ -161,6 +161,63 @@ describe("Roslyn auto-install", () => {
   });
 });
 
+describe("built-in tools auto-install", () => {
+  const tool = (
+    name: string,
+    displayName: string,
+    language: string,
+    kind: "languageServer" | "debugger" = "languageServer",
+  ) =>
+    backend.tools.push({
+      ...sampleTools()[0]!,
+      name,
+      displayName,
+      command: name,
+      kind,
+      status: "missing",
+      languages: [language],
+      alternatives: [],
+      version: null,
+      path: null,
+    });
+  const withSetting = (on: boolean | undefined, unity = false) =>
+    useProject.setState({
+      project: { trusted: true, root: "/u", name: "u", isGit: false, unity: unity ? {} : null } as never,
+      settings: { languages: { autoInstallTools: on } } as never,
+    });
+  afterEach(() => useProject.setState({ project: null, settings: null }));
+
+  it("installs the JSON and Markdown servers without asking (the default)", async () => {
+    tool("vscode-json-language-server", "JSON Language Server", "JSON");
+    tool("marksman", "Marksman (Markdown)", "Markdown");
+    withSetting(undefined);
+    const off = installMissingServerPrompts();
+    for (const name of ["vscode-json-language-server", "marksman"])
+      emitLocalIdeEvent({ type: "languageServer", server: 1, name, status: "missing", message: null });
+    await waitFor(() => expect(backend.restarted).toEqual(["vscode-json-language-server", "marksman"]));
+    off();
+  });
+
+  it("asks instead when the setting is off", async () => {
+    tool("marksman", "Marksman (Markdown)", "Markdown");
+    withSetting(false);
+    const off = installMissingServerPrompts();
+    emitLocalIdeEvent({ type: "languageServer", server: 1, name: "marksman", status: "missing", message: null });
+    await waitFor(() => expect(notes).toHaveLength(1));
+    expect(notes[0]!.title).toBe("Marksman (Markdown) is not installed");
+    expect(backend.restarted).toEqual([]);
+    off();
+  });
+
+  it("installs the Unity debugger after Roslyn when a trusted Unity project opens", async () => {
+    tool("unity-debugger", "Unity debugger (Mono)", "C#", "debugger");
+    withSetting(true, true);
+    const off = autoInstallForProject();
+    await waitFor(() => expect(notes.map((n) => n.title)).toEqual(["Unity debugger (Mono) installed"]));
+    off();
+  });
+});
+
 describe("missing language server prompt", () => {
   it("uses the same install prompt for Prettier with a Reformat Code explanation", async () => {
     const template = sampleTools()[0]!;

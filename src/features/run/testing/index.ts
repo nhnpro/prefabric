@@ -8,6 +8,7 @@ import { phpunitParser, withTeamcity } from "./phpunit";
 import { pytestParser } from "./pytest";
 import { rubyParser } from "./ruby";
 import { unittestParser } from "./unittest";
+import { unityParser } from "./unity";
 import type { TestEvent, TestOutputParser } from "./types";
 
 export type { TestEvent, TestOutputParser, TestStatus } from "./types";
@@ -23,7 +24,18 @@ export function combinedParser(parsers: TestOutputParser[]): TestOutputParser {
   };
 }
 
-export type Framework = "cargo" | "js" | "pytest" | "unittest" | "phpunit" | "go" | "jvm" | "ruby" | "dotnet" | "auto";
+export type Framework =
+  | "cargo"
+  | "js"
+  | "pytest"
+  | "unittest"
+  | "phpunit"
+  | "go"
+  | "jvm"
+  | "ruby"
+  | "dotnet"
+  | "unity"
+  | "auto";
 
 export function frameworkFor(config: Pick<RunConfig, "kind" | "command" | "args">): Framework {
   const cmd = [config.command, ...config.args].join(" ");
@@ -54,6 +66,8 @@ export function frameworkFor(config: Pick<RunConfig, "kind" | "command" | "args"
       return "ruby";
     case "dotnet-test":
       return "dotnet";
+    case "unity-test":
+      return "unity";
   }
   if (/\bcargo\b/.test(cmd)) return "cargo";
   if (/\b(jest|vitest|npm|pnpm|yarn|bun|npx|deno)\b/.test(cmd)) return "js";
@@ -132,6 +146,8 @@ export function createTestParser(config: Pick<RunConfig, "kind" | "command" | "a
     case "dotnet":
       // Results come from the TRX reports once the run ends (`trx.ts`).
       return { feed: () => [] };
+    case "unity":
+      return unityParser();
     default:
       return combinedParser([
         cargoParser(),

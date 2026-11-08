@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import clsx from "clsx";
 import type { ToolInfo } from "@/bindings";
-import { Badge, Button, EmptyState, IconButton, ProgressBar, SearchField, Spinner, T } from "@/ui";
+import { Badge, Button, Checkbox, EmptyState, IconButton, ProgressBar, SearchField, Spinner, T } from "@/ui";
 import { onIdeEvent } from "@/platform/ipc";
 import { useProject } from "@/platform/project";
 import { useSettingsForm } from "@/workbench/contributions";
@@ -27,6 +27,9 @@ import styles from "./LanguageServersPage.module.css";
 import { tx } from "@/platform/i18n";
 
 type Filter = "all" | "missing" | "installed";
+
+/** Roslyn has its own setting (Languages & Frameworks › C#). */
+const AUTO_INSTALL_KEY = "languages.autoInstallTools";
 
 const STATUS_TONE: Record<ToolInfo["status"], "success" | "accent" | "warning"> = {
   installed: "success",
@@ -246,6 +249,7 @@ function Details({ tool, pending }: { tool: ToolInfo; pending: boolean }) {
 export function LanguageServersPage() {
   const { tools, loaded, loading, error } = useTools();
   const form = useSettingsForm();
+  const autoInstall = form.useValue(AUTO_INSTALL_KEY);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedName, setSelectedName] = useState<string | null>(null);
@@ -317,9 +321,16 @@ export function LanguageServersPage() {
     <div className={styles.page}>
       <p className={styles.intro}>
         {tx(
-          "Language servers and debug adapters used by the IDE. Missing tools can be installed into the IDE's own tools folder; nothing is downloaded until you click Install.",
+          "Language servers and debug adapters used by the IDE. Missing tools can be installed into the IDE's own tools folder.",
         )}
       </p>
+      <Checkbox
+        checked={autoInstall !== false}
+        onChange={(on) => form.set(AUTO_INSTALL_KEY, on)}
+        label={tx(
+          "Install built-in tools automatically (JSON and Markdown servers, Unity debugger) the first time they are needed",
+        )}
+      />
       {error && (
         <div className={styles.error} role="alert">
           {error}

@@ -7,8 +7,13 @@ import { registerActions } from "@/platform/actions";
 import {
   registerEditorBanner,
   registerSearchEverywhereTab,
+  registerStatusItem,
   registerTextEditorWrapper,
+  registerTitleItem,
+  registerToolWindow,
 } from "@/workbench/contributions";
+import { onIdeEvent } from "@/platform/ipc";
+import { lazyComponent } from "@/ui";
 import { useProject } from "@/platform/project";
 import { clearUnityBases, unityDeps } from "./bases";
 import { assemblyDefinitionSupport } from "./asmdef";
@@ -23,6 +28,10 @@ import { unityRename } from "./rename";
 import { unityYamlBanner, unityYamlLock } from "./unityYaml";
 import { ussSupport } from "./uss";
 import { loadMessageData } from "./messages";
+import { trackUnityLink, UnityLinkItem } from "./link";
+import { playActions, trackPlayControls, UnityPlayControls } from "./playControls";
+import { appendEntries, clearConsole } from "./console/store";
+import { showInUnityAction, showInUnityMenus } from "./showInUnity";
 
 const deps = unityDeps(async () => {
   const unity = useProject.getState().project?.unity;
@@ -57,8 +66,48 @@ export function activate() {
   const unregisterBanner = registerEditorBanner(unityYamlBanner);
   const unregisterSearch = registerSearchEverywhereTab(unitySearchTab);
   const unregisterHierarchy = registerTextEditorWrapper(hierarchyWrapper);
-  const unregisterActions = registerActions(hierarchyActions());
+  const unregisterActions = registerActions([...hierarchyActions(), ...playActions(), showInUnityAction()]);
+  const unregisterShowMenus = showInUnityMenus();
+  const unregisterLink = registerStatusItem({
+    id: "unity.link",
+    title: "Unity Editor",
+    align: "left",
+    priority: 90,
+    component: UnityLinkItem,
+  });
+  const untrackLink = trackUnityLink();
+  const unregisterPlay = registerTitleItem({
+    id: "unity.playControls",
+    title: "Unity Play Mode",
+    align: "right",
+    priority: 1,
+    component: UnityPlayControls,
+  });
+  const untrackPlay = trackPlayControls();
+  const unregisterConsole = registerToolWindow({
+    id: "unity.console",
+    title: "Unity Console",
+    icon: "toolwindow-logcat",
+    anchor: "bottom",
+    // Listed under the stripe's "…" until first opened: most projects are not Unity ones.
+    stripe: "onUse",
+    order: 27,
+    component: lazyComponent(() => import("./console/ConsoleView").then((m) => m.ConsoleView)),
+  });
+  // Collected from the start, so the window shows what was logged before it opened.
+  const offConsole = onIdeEvent("unityConsole", (e) => appendEntries(e.entries));
+  const offProject = useProject.subscribe((s, prev) => {
+    if (s.project?.root !== prev.project?.root) clearConsole();
+  });
   return () => {
+    unregisterShowMenus();
+    offProject();
+    offConsole();
+    unregisterConsole();
+    untrackPlay();
+    unregisterPlay();
+    untrackLink();
+    unregisterLink();
     unregisterActions();
     unregisterHierarchy();
     unregisterSearch();

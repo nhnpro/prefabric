@@ -25,6 +25,11 @@ describe("missing debug adapters", () => {
       "netcoredbg",
     );
     expect(missingAdapter("delve", unavailable("debug adapter `delve` not found (x)"))?.tool).toBe("delve");
+    // Built in: installed on first use (no `installing` for the others, which ask first).
+    expect(missingAdapter("unity-debugger", unavailable("debug adapter `unity-debugger` not found (x)"))).toMatchObject(
+      { tool: "unity-debugger", installing: "Installing the Unity debugger…" },
+    );
+    expect(missingAdapter("delve", unavailable("debug adapter `delve` not found (x)"))?.installing).toBeUndefined();
     expect(missingAdapter("bash-debug", unavailable("debug adapter `bash-debug` not found (x)"))?.title).toBe(
       "Bash Debug is not installed",
     );

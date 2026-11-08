@@ -9,6 +9,7 @@ license.workspace = true
 dunce.workspace = true
 ide-core.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 specta.workspace = true
 redb.workspace = true
 parking_lot.workspace = true

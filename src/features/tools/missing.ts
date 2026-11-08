@@ -60,9 +60,15 @@ export async function promptInstall(
   return true;
 }
 
-/** Servers installed without asking while their setting is on (Roslyn: C# and Unity projects). */
+const builtInTools = () => useProject.getState().settings?.languages?.autoInstallTools !== false;
+
+/** Tools installed without asking while their setting is on: Roslyn has its own setting, the
+ * other built-in tools share one. */
 const AUTO_INSTALL: Record<string, () => boolean> = {
   roslyn: () => useProject.getState().settings?.languages?.csharp?.autoInstallRoslyn !== false,
+  "vscode-json-language-server": builtInTools,
+  marksman: builtInTools,
+  "unity-debugger": builtInTools,
 };
 
 /** Installs `name` without asking when its setting allows; false when it doesn't apply. */
@@ -76,14 +82,18 @@ export async function autoInstall(name: string): Promise<boolean> {
   return true;
 }
 
-/** A trusted Unity project gets Roslyn as soon as it opens, before a script is opened. */
+/** A trusted Unity project gets Roslyn and the Unity debugger as soon as it opens. */
 export function autoInstallForProject(): () => void {
   const done = new Set<string>();
   const check = () => {
     const p = useProject.getState().project;
     if (!p?.trusted || !p.unity || done.has(p.root)) return;
     done.add(p.root);
-    void autoInstall("roslyn").catch(() => {});
+    // One after the other: both are large downloads.
+    void autoInstall("roslyn")
+      .catch(() => false)
+      .then(() => autoInstall("unity-debugger"))
+      .catch(() => {});
   };
   check();
   return useProject.subscribe(check);

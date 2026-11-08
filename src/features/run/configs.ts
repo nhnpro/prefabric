@@ -74,6 +74,7 @@ export function configIcon(config: Pick<RunConfig, "kind" | "isTest">): string {
       return "file-maven";
     case "dotnet":
     case "dotnet-test":
+    case "unity-test":
       return "file-csharp";
     case "go":
       return "file-go";

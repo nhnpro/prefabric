@@ -140,6 +140,12 @@ export const LANGUAGE_PAGES: PageSpec[] = [
             label: "Install Roslyn automatically",
             hint: "When a C# or Unity project needs it, download the C# language server (about 300 MB) into the IDE's tools folder, with progress in the status bar",
           },
+          {
+            kind: "toggle",
+            key: "languages.csharp.refreshUnityAssetsOnSave",
+            label: "Refresh Unity assets on save",
+            hint: "When a Unity Editor has the project open, saving a file in Assets or Packages makes it import the change and recompile without switching to it",
+          },
         ],
       },
     ],

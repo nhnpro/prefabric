@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import type { Hierarchy } from "@/bindings";
-import { FloatingToolbar, IconButton, Tree } from "@/ui";
+import { FloatingToolbar, IconButton, Tree, showContextMenu } from "@/ui";
 import { formatMessage, tx } from "@/platform/i18n";
 import { call, commands, onIdeEvent } from "@/platform/ipc";
 import { maybeEditorService } from "@/workbench/contributions";
@@ -153,6 +153,11 @@ function HierarchyView({ path }: { path: string }) {
           rowClassName={(r) => (r.kind === "node" && r.node.kind === "fromPrefab" ? styles.fromPrefab : undefined)}
           defaultExpanded={expanded}
           onActivate={open}
+          onContextMenu={(r, _selection, e) => {
+            if (!r || r.kind === "overrides" || r.kind === "override") return;
+            e.preventDefault();
+            showContextMenu(e, [{ kind: "action", action: "unity.showInUnity", arg: { path, line: rowLine(r) } }]);
+          }}
           speedSearch
           aria-label={tx("Hierarchy")}
         />

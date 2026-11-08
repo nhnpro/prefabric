@@ -1,6 +1,7 @@
 //! Attach to Process: the current user's processes, grouped by the debugger that can
 //! attach to them (IDEA's `XAttachDebuggerProvider`s): JVMs with a JDWP agent, Node,
-//! Python (debugpy injection), Go binaries (Delve) and anything else natively (LLDB).
+//! Python (debugpy injection), Unity Editors (Mono), .NET apps (netcoredbg), Go binaries
+//! (Delve) and anything else natively (LLDB).
 
 use crate::adapter;
 use ide_core::{IdeError, IdeResult};
@@ -14,6 +15,8 @@ pub enum AttachKind {
     Java,
     Node,
     Python,
+    UnityMono,
+    Dotnet,
     Go,
     Native,
 }
@@ -21,6 +24,7 @@ pub enum AttachKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachableProcess {
+    /// Process id; for a Unity player found on the network, its session GUID.
     pub pid: u32,
     /// Executable name.
     pub name: String,
@@ -28,7 +32,7 @@ pub struct AttachableProcess {
     pub kind: AttachKind,
     /// Debug adapter that attaches to it.
     pub adapter: String,
-    /// Debug port the process listens on (JDWP, `--inspect`, `debugpy --listen`).
+    /// Debug port the process listens on (JDWP, `--inspect`, `debugpy --listen`, Mono).
     pub host: Option<String>,
     pub port: Option<u16>,
 }
@@ -129,10 +133,41 @@ pub fn classify(p: &RawProcess, is_go: impl Fn(&str) -> bool, native_adapter: &s
     if is_python(&name) {
         return make(AttachKind::Python, "debugpy", debugpy_listen(&p.args));
     }
+    if let Some(unity) = crate::unity::editor(p, &name) {
+        return Some(unity);
+    }
+    if is_dotnet_app(p, base) {
+        return make(AttachKind::Dotnet, "netcoredbg", None);
+    }
     if is_go(&p.exe) {
         return make(AttachKind::Go, "delve", None);
     }
     make(AttachKind::Native, native_adapter, None)
+}
+
+/// .NET's own tools, which run as `dotnet <tool>.dll` but aren't what one debugs.
+const DOTNET_TOOLS: &[&str] = &[
+    "MSBuild.dll",
+    "VBCSCompiler.dll",
+    "Microsoft.CodeAnalysis.LanguageServer.dll",
+    "dotnet-watch.dll",
+    "vstest.console.dll",
+    "testhost.dll",
+    "monodbg.dll",
+    "OmniSharp.dll",
+    "csharp-ls.dll",
+];
+
+/// `dotnet <app>.dll`, or an apphost (`<app>` next to `<app>.runtimeconfig.json`).
+fn is_dotnet_app(p: &RawProcess, base: &str) -> bool {
+    if base == "dotnet" {
+        let dll = p.args.split_whitespace().skip(1).find(|a| !a.starts_with('-'));
+        return dll.is_some_and(|d| d.ends_with(".dll") && !DOTNET_TOOLS.contains(&file_name(d)));
+    }
+    let exe = Path::new(&p.exe);
+    exe.is_absolute()
+        && !DOTNET_TOOLS.contains(&format!("{base}.dll").as_str())
+        && exe.with_file_name(format!("{base}.runtimeconfig.json")).is_file()
 }
 
 const GO_BUILDINFO_MAGIC: &[u8] = b"\xff Go buildinf:";
@@ -193,11 +228,27 @@ pub fn list_processes() -> IdeResult<Vec<RawProcess>> {
             let exe = exes
                 .get(&pid)
                 .cloned()
+                // `comm` is relative when the program was started by a relative path.
+                .map(|e| if e.starts_with('/') { e } else { executable_path(pid).unwrap_or(e) })
                 .or_else(|| std::fs::read_link(format!("/proc/{pid}/exe")).ok().map(|p| p.display().to_string()))
                 .unwrap_or_else(|| args.split_whitespace().next().unwrap_or_default().to_owned());
             RawProcess { pid, exe, args }
         })
         .collect())
+}
+
+/// The absolute executable path of `pid` (macOS `proc_pidpath`).
+#[cfg(target_os = "macos")]
+fn executable_path(pid: u32) -> Option<String> {
+    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: `buf` is writable for the size passed; the call writes at most that many bytes.
+    let n = unsafe { libc::proc_pidpath(pid as i32, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    (n > 0).then(|| String::from_utf8_lossy(&buf[..n as usize]).into_owned())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn executable_path(pid: u32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok().map(|p| p.display().to_string())
 }
 
 #[cfg(not(unix))]
@@ -298,6 +349,27 @@ mod tests {
     }
 
     #[test]
+    fn classifies_dotnet_apps_but_not_dotnet_tools() {
+        assert_eq!(
+            kind("/usr/local/share/dotnet/dotnet", "dotnet bin/Debug/net8.0/Tasks.Cli.dll wait"),
+            Some((AttachKind::Dotnet, None))
+        );
+        assert_eq!(
+            kind("/usr/local/share/dotnet/dotnet", "dotnet /sdk/10.0.101/MSBuild.dll -nologo").map(|k| k.0),
+            Some(AttachKind::Native)
+        );
+        assert_eq!(kind("/usr/local/share/dotnet/dotnet", "dotnet build").map(|k| k.0), Some(AttachKind::Native));
+        let dir = std::env::temp_dir().join(format!("openidea-attach-dotnet-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = dir.join("Tasks.Cli");
+        std::fs::write(&app, "").unwrap();
+        std::fs::write(dir.join("Tasks.Cli.runtimeconfig.json"), "{}").unwrap();
+        assert_eq!(kind(app.to_str().unwrap(), "./Tasks.Cli").map(|k| k.0), Some(AttachKind::Dotnet));
+        assert_eq!(kind(dir.join("other").to_str().unwrap(), "./other").map(|k| k.0), Some(AttachKind::Native));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn detects_go_binaries_by_buildinfo() {
         let dir = std::env::temp_dir().join(format!("openidea-attach-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -324,5 +396,16 @@ mod tests {
         assert!(found.args.contains("sleep 30"));
         assert!(found.exe.ends_with("sleep"));
         assert!(list.iter().all(|p| p.pid != std::process::id()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lists_absolute_paths_for_relatively_started_processes() {
+        let mut child = std::process::Command::new("./sleep").current_dir("/bin").arg("30").spawn().unwrap();
+        let list = list_processes().unwrap();
+        let _ = child.kill();
+        let _ = child.wait();
+        let found = list.iter().find(|p| p.pid == child.id()).expect("sleep is listed");
+        assert!(found.exe.starts_with('/') && found.exe.ends_with("sleep"), "{}", found.exe);
     }
 }

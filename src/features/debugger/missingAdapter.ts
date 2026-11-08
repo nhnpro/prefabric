@@ -5,13 +5,18 @@
 import { IpcError } from "@/platform/ipc";
 
 /** Adapters the tools installer can provide (adapter id → tool name). */
-const INSTALLABLE: Record<string, { tool: string; title: string }> = {
+const INSTALLABLE: Record<string, { tool: string; title: string; installing?: string }> = {
   "kotlin-debug-adapter": { tool: "kotlin-debug-adapter", title: "The Kotlin debugger is not installed" },
   netcoredbg: { tool: "netcoredbg", title: "netcoredbg is not installed" },
   debugpy: { tool: "debugpy", title: "debugpy is not installed" },
   "js-debug": { tool: "js-debug", title: "The JavaScript debugger (vscode-js-debug) is not installed" },
   delve: { tool: "delve", title: "Delve is not installed" },
   codelldb: { tool: "codelldb", title: "CodeLLDB is not installed" },
+  "unity-debugger": {
+    tool: "unity-debugger",
+    title: "The Unity debugger is not installed",
+    installing: "Installing the Unity debugger…",
+  },
   "php-debug": { tool: "php-debug", title: "PHP Debug (Xdebug) is not installed" },
   "bash-debug": { tool: "bash-debug", title: "Bash Debug is not installed" },
 };
@@ -20,6 +25,8 @@ export interface MissingAdapter {
   tool: string;
   title: string;
   body: string;
+  /** A built-in debugger (installed on first use unless that setting is off): the progress title. */
+  installing?: string;
 }
 
 /** The install offer for a failed start, or null when the failure is something else. */
@@ -38,5 +45,6 @@ export function missingAdapter(adapter: string, e: unknown): MissingAdapter | nu
     tool: entry.tool,
     title: entry.title,
     body: e.message,
+    ...(entry.installing ? { installing: entry.installing } : {}),
   };
 }

@@ -5,6 +5,7 @@
 import { tx } from "@/platform/i18n";
 import { workflowSettings } from "@/platform/workflowSettings";
 import { executeAction, getAction } from "@/platform/actions";
+import { useProject } from "@/platform/project";
 import { create } from "zustand";
 import { AnsiStream, appendSpans, type Span } from "@/ui/ansi";
 import { setContext } from "@/platform/context";
@@ -27,7 +28,7 @@ import { confirmTerminate } from "@/workbench/confirmTerminate";
 import { maybeEditorService, notifications, toolWindowService, useDebugRunSessions } from "@/workbench/contributions";
 import { startedPort } from "@/platform/serverPort";
 import { breakpointsOf, consumeTemporary, flushBreakpoints, refreshStates, resetStatuses } from "./breakpoints/store";
-import { interpolateLog, logParts, suspends } from "./breakpoints/model";
+import { interpolateLog, isPausepoint, logParts, suspends } from "./breakpoints/model";
 import { syncSpecial, useSpecialBreakpoints } from "./breakpoints/special";
 import { refreshExceptionFilters } from "./breakpoints/exceptions";
 import { flashTaskbarForBreakpoint, stopTaskbarFlash } from "./taskbarFlash";
@@ -634,6 +635,17 @@ export async function startSession(
     if (options.preparation)
       appendConsole(options.preparation.id, "stderr", (e instanceof Error ? e.message : String(e)) + "\n");
     const missing = missingAdapter(launch.adapter, e);
+    if (missing?.installing && useProject.getState().settings?.languages?.autoInstallTools !== false) {
+      // A built-in debugger installs on first use (progress in the background task), then starts.
+      notifications().notify({
+        group: "run",
+        level: "info",
+        title: tx(missing.installing),
+        key: "debug.start",
+      });
+      void executeAction("tools.install", missing.tool).then(() => startSession(launch, options));
+      return null;
+    }
     if (missing) {
       notifications().notify({
         group: "run",
@@ -841,6 +853,12 @@ async function loadFrames(id: DebugSessionId, threadId: number, reveal: boolean)
   if (top?.path && (s.stopReason === "breakpoint" || s.stopReason === "function breakpoint")) {
     void logSuspendingHit(id, top);
     consumeTemporary(top.path, top.line);
+    if (breakpointsOf(top.path).some((b) => b.line === top.line && b.enabled && isPausepoint(b))) {
+      // Unity's main thread is stopped here: the pause runs in the Editor once the thread goes on.
+      void executeAction("unity.pauseEditor");
+      void resumeExecution(id, () => call(commands.debugResume(id, threadId)));
+      return;
+    }
   }
   if (top) selectFrame(id, top.id, reveal);
   else updateExecutionPoint();

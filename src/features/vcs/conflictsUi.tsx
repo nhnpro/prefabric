@@ -40,7 +40,42 @@ export function showConflictsDialog() {
 }
 
 export function openMergeEditor(path: string) {
-  void editorService().openInput(mergeInput(stripSlash(path)), { focus: true });
+  void mergeUnityAsset(stripSlash(path)).then((merged) => {
+    if (!merged) void editorService().openInput(mergeInput(stripSlash(path)), { focus: true });
+  });
+}
+
+/**
+ * Scenes, prefabs and other Unity YAML assets merge with UnityYAMLMerge first, by object and
+ * property, as Rider does: when it merges everything the file is resolved; otherwise the merge
+ * editor opens. False when the tool doesn't apply (other files, no Unity installed).
+ */
+async function mergeUnityAsset(path: string): Promise<boolean> {
+  const result = await call(commands.unityMergeAsset(path)).catch(() => null);
+  if (!result) return false;
+  const name = baseName(path);
+  const merged = result.merged;
+  if (merged === null) {
+    const count = result.conflicts.length;
+    notifications().notify({
+      group: "vcs",
+      level: "info",
+      title: tx`UnityYAMLMerge: ${count} properties changed on both sides`,
+      body: result.conflicts.slice(0, 5).join(", "),
+    });
+    return false;
+  }
+  // A failed write leaves the conflict for the merge editor.
+  const done = await runOp(
+    tx`Merge ${name} with UnityYAMLMerge`,
+    async () => {
+      await writeFileText(path, merged, { save: true });
+      await call(commands.vcsStage([path]));
+      return true;
+    },
+    { success: tx`${name} merged by UnityYAMLMerge` },
+  );
+  return done === true;
 }
 
 /** Accept Yours / Accept Theirs for a whole conflicted file. */

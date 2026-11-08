@@ -16,6 +16,8 @@ pub mod jdwp;
 pub mod kotlin;
 mod kotlin_jdwp;
 mod session;
+pub mod unity;
+pub mod unity_devices;
 
 use adapter::{AdapterLauncher, AdapterSpec, ProcessLauncher};
 use connection::{Connection, DapError};

@@ -4654,7 +4654,6 @@
   "Abbreviation for <{tag}>, e.g.": "<{tag}>의 약어, 예:",
   "caret,": "캐럿,",
   "{count} item": "{count}개 항목",
-  "Language servers and debug adapters used by the IDE. Missing tools can be installed into the IDE's own tools folder; nothing is downloaded until you click Install.": "IDE에서 사용하는 언어 서버와 디버그 어댑터입니다. 누락된 도구는 IDE 자체 도구 폴더에 설치할 수 있으며, 설치를 클릭하기 전까지는 아무것도 다운로드되지 않습니다.",
   "Large file": "대용량 파일",
   "Binary file": "바이너리 파일",
   "read-only": "읽기 전용",

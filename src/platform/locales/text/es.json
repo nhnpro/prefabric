@@ -4583,7 +4583,6 @@
   "Abbreviation for <{tag}>, e.g.": "Abreviatura de <{tag}>, p. ej.,",
   "caret,": "el cursor,",
   "{count} item": "{count} elemento",
-  "Language servers and debug adapters used by the IDE. Missing tools can be installed into the IDE's own tools folder; nothing is downloaded until you click Install.": "Servidores de lenguaje y adaptadores de depuración utilizados por el IDE. Las herramientas faltantes se pueden instalar en la carpeta de herramientas propia del IDE; no se descarga nada hasta que haga clic en Instalar.",
   "Large file": "Archivo grande",
   "Binary file": "Archivo binario",
   "read-only": "solo lectura",

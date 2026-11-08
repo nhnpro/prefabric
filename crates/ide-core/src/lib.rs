@@ -29,7 +29,10 @@ pub mod workflow_settings;
 pub mod wsl;
 
 pub use error::{IdeError, IdeResult};
-pub use event::{EventSink, IdeEvent, NullSink, SharedSink};
+pub use event::{
+    EventSink, IdeEvent, NullSink, SharedSink, UnityEditorState, UnityLinkConnection, UnityLinkStatus, UnityLogEntry,
+    UnityLogKind, UnityPlayMode,
+};
 pub use ids::*;
 pub use ipc_path::IpcPath;
 pub use text::*;

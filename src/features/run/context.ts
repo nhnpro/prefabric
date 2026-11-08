@@ -59,7 +59,7 @@ function testKinds(relPath: string): string[] {
   if (/\.go$/.test(relPath)) return ["go"];
   if (/\.rs$/.test(relPath)) return ["cargo"];
   if (/\.(kt|java|scala|groovy)$/.test(relPath)) return ["gradle", "maven"];
-  if (/\.cs$/.test(relPath)) return ["dotnet-test"];
+  if (/\.cs$/.test(relPath)) return ["unity-test", "dotnet-test"];
   return [];
 }
 

@@ -45,6 +45,7 @@ import { GoTestOutput } from "./testing/go";
 import { moveToReportedClasses } from "./testing/jvm";
 import { RubyTestOutput } from "./testing/ruby";
 import { TeamcityOutput } from "./testing/teamcity";
+import { UnityTestOutput } from "./testing/unity";
 import type { TestStdout } from "./testing/types";
 import { TRX_DIR, trxEvents, withTrxLogger } from "./testing/trx";
 import { recordTestStates } from "./testing/states";
@@ -632,7 +633,9 @@ function newRuntime(config: RunConfig): SessionRuntime {
         ? new TeamcityOutput(feed)
         : framework === "ruby" && config.kind !== "rspec"
           ? new RubyTestOutput(feed)
-          : null;
+          : framework === "unity"
+            ? new UnityTestOutput(feed)
+            : null;
   const runtime: SessionRuntime = {
     stdout,
     tests,

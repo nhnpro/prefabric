@@ -3,14 +3,16 @@
 
 use crate::Host;
 use crate::ops::project::{ProjectInfo, info};
-use ide_core::{CancellationToken, DocId, IdeError, IdeResult, Pos, RequestId};
+use ide_core::{CancellationToken, DocId, IdeError, IdeResult, Pos, RequestId, UnityLinkStatus};
 use ide_unity::UnityIndexStatus;
 use ide_unity::hierarchy::Hierarchy;
 use ide_unity::lenses::UnityLens;
+use ide_unity::link::UnityEditorCommand;
 use ide_unity::search::UnitySearch;
 use ide_unity::usages::{AssetUsage, symbol_at};
+use ide_workspace::unity::merge::{self, YamlMerge};
 use ide_workspace::unity::{self, UnityPackageStatus, assemblies::AssemblyDefinition};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,6 +23,32 @@ const GENERATE_METHOD: &str = "Prefabric.Unity.Editor.ProjectFiles.Generate";
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> IdeResult<T> + Send + 'static) -> IdeResult<T> {
     tokio::task::spawn_blocking(f).await.map_err(|e| IdeError::internal(e.to_string()))?
+}
+
+/// Merges a conflicted scene, prefab or other YAML asset with UnityYAMLMerge (the user's side is
+/// `ours`, as in the merge editor). `None` outside Unity projects, for other files, when a side
+/// was deleted, and when no Unity is installed.
+pub async fn merge_asset(host: &Host, window: &str, path: PathBuf) -> IdeResult<Option<YamlMerge>> {
+    let project = host.project(window)?;
+    project.require_trust()?;
+    blocking(move || {
+        let Some(detected) = unity::detect(&project.root) else { return Ok(None) };
+        if !merge::is_yaml_asset(&path) {
+            return Ok(None);
+        }
+        let Some(tool) = unity::editor::yaml_merge(detected.editor_version.as_deref()) else { return Ok(None) };
+        let versions = project.with_repo_of(&path, |r| r.merge_versions(&path, encoding_rs::UTF_8))?;
+        let (Some(base), Some(ours), Some(theirs)) = (versions.base, versions.ours, versions.theirs) else {
+            return Ok(None);
+        };
+        // Binary serialization: not for this tool.
+        if ![&base, &ours, &theirs].iter().all(|text| text.starts_with("%YAML")) {
+            return Ok(None);
+        }
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        merge::merge(&tool, &name, &base, &ours, &theirs).map(Some)
+    })
+    .await
 }
 
 /// Copies the app's package into `Packages/` (Unity reloads it when focused); also updates an older copy.
@@ -95,7 +123,7 @@ fn run_batch(editor: &Path, root: &Path, cancel: &CancellationToken) -> IdeResul
     if status.success() { Ok(()) } else { Err(IdeError::internal(failure_message(&text))) }
 }
 
-fn nonce() -> u128 {
+pub(crate) fn nonce() -> u128 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default()
 }
 
@@ -129,6 +157,32 @@ pub async fn assembly_definitions(host: &Arc<Host>, window: &str) -> IdeResult<V
 /// State of the asset index; `None` outside Unity projects.
 pub fn index_status(host: &Host, window: &str) -> IdeResult<Option<UnityIndexStatus>> {
     Ok(host.project(window)?.unity.as_ref().map(|u| u.status()))
+}
+
+/// The link to the Unity Editor; `None` outside Unity projects.
+pub fn link_status(host: &Host, window: &str) -> IdeResult<Option<UnityLinkStatus>> {
+    Ok(host.project(window)?.unity_link.as_ref().map(|l| l.status()))
+}
+
+/// Play, pause, step, stop or refresh assets in the connected Unity Editor.
+pub async fn editor_command(host: &Arc<Host>, window: &str, command: UnityEditorCommand) -> IdeResult<()> {
+    let project = host.project(window)?;
+    blocking(move || {
+        let link = project.unity_link.as_ref().ok_or_else(|| IdeError::invalid("Not a Unity project"))?;
+        link.command(command)
+    })
+    .await
+}
+
+/// Selects in the connected Unity Editor what `path` holds at `line` (a GameObject of a scene or
+/// prefab), or the asset; returns whether Unity found it.
+pub async fn show_in_editor(host: &Arc<Host>, window: &str, path: PathBuf, line: Option<u32>) -> IdeResult<bool> {
+    let project = host.project(window)?;
+    blocking(move || {
+        let link = project.unity_link.as_ref().ok_or_else(|| IdeError::invalid("Not a Unity project"))?;
+        link.show_in_editor(&path, line)
+    })
+    .await
 }
 
 /// The assets using the C# class, method or serialized field at `pos` of `doc`.
@@ -212,7 +266,13 @@ pub fn register(d: &mut crate::rpc::Dispatcher) {
         |c| async move { asset_usages(&c.host, &c.window, c.arg("doc")?, c.arg("pos")?).await },
     );
     d.add("unity_index_status", |c| async move { index_status(&c.host, &c.window) });
+    d.add("unity_link_status", |c| async move { link_status(&c.host, &c.window) });
+    d.add("unity_editor_command", |c| async move { editor_command(&c.host, &c.window, c.arg("command")?).await });
+    d.add("unity_show_in_editor", |c| async move {
+        show_in_editor(&c.host, &c.window, c.arg("path")?, c.arg("line")?).await
+    });
     d.add("unity_assembly_definitions", |c| async move { assembly_definitions(&c.host, &c.window).await });
+    d.add("unity_merge_asset", |c| async move { merge_asset(&c.host, &c.window, c.arg("path")?).await });
     d.add("unity_install_package", |c| async move { install_package(&c.host, &c.window).await });
     d.add("unity_generate_project_files", |c| async move {
         generate_project_files(&c.host, &c.window, c.arg("request")?).await

@@ -1,6 +1,14 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { ChangeSet, EditorState, Text } from "@codemirror/state";
-import { interpolateLog, isConditional, makeBreakpoint, mapLines, toBackend, toggleLine } from "../breakpoints/model";
+import {
+  interpolateLog,
+  isConditional,
+  isPausepoint,
+  makeBreakpoint,
+  mapLines,
+  toBackend,
+  toggleLine,
+} from "../breakpoints/model";
 import {
   addBreakpoint,
   breakpointsOf,
@@ -161,6 +169,16 @@ describe("breakpoint store", () => {
     const list = breakpointsOf("/proj/a.py");
     expect(list).toHaveLength(1);
     expect(list[0]!.logMessage).toBe("hit {i}");
+  });
+
+  it("keeps a Unity pausepoint, which stops in the adapter like any suspending breakpoint", () => {
+    addBreakpoint("/proj/A.cs", 3, { pausepoint: true });
+    loadBreakpoints("/proj");
+    const bp = breakpointsOf("/proj/A.cs")[0]!;
+    expect(isPausepoint(bp)).toBe(true);
+    expect(toBackend([bp], false)[0]).toMatchObject({ enabled: true, logMessage: null });
+    updateBreakpoint("/proj/A.cs", bp.id, { suspend: false });
+    expect(isPausepoint(breakpointsOf("/proj/A.cs")[0]!)).toBe(false);
   });
 
   it("persists per project, including mute", () => {

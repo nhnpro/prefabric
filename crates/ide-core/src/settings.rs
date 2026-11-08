@@ -623,6 +623,9 @@ pub struct LanguagesSettings {
     pub ruby: RubySettings,
     pub markdown: MarkdownSettings,
     pub csharp: CSharpSettings,
+    /// Install the built-in tools (JSON and Markdown servers, the Unity debugger) the first
+    /// time they are needed, without asking. Roslyn has its own setting.
+    pub auto_install_tools: bool,
 }
 
 impl Default for LanguagesSettings {
@@ -644,6 +647,7 @@ impl Default for LanguagesSettings {
             ruby: RubySettings::default(),
             markdown: MarkdownSettings::default(),
             csharp: CSharpSettings::default(),
+            auto_install_tools: true,
         }
     }
 }
@@ -662,11 +666,14 @@ pub struct MarkdownSettings {
 pub struct CSharpSettings {
     /// Install Roslyn (the C# language server) when a C# or Unity project needs it.
     pub auto_install_roslyn: bool,
+    /// Ask the connected Unity Editor to refresh its assets when a file is saved, so it
+    /// recompiles without switching to it.
+    pub refresh_unity_assets_on_save: bool,
 }
 
 impl Default for CSharpSettings {
     fn default() -> Self {
-        Self { auto_install_roslyn: true }
+        Self { auto_install_roslyn: true, refresh_unity_assets_on_save: true }
     }
 }
 

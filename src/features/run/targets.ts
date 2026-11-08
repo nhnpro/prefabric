@@ -18,6 +18,7 @@ import { scanJvmTargets, simpleClassName } from "./jvmTargets";
 import { escapeRegExp } from "./testing/rerun";
 import { pestFilter, phpunitArgs, phpunitFilter } from "./testing/phpunit";
 import { withDotnetFilter } from "./testing/trx";
+import { withUnityTests } from "./testing/unity";
 
 export type TargetKind = "main" | "test" | "suite" | "generate";
 
@@ -350,8 +351,10 @@ function jvmTargets(lines: string[], relPath: string): RunTarget[] {
   return out;
 }
 
-/** xUnit `[Fact]` / `[Theory]`, NUnit `[Test]` / `[TestCase(…)]` / `[TestCaseSource]`, MSTest `[TestMethod]`. */
-const CS_TEST_ATTRIBUTE = /^(?:Fact|Theory|Test|TestCase|TestCaseSource|TestMethod|DataTestMethod)(?:Attribute)?$/;
+/** xUnit `[Fact]` / `[Theory]`, NUnit `[Test]` / `[TestCase(…)]` / `[TestCaseSource]`, MSTest `[TestMethod]`,
+ * Unity's `[UnityTest]` coroutines. */
+const CS_TEST_ATTRIBUTE =
+  /^(?:Fact|Theory|Test|TestCase|TestCaseSource|TestMethod|DataTestMethod|UnityTest)(?:Attribute)?$/;
 const CS_FIXTURE_ATTRIBUTE = /^(?:TestFixture|TestClass)(?:Attribute)?$/;
 
 /** Attribute names of a `[A, B(…)]` line (none if the line isn't only attributes). */
@@ -623,6 +626,8 @@ export function targetConfig(
             `FullyQualifiedName=${name}|FullyQualifiedName~${name}\\(`;
       return { ...named(file.args), ...withDotnetFilter(file, filter) };
     }
+    case "unity-test":
+      return { ...named([]), ...withUnityTests(file, [target.path.join(".")]) };
     case "gradle":
       return named(
         withLast(file.args, (f) => (target.kind === "suite" ? f : `${f}.${target.path[target.path.length - 1]}`)),

@@ -119,6 +119,30 @@ export const commands = {
 	 */
 	revision: number,
 } | null, IdeError>(__TAURI_INVOKE("unity_index_status")),
+	/**  The link to the Unity Editor that has the project open; `null` outside Unity projects. */
+	unityLinkStatus: () => typedError<{
+	connection: UnityLinkConnection,
+	/**  The Editor's state; `None` unless connected. */
+	editor: UnityEditorState | null,
+	unityVersion: string | null,
+} | null, IdeError>(__TAURI_INVOKE("unity_link_status")),
+	/**  Play, pause, step, stop or refresh assets in the connected Unity Editor. */
+	unityEditorCommand: (command: UnityEditorCommand) => typedError<null, IdeError>(__TAURI_INVOKE("unity_editor_command", { command })),
+	/**
+	 *  Selects in the connected Unity Editor what `path` holds at `line` (a GameObject of a scene or
+	 *  prefab), or the asset; `false` when Unity didn't find it.
+	 */
+	unityShowInEditor: (path: string, line: number | null) => typedError<boolean, IdeError>(__TAURI_INVOKE("unity_show_in_editor", { path, line })),
+	/**
+	 *  Merges a conflicted scene, prefab or other YAML asset with UnityYAMLMerge; `null` when it
+	 *  doesn't apply (not a Unity YAML asset, a deleted side, no Unity installed).
+	 */
+	unityMergeAsset: (path: string) => typedError<{
+	/**  The merged asset; `None` when properties changed on both sides. */
+	merged: string | null,
+	/**  The properties changed on both sides (`<fileID>.<Type>.<property>`), when `merged` is `None`. */
+	conflicts: string[],
+} | null, IdeError>(__TAURI_INVOKE("unity_merge_asset", { path })),
 	/**
 	 *  The scenes, prefabs and clips using the C# class, method or serialized field at `pos`;
 	 *  `null` outside Unity projects and for symbols assets can't use.
@@ -1059,6 +1083,10 @@ export const commands = {
 	debugDataBreakpointInfo: (session: DebugSessionId, container: number, name: string, frameId: number | null) => typedError<DataBreakpointInfo, IdeError>(__TAURI_INVOKE("debug_data_breakpoint_info", { session, container, name, frameId })),
 	/**  Attach to Process: the user's processes a debugger can attach to. */
 	debugAttachableProcesses: () => typedError<AttachableProcess[], IdeError>(__TAURI_INVOKE("debug_attachable_processes")),
+	/**  Attach to Process: Unity development players on the local network. */
+	debugUnityPlayers: () => typedError<AttachableProcess[], IdeError>(__TAURI_INVOKE("debug_unity_players")),
+	/**  Attach to Process: forwards a USB device's Unity player port to a local port. */
+	debugUnityForward: (target: string, port: number) => typedError<number, IdeError>(__TAURI_INVOKE("debug_unity_forward", { target, port })),
 	/**
 	 *  Remote JVM Debug in listen mode: waits (cancellable through `request`) for the remote
 	 *  JVM to connect to `host:port`; returns the loopback port java-debug attaches to.
@@ -2015,9 +2043,10 @@ export type AssetUsageKind =
 /**  The serialized field's value on a component; `overridden` when a prefab instance sets it. */
 { kind: "fieldValue"; value: string | null; overridden: boolean };
 
-export type AttachKind = "java" | "node" | "python" | "go" | "native";
+export type AttachKind = "java" | "node" | "python" | "unityMono" | "dotnet" | "go" | "native";
 
 export type AttachableProcess = {
+	/**  Process id; for a Unity player found on the network, its session GUID. */
 	pid: number,
 	/**  Executable name. */
 	name: string,
@@ -2025,7 +2054,7 @@ export type AttachableProcess = {
 	kind: AttachKind,
 	/**  Debug adapter that attaches to it. */
 	adapter: string,
-	/**  Debug port the process listens on (JDWP, `--inspect`, `debugpy --listen`). */
+	/**  Debug port the process listens on (JDWP, `--inspect`, `debugpy --listen`, Mono). */
 	host: string | null,
 	port: number | null,
 };
@@ -2238,6 +2267,11 @@ export type CMakeSettings_Serialize = {
 export type CSharpSettings = {
 	/**  Install Roslyn (the C# language server) when a C# or Unity project needs it. */
 	autoInstallRoslyn?: boolean,
+	/**
+	 *  Ask the connected Unity Editor to refresh its assets when a file is saved, so it
+	 *  recompiles without switching to it.
+	 */
+	refreshUnityAssetsOnSave?: boolean,
 };
 
 export type CallHierarchy = {
@@ -4686,6 +4720,10 @@ cancellable: boolean } |
 { type: "unityIndexState"; indexing: boolean; files: number; 
 /**  Bumped whenever the index gets new content. */
 revision: number } | 
+/**  The link to the project's running Unity Editor changed (Unity projects only). */
+{ type: "unityLink"; status: UnityLinkStatus } | 
+/**  Messages the Unity Editor logged (`Debug.Log`, exceptions), in batches. */
+{ type: "unityConsole"; entries: UnityLogEntry[] } | 
 /**  Git status / branch information should be refreshed. */
 { type: "vcsChanged"; root: IpcPath } | { type: "languageServer"; server: ServerId; name: string; status: ServerStatus; message: string | null } | 
 /**  A running server lacks a capability; the UI offers the managed tool as a replacement. */
@@ -5303,6 +5341,11 @@ export type LanguagesSettings = {
 	ruby?: RubySettings,
 	markdown?: MarkdownSettings,
 	csharp?: CSharpSettings,
+	/**
+	 *  Install the built-in tools (JSON and Markdown servers, the Unity debugger) the first
+	 *  time they are needed, without asking. Roslyn has its own setting.
+	 */
+	autoInstallTools?: boolean,
 };
 
 /**  What a freshly opened window should do once its frontend is up. */
@@ -8275,6 +8318,20 @@ export type UnityAssetUsages = {
 	usages: AssetUsage[],
 };
 
+/**  What the IDE asks the Editor to do (the toolbar and its actions). */
+export type UnityEditorCommand = "play" | "stop" | 
+/**  Toggles pause. */
+"pause" | 
+/**  Pauses (a pausepoint): unlike [`Self::Pause`], never resumes. */
+"pausePlay" | "step" | "refreshAssets";
+
+export type UnityEditorState = {
+	playMode: UnityPlayMode,
+	compiling: boolean,
+	/**  Importing assets. */
+	updating: boolean,
+};
+
 export type UnityHit = {
 	kind: UnityHitKind,
 	name: string,
@@ -8313,6 +8370,34 @@ export type UnityLens = {
 	summary: LensSummary,
 };
 
+export type UnityLinkConnection = 
+/**  No Editor has the project open (or its package has no link). */
+"disconnected" | 
+/**  An Editor announced the link; connecting or reconnecting after a domain reload. */
+"connecting" | "connected" | 
+/**  The Editor's package speaks an older protocol than the IDE needs. */
+"incompatible";
+
+/**  The link to a Unity Editor (`docs/unity-link.md`). */
+export type UnityLinkStatus = {
+	connection: UnityLinkConnection,
+	/**  The Editor's state; `None` unless connected. */
+	editor: UnityEditorState | null,
+	unityVersion: string | null,
+};
+
+/**  One message of the Unity Editor's console. */
+export type UnityLogEntry = {
+	kind: UnityLogKind,
+	message: string,
+	stackTrace?: string,
+	/**  Local time in the Editor, `HH:mm:ss.fff`. */
+	time?: string,
+};
+
+/**  Unity's `LogType`. */
+export type UnityLogKind = "log" | "warning" | "error" | "exception" | "assert";
+
 export type UnityPackageStatus = { state: "missing" } | 
 /**  The embedded copy is the app's version (or newer). */
 { state: "current" } | 
@@ -8320,6 +8405,8 @@ export type UnityPackageStatus = { state: "missing" } |
 { state: "outdated"; installed: string } | 
 /**  Listed in `Packages/manifest.json`; updated by hand. */
 { state: "manual"; source: string };
+
+export type UnityPlayMode = "edit" | "playing" | "paused";
 
 export type UnityProjectInfo = {
 	editorVersion: string | null,
@@ -8617,6 +8704,13 @@ export type Worktree = {
 	main: boolean,
 	locked: boolean,
 	prunable: boolean,
+};
+
+export type YamlMerge = {
+	/**  The merged asset; `None` when properties changed on both sides. */
+	merged: string | null,
+	/**  The properties changed on both sides (`<fileID>.<Type>.<property>`), when `merged` is `None`. */
+	conflicts: string[],
 };
 
 /* Tauri Specta runtime */

@@ -149,6 +149,7 @@ function BreakpointFields({
   onEnter?: () => void;
   commitRef?: MutableRefObject<(() => void) | null>;
 }) {
+  const unity = useProject((s) => !!s.project?.unity);
   const [condition, setCondition] = useState(bp.condition ?? "");
   const [hitCondition, setHitCondition] = useState(bp.hitCondition ?? "");
   const [logEval, setLogEval] = useState(!!bp.logMessage?.trim());
@@ -194,6 +195,14 @@ function BreakpointFields({
         onChange={(on) => updateBreakpoint(path, bp.id, { suspend: on ? undefined : false })}
         label="Suspend"
       />
+      {unity && /\.cs$/i.test(path) && (
+        <Checkbox
+          checked={!!bp.pausepoint}
+          disabled={!suspends(bp)}
+          onChange={(on) => updateBreakpoint(path, bp.id, { pausepoint: on || undefined })}
+          label="Pause the Unity Editor (pausepoint)"
+        />
+      )}
       <label className={styles.field}>
         <span className={styles.label}>
           <T>Condition</T>

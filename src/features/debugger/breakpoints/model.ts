@@ -15,6 +15,8 @@ export interface BreakpointEntry {
   suspend?: boolean;
   /** Log the IDEA-style "Breakpoint reached at file:line" message on every hit. */
   logHit?: boolean;
+  /** Unity pausepoint: a hit pauses the Editor's Play mode (through the link) and the thread goes on. */
+  pausepoint?: boolean;
 }
 
 export interface BreakpointStatus {
@@ -44,11 +46,17 @@ export function makeBreakpoint(
     ...(props.temporary ? { temporary: true } : {}),
     ...(props.suspend === false ? { suspend: false } : {}),
     ...(props.logHit ? { logHit: true } : {}),
+    ...(props.pausepoint ? { pausepoint: true } : {}),
   };
 }
 
 export function suspends(b: BreakpointEntry): boolean {
   return b.suspend !== false;
+}
+
+/** Stops at the DAP level like any breakpoint; the UI then pauses Unity and resumes. */
+export function isPausepoint(b: BreakpointEntry): boolean {
+  return b.pausepoint === true && suspends(b);
 }
 
 /** The "Breakpoint hit" message IDEA logs for `path:line` (0-based line). */
@@ -161,7 +169,8 @@ export function sameEntries(a: readonly BreakpointEntry[], b: readonly Breakpoin
       x.hitCondition === y.hitCondition &&
       !!x.temporary === !!y.temporary &&
       suspends(x) === suspends(y) &&
-      !!x.logHit === !!y.logHit
+      !!x.logHit === !!y.logHit &&
+      !!x.pausepoint === !!y.pausepoint
     );
   });
 }

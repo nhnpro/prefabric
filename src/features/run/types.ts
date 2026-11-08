@@ -27,6 +27,7 @@ import { dotnetProjectType, dotnetTestType } from "./dotnetTypes";
 import { rakeType, rspecType, rubyScriptType } from "./rubyTypes";
 import { djangoTestType } from "./djangoTypes";
 import { phpunitType } from "./phpunitTypes";
+import { unityTestType } from "./unityTypes";
 
 export const COMPOUND = "compound";
 
@@ -444,6 +445,7 @@ export const BUILTIN_TYPES: readonly RunConfigTypeContribution[] = [
   phpunitType,
   dotnetProjectType,
   dotnetTestType,
+  unityTestType,
   goBuildType,
   goTestType,
   applicationType,
@@ -498,6 +500,7 @@ export function withParams(config: RunConfig, params: Record<string, string>, ty
       ? { beforeLaunch: [{ kind: "dotnetBuild", target: "" }] }
       : {}),
     ...(config.kind === "dotnet-test" ||
+    config.kind === "unity-test" ||
     config.kind === "django-test" ||
     config.kind === "phpunit" ||
     config.kind === "rspec"

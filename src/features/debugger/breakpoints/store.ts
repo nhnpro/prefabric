@@ -65,6 +65,7 @@ function sanitize(raw: unknown): BreakpointEntry[] {
           ? { suspend: false }
           : {}),
         ...(b.logHit === true ? { logHit: true } : {}),
+        ...(b.pausepoint === true ? { pausepoint: true } : {}),
       })),
   );
 }

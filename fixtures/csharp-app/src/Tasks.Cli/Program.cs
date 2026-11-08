@@ -20,3 +20,10 @@ foreach (var item in items)
     Console.WriteLine(item);
 }
 Console.WriteLine($"{store.CountDone()} of {store.Items.Count} done");
+
+// `wait`: keep running until Enter, so a debugger can attach (QA: Attach to Process).
+if (command == "wait")
+{
+    Console.WriteLine($"pid {Environment.ProcessId}: press Enter to exit");
+    Console.ReadLine();
+}

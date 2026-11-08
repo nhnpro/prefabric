@@ -17,6 +17,7 @@ specta.workspace = true
 tokio = { workspace = true, features = ["net"] }
 parking_lot.workspace = true
 memchr = "2"
+socket2 = { version = "0.6", features = ["all"] }
 portable-pty.workspace = true
 tracing.workspace = true
 

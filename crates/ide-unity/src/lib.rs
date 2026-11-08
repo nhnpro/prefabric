@@ -11,6 +11,7 @@ pub mod events;
 mod graph;
 pub mod hierarchy;
 pub mod lenses;
+pub mod link;
 pub mod prefab;
 pub mod problems;
 pub mod scan;

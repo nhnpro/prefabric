@@ -90,6 +90,14 @@ pub enum IdeEvent {
         /// Bumped whenever the index gets new content.
         revision: u32,
     },
+    /// The link to the project's running Unity Editor changed (Unity projects only).
+    UnityLink {
+        status: UnityLinkStatus,
+    },
+    /// Messages the Unity Editor logged (`Debug.Log`, exceptions), in batches.
+    UnityConsole {
+        entries: Vec<UnityLogEntry>,
+    },
     /// Git status / branch information should be refreshed.
     VcsChanged {
         root: crate::IpcPath,
@@ -177,6 +185,70 @@ pub enum AskpassKind {
     Text,
     /// Yes / no (an unknown host key); answered with `yes` or `no`.
     Confirm,
+}
+
+/// The link to a Unity Editor (`docs/unity-link.md`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnityLinkStatus {
+    pub connection: UnityLinkConnection,
+    /// The Editor's state; `None` unless connected.
+    pub editor: Option<UnityEditorState>,
+    pub unity_version: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum UnityLinkConnection {
+    /// No Editor has the project open (or its package has no link).
+    #[default]
+    Disconnected,
+    /// An Editor announced the link; connecting or reconnecting after a domain reload.
+    Connecting,
+    Connected,
+    /// The Editor's package speaks an older protocol than the IDE needs.
+    Incompatible,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnityEditorState {
+    pub play_mode: UnityPlayMode,
+    pub compiling: bool,
+    /// Importing assets.
+    pub updating: bool,
+}
+
+/// One message of the Unity Editor's console.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct UnityLogEntry {
+    pub kind: UnityLogKind,
+    pub message: String,
+    #[serde(default)]
+    pub stack_trace: String,
+    /// Local time in the Editor, `HH:mm:ss.fff`.
+    #[serde(default)]
+    pub time: String,
+}
+
+/// Unity's `LogType`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum UnityLogKind {
+    Log,
+    Warning,
+    Error,
+    Exception,
+    Assert,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum UnityPlayMode {
+    Edit,
+    Playing,
+    Paused,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]

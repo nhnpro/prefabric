@@ -251,3 +251,61 @@ async fn finds_asset_usages_of_the_symbol_at_the_caret() {
     assert!(ops::unity::asset_usages(&host, "main", doc, at("var unused")).await.unwrap().is_none());
     host.close_project("main");
 }
+
+/// With Unity installed: a prefab conflicting by line merges by property through UnityYAMLMerge.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn merges_a_conflicted_prefab_with_unity_yaml_merge() {
+    if ide_workspace::unity::editor::yaml_merge(None).is_none() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let base = dunce::canonicalize(temp.path()).unwrap();
+    let root = base.join("Game");
+    std::fs::create_dir_all(root.join("Assets")).unwrap();
+    std::fs::create_dir_all(root.join("ProjectSettings")).unwrap();
+    std::fs::write(root.join("ProjectSettings/ProjectVersion.txt"), "m_EditorVersion: 6000.0.62f1\n").unwrap();
+    let prefab = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!136 &6979\nCapsuleCollider:\n  m_ObjectHideFlags: 0\n  m_Radius: 0.5\n  m_Height: 1\n";
+    std::fs::write(root.join("Assets/P.prefab"), prefab).unwrap();
+    std::fs::write(root.join("Assets/notes.txt"), "a\nb\n").unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    git(&["checkout", "-qb", "other"]);
+    std::fs::write(root.join("Assets/P.prefab"), prefab.replace("m_Height: 1", "m_Height: 2")).unwrap();
+    std::fs::write(root.join("Assets/notes.txt"), "a\nB\n").unwrap();
+    git(&["commit", "-qam", "theirs"]);
+    git(&["checkout", "-q", "main"]);
+    std::fs::write(root.join("Assets/P.prefab"), prefab.replace("m_Radius: 0.5", "m_Radius: 0.7")).unwrap();
+    std::fs::write(root.join("Assets/notes.txt"), "a\nbb\n").unwrap();
+    git(&["commit", "-qam", "ours"]);
+    git(&["merge", "other"]);
+    assert!(git(&["status", "--short"]).contains("UU Assets/P.prefab"));
+    let host = Host::new(HostConfig {
+        config_dir: base.join("config"),
+        data_dir: base.join("data"),
+        local_data_dir: base.join("data"),
+        languages: Arc::new(ide_language::LanguageRegistry::load(None).unwrap()),
+        syntax: Arc::default(),
+        sink_for: Box::new(|_| Arc::new(NullSink)),
+        owner: |w| w,
+        runtime: tokio::runtime::Handle::current(),
+        project_environment: false,
+    });
+    host.trust.decide(&root, true, false).unwrap();
+    host.open_project("main", &root).unwrap();
+    let merged = ops::unity::merge_asset(&host, "main", root.join("Assets/P.prefab")).await.unwrap().unwrap();
+    assert_eq!(
+        merged.merged.unwrap(),
+        prefab.replace("m_Radius: 0.5", "m_Radius: 0.7").replace("m_Height: 1", "m_Height: 2")
+    );
+    assert!(ops::unity::merge_asset(&host, "main", root.join("Assets/notes.txt")).await.unwrap().is_none());
+}

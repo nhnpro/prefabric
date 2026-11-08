@@ -18,6 +18,19 @@ const ipc = vi.hoisted(() => {
         { pid: 9, name: "node", commandLine: "node a.js", kind: "node", adapter: "js-debug", host: null, port: null },
       ]),
     ),
+    debugUnityPlayers: vi.fn(() =>
+      ok([
+        {
+          pid: 4242,
+          name: "Game — OSXPlayer(1,mac)",
+          commandLine: "Unity player OSXPlayer(1,mac) at 10.0.0.5",
+          kind: "unityMono",
+          adapter: "unity-debugger",
+          host: "10.0.0.5",
+          port: 56242,
+        },
+      ]),
+    ),
     debugStackTrace: vi.fn(() => ok([])),
     debugThreads: vi.fn(() => ok([])),
     debugScopes: vi.fn(() => ok([])),
@@ -308,6 +321,18 @@ describe("debugger actions (IDEA parity)", () => {
     expect(useOverlays.getState().attach?.processes?.map((p) => p.pid)).toEqual([9]);
   });
 
+  it("Attach to Process adds Unity players found on the network in a Unity project", async () => {
+    vi.mocked(ipc.debugUnityPlayers).mockClear();
+    await executeAction("debug.attachToProcess");
+    await settle();
+    expect(ipc.debugUnityPlayers).not.toHaveBeenCalled();
+    useProject.setState({ project: { root: "/g", unity: { editorVersion: "6000.6.8f1" } } as never });
+    await executeAction("debug.attachToProcess");
+    await settle();
+    expect(useOverlays.getState().attach?.processes?.map((p) => p.pid)).toEqual([9, 4242]);
+    useProject.setState({ project: null });
+  });
+
   it("Evaluate prefills the expression at the caret, or the whole selection", async () => {
     paused();
     const doc = "total = order.items\nfor i in x:\n  pass";
@@ -437,4 +462,35 @@ it("stops the waiting Python container if attaching fails", async () => {
     process: 9,
   });
   expect(ipc.runStop).toHaveBeenCalledWith(9);
+});
+
+it("installs a missing built-in debugger and starts the session once it is installed", async () => {
+  const titles: string[] = [];
+  provideNotificationService({ notify: (n) => void titles.push(n.title) });
+  useProject.setState({ project: { root: "/g" } as never, settings: null });
+  const installed: unknown[] = [];
+  const off = registerActions([
+    { id: "tools.install", title: "Install", hidden: true, run: async ({ arg }) => void installed.push(arg) },
+  ]);
+  ipc.debugStart.mockClear();
+  ipc.debugStart.mockResolvedValueOnce({
+    status: "error",
+    error: { kind: "unavailable", message: "debug adapter `unity-debugger` not found (x)" },
+  } as never);
+  const { startSession } = await import("../state");
+  await startSession({
+    name: "Unity Editor",
+    adapter: "unity-debugger",
+    request: "attach",
+    program: null,
+    args: [],
+    cwd: "/g",
+    env: {},
+    extraJson: JSON.stringify({ address: "127.0.0.1", port: 56029 }),
+  });
+  await vi.waitFor(() => expect(ipc.debugStart).toHaveBeenCalledTimes(2));
+  expect(installed).toEqual(["unity-debugger"]);
+  expect(titles).toContain("Installing the Unity debugger…");
+  off();
+  useProject.setState({ project: null });
 });

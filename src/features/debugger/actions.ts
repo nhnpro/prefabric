@@ -6,6 +6,7 @@ import {
   isCancelled,
   isTauri,
   nextRequestId,
+  type AttachableProcess,
   type LaunchConfig,
   type RunConfig,
   type RunId,
@@ -17,6 +18,7 @@ import { activeEditor } from "@/editor/api";
 import type { EditorView } from "@codemirror/view";
 import { maybeEditorService, notifications, showStatusInfo, toolWindowService } from "@/workbench/contributions";
 import { classFileBreakpointReason } from "@/platform/classFiles";
+import { attachConfig, unityEditorFor } from "./attach";
 import { lineHasCode } from "./breakpoints/codeLines";
 import { canPlaceBreakpoint } from "./breakpoints/languages";
 import {
@@ -155,6 +157,29 @@ async function smartStepInto() {
   if (!startInlineSmartStep(t.s.id, t.thread, targets)) openSmartStepChooser(t.s.id, t.thread, targets);
 }
 
+/** Attaches to the Editor of the open Unity project; true once a session is attached to it. */
+async function attachUnityEditor(): Promise<boolean> {
+  const root = useProject.getState().project?.root;
+  if (!root || !isTauri()) return false;
+  const editor = unityEditorFor(await call(commands.debugAttachableProcesses()), root);
+  if (!editor) {
+    notifications().notify({
+      group: "run",
+      level: "warning",
+      key: "debug.action",
+      title: tx("No Unity Editor has this project open"),
+    });
+    return false;
+  }
+  const config = await attachConfig(editor, root);
+  const attached = Object.values(useDebug.getState().sessions).some(
+    (s) => isLive(s) && s.launch?.adapter === config.adapter && s.launch.extraJson === config.extraJson,
+  );
+  if (attached) return true;
+  const session = await startSession(config, { rerunnable: false });
+  return session != null;
+}
+
 /** Opens the Attach to Process popup and loads the process list. */
 export async function openAttachPopup() {
   if (!isTauri()) {
@@ -162,6 +187,10 @@ export async function openAttachPopup() {
     return;
   }
   useOverlays.setState({ attach: { processes: null, error: null } });
+  // Unity players announce themselves over UDP about once a second; they join the list later.
+  const players = useProject.getState().project?.unity
+    ? call(commands.debugUnityPlayers()).catch(() => [] as AttachableProcess[])
+    : null;
   try {
     const processes = await call(commands.debugAttachableProcesses());
     if (useOverlays.getState().attach) useOverlays.setState({ attach: { processes, error: null } });
@@ -169,6 +198,10 @@ export async function openAttachPopup() {
     if (useOverlays.getState().attach)
       useOverlays.setState({ attach: { processes: [], error: errorText(e) || "Cannot list processes" } });
   }
+  const found = players ? await players : [];
+  const open = useOverlays.getState().attach;
+  if (found.length && open?.processes)
+    useOverlays.setState({ attach: { ...open, processes: [...open.processes, ...found] } });
 }
 
 function cursor(): { path: string; line: number; selection: string } | null {
@@ -443,6 +476,31 @@ export function registerDebugActions(): () => void {
             });
           })(),
         ),
+    },
+    {
+      id: "debug.attachUnityEditor",
+      title: "Attach to Unity Editor",
+      category: "Debug",
+      hidden: true,
+      description:
+        "Attach the Unity debugger to the Editor that has this project open, unless attached already (arg: { attached?(ok: boolean): void })",
+      run: ({ arg }) =>
+        (async () => {
+          let ok = false;
+          try {
+            ok = await attachUnityEditor();
+          } catch (e) {
+            notifications().notify({
+              group: "run",
+              level: "error",
+              key: "debug.action",
+              title: tx("Cannot attach to the Unity Editor"),
+              body: errorText(e),
+            });
+          } finally {
+            (arg as { attached?: (ok: boolean) => void } | null)?.attached?.(ok);
+          }
+        })(),
     },
     {
       id: "debug.stop",

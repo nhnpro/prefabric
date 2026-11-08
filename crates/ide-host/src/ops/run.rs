@@ -67,12 +67,15 @@ fn detected_and_saved(
         .linked_projects
         .as_ref()
         .map(|_| ide_build::gradle::load_linked(root, &settings.languages.java.gradle));
-    let mut all: Vec<RunConfig> =
-        ide_run::detect_with_profiles(root, &excluded_poms, settings.cmake.profiles.as_deref())
-            .into_iter()
-            .filter(|d| !suppressed.contains(&d.id) && !saved.iter().any(|u| u.id == d.id))
-            .filter(|d| linked_config(root, gradle.as_deref(), &excluded_poms, d))
-            .collect();
+    let mut detected = ide_run::detect_with_profiles(root, &excluded_poms, settings.cmake.profiles.as_deref());
+    if ide_workspace::unity::is_project(root) {
+        unity::adjust_detected(root, &mut detected);
+    }
+    let mut all: Vec<RunConfig> = detected
+        .into_iter()
+        .filter(|d| !suppressed.contains(&d.id) && !saved.iter().any(|u| u.id == d.id))
+        .filter(|d| linked_config(root, gradle.as_deref(), &excluded_poms, d))
+        .collect();
     all.extend(saved.iter().cloned());
     for config in all.iter_mut().filter(|c| !matches!(c.kind.as_str(), "gradle" | "maven")) {
         ide_sdk::apply::apply_to_run_configs(std::slice::from_mut(config), root, settings);
@@ -200,6 +203,9 @@ pub fn apply_settings(host: &Host, window: &str, configs: Vec<RunConfig>) -> Ide
 
 pub async fn start(host: &Host, window: &str, config: RunConfig, on_output: Emit<OutputChunk>) -> IdeResult<RunInfo> {
     host.require_trust(window)?;
+    if config.kind == unity::KIND {
+        return unity::start(host, window, config, on_output).await;
+    }
     let project = host.project(window)?;
     if config.command.is_empty() {
         return Err(IdeError::invalid("run configuration has no command"));
@@ -321,6 +327,9 @@ pub fn stop(host: &Host, window: &str, id: RunId) -> IdeResult<()> {
         Ok(p) => p.settings.effective(),
         Err(_) => host.global_settings.effective(),
     };
+    if let Some(stopped) = unity::stop(host, window, id) {
+        return stopped;
+    }
     let grace = Duration::from_millis(u64::from(settings.run.termination_timeout_ms));
     if host.remote.runs.contains(id) {
         return host.remote.runs.stop(id, grace);
@@ -357,6 +366,7 @@ pub fn list(host: &Host) -> Vec<RunInfo> {
 
 mod commands;
 mod container;
+mod unity;
 pub use commands::*;
 
 #[cfg(test)]

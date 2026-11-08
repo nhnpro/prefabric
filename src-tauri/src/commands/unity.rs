@@ -45,6 +45,49 @@ pub fn unity_index_status(window: Window, state: State<'_, AppState>) -> IdeResu
     ide_host::ops::unity::index_status(&state.host, window.label())
 }
 
+/// The link to the Unity Editor that has the project open; `null` outside Unity projects.
+#[tauri::command]
+#[specta::specta]
+pub fn unity_link_status(window: Window, state: State<'_, AppState>) -> IdeResult<Option<ide_core::UnityLinkStatus>> {
+    ide_host::ops::unity::link_status(&state.host, window.label())
+}
+
+/// Play, pause, step, stop or refresh assets in the connected Unity Editor.
+#[tauri::command]
+#[specta::specta]
+pub async fn unity_editor_command(
+    window: Window,
+    state: State<'_, AppState>,
+    command: ide_unity::link::UnityEditorCommand,
+) -> IdeResult<()> {
+    ide_host::ops::unity::editor_command(&state.host, window.label(), command).await
+}
+
+/// Selects in the connected Unity Editor what `path` holds at `line` (a GameObject of a scene or
+/// prefab), or the asset; `false` when Unity didn't find it.
+#[tauri::command]
+#[specta::specta]
+pub async fn unity_show_in_editor(
+    window: Window,
+    state: State<'_, AppState>,
+    path: std::path::PathBuf,
+    line: Option<u32>,
+) -> IdeResult<bool> {
+    ide_host::ops::unity::show_in_editor(&state.host, window.label(), path, line).await
+}
+
+/// Merges a conflicted scene, prefab or other YAML asset with UnityYAMLMerge; `null` when it
+/// doesn't apply (not a Unity YAML asset, a deleted side, no Unity installed).
+#[tauri::command]
+#[specta::specta]
+pub async fn unity_merge_asset(
+    window: Window,
+    state: State<'_, AppState>,
+    path: std::path::PathBuf,
+) -> IdeResult<Option<ide_workspace::unity::merge::YamlMerge>> {
+    ide_host::ops::unity::merge_asset(&state.host, window.label(), path).await
+}
+
 /// The scenes, prefabs and clips using the C# class, method or serialized field at `pos`;
 /// `null` outside Unity projects and for symbols assets can't use.
 #[tauri::command]

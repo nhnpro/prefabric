@@ -10,6 +10,7 @@ import { goTestParts, withoutGoSelection } from "../goArguments";
 import { frameworkFor } from "./index";
 import { nodeStatus, type TestNode, type TestResults } from "./results";
 import { dotnetTestsConfig } from "./trx";
+import { unityTestsConfig } from "./unity";
 
 /** Paths of failed tests: failed leaves, plus failed suites without any failed children reported. */
 export function failedTestPaths(results: Pick<TestResults, "roots">): string[][] {
@@ -210,6 +211,8 @@ export function testsConfig(config: RunConfig, paths: string[][], name: string):
       if (!selected) return null;
       return { ...config, ...selected, name, detected: true, env: { ...config.env } };
     }
+    case "unity":
+      return { ...config, ...unityTestsConfig(config, paths), name, detected: true, env: { ...config.env } };
     default:
       args = null;
   }

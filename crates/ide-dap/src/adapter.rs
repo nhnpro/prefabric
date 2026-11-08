@@ -98,6 +98,12 @@ fn builtin(adapter: &str) -> Option<DebuggerConfig> {
             "stdio",
             "Install netcoredbg (.NET debugger) in Settings › Languages & Frameworks › Language Servers",
         ),
+        "unity-debugger" => cfg(
+            "prefabric-unity-debugger",
+            &[],
+            "stdio",
+            "Install Unity debugger (Mono) in Settings › Languages & Frameworks › Language Servers",
+        ),
         "lldb-dap" => {
             cfg("lldb-dap", &[], "stdio", "Install LLVM's lldb-dap (brew install llvm; on macOS `xcrun -f lldb-dap`)")
         }
@@ -125,6 +131,7 @@ pub fn default_type(adapter: &str) -> Option<&'static str> {
         "js-debug" => "pwa-node",
         "delve" => "go",
         "netcoredbg" => "coreclr",
+        "unity-debugger" => "unity",
         "lldb-dap" => "lldb-dap",
         "java-debug" => "java",
         _ => return None,
@@ -674,7 +681,7 @@ mod tests {
 
     #[test]
     fn builtins_cover_common_adapters() {
-        for name in ["codelldb", "debugpy", "js-debug", "delve", "netcoredbg", "java-debug"] {
+        for name in ["codelldb", "debugpy", "js-debug", "delve", "netcoredbg", "java-debug", "unity-debugger"] {
             let cfg = builtin(name).unwrap();
             assert!(cfg.install_hint.is_some());
         }

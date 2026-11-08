@@ -72,6 +72,26 @@ pub fn kill_tree_of(pid: u32) {
     let _ = pid;
 }
 
+/// Whether a process with this id is running.
+pub fn is_running(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+        // SAFETY: signal 0 only checks that the process exists; EPERM means it does.
+        let exists = unsafe { libc::kill(pid, 0) == 0 };
+        exists || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+    #[cfg(windows)]
+    {
+        windows_tree::running(pid)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
 /// [`kill_tree`] that first asks the group to exit: `SIGTERM`, then `grace`, then `SIGKILL`.
 /// Git removes its `index.lock` on `SIGTERM`, where `SIGKILL` leaves it behind and the next
 /// git command fails. Windows has no such signal to send from outside the child's console,
@@ -184,6 +204,12 @@ mod windows_tree {
             }
         }
         out
+    }
+
+    pub(super) fn running(pid: u32) -> bool {
+        use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
+        // SAFETY: a live process handle opened with SYNCHRONIZE access; a zero wait only polls.
+        open(pid).is_some_and(|p| unsafe { WaitForSingleObject(p.as_raw_handle(), 0) } == WAIT_TIMEOUT)
     }
 
     fn open(pid: u32) -> Option<OwnedHandle> {
