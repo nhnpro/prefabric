@@ -81,5 +81,6 @@
   "Inspector: several values": "Inspector: several values",
   "1 override": "1 override",
   "{count} overrides": "{count} overrides",
-  "Show usages in Unity assets": "Show usages in Unity assets"
+  "Show usages in Unity assets": "Show usages in Unity assets",
+  "Unity": "Unity"
 }

@@ -100,6 +100,7 @@
     "unity_50k/field_values": 200000,
     "unity_50k/method_bindings": 200000,
     "unity_50k/referrers": 200000,
+    "unity_50k/search": 120000,
     "unity_50k/index_heap_kib": 307200
   }
 }

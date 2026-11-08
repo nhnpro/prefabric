@@ -4,6 +4,7 @@ use ide_host::ops::project::ProjectInfo;
 use ide_host::ops::unity::UnityAssetUsages;
 use ide_unity::UnityIndexStatus;
 use ide_unity::lenses::UnityLens;
+use ide_unity::search::UnitySearch;
 use ide_workspace::unity::assemblies::AssemblyDefinition;
 use tauri::{State, Window};
 
@@ -61,4 +62,16 @@ pub async fn unity_asset_usages(
 #[specta::specta]
 pub async fn unity_lenses(window: Window, state: State<'_, AppState>, doc: DocId) -> IdeResult<Vec<UnityLens>> {
     ide_host::ops::unity::lenses(&state.host, window.label(), doc).await
+}
+
+/// GameObjects, prefab instances and assets matching `query` (Search Everywhere's Unity tab).
+#[tauri::command]
+#[specta::specta]
+pub async fn unity_search(
+    window: Window,
+    state: State<'_, AppState>,
+    query: String,
+    limit: u32,
+) -> IdeResult<UnitySearch> {
+    ide_host::ops::unity::search(&state.host, window.label(), query, limit).await
 }

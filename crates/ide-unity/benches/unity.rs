@@ -108,6 +108,8 @@ fn bench(c: &mut Criterion) {
     g.bench_function("method_bindings", |b| b.iter(|| black_box(index.method_bindings("OnHit7", None).len())));
     let prefab_guid = guid(synthetic::prefab_guid(7));
     g.bench_function("referrers", |b| b.iter(|| black_box(index.referrers(prefab_guid).len())));
+    // Search Everywhere's Unity tab: a fuzzy name over every GameObject, instance and asset.
+    g.bench_function("search", |b| b.iter(|| black_box(index.search("prefab12", 50).hits.len())));
     g.finish();
 }
 

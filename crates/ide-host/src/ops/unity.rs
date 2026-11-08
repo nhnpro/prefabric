@@ -6,6 +6,7 @@ use crate::ops::project::{ProjectInfo, info};
 use ide_core::{CancellationToken, DocId, IdeError, IdeResult, Pos, RequestId};
 use ide_unity::UnityIndexStatus;
 use ide_unity::lenses::UnityLens;
+use ide_unity::search::UnitySearch;
 use ide_unity::usages::{AssetUsage, symbol_at};
 use ide_workspace::unity::{self, UnityPackageStatus, assemblies::AssemblyDefinition};
 use std::path::Path;
@@ -173,7 +174,15 @@ pub async fn lenses(host: &Host, window: &str, doc: DocId) -> IdeResult<Vec<Unit
     .await
 }
 
+/// Search Everywhere's Unity tab: GameObjects, prefab instances and assets matching `query`.
+pub async fn search(host: &Host, window: &str, query: String, limit: u32) -> IdeResult<UnitySearch> {
+    let project = host.project(window)?;
+    let Some(index) = project.unity.clone() else { return Ok(UnitySearch::default()) };
+    blocking(move || Ok(index.search(&query, limit.min(1_000) as usize))).await
+}
+
 pub fn register(d: &mut crate::rpc::Dispatcher) {
+    d.add("unity_search", |c| async move { search(&c.host, &c.window, c.arg("query")?, c.arg("limit")?).await });
     d.add("unity_lenses", |c| async move { lenses(&c.host, &c.window, c.arg("doc")?).await });
     d.add(
         "unity_asset_usages",

@@ -16,6 +16,8 @@ pub(crate) type FileIdx = u32;
 struct FileNode {
     rel: Arc<str>,
     record: Record,
+    /// The file's GameObjects and prefab instances, by name (for search).
+    named: Box<[Named]>,
     /// Removed since the last full scan (its index isn't reused until then).
     removed: bool,
 }
@@ -35,6 +37,37 @@ pub(crate) struct Graph {
     methods: HashMap<Box<str>, Vec<FileIdx>>,
     live_files: u32,
     scanned_files: u32,
+}
+
+/// A GameObject, or a prefab instance (whose GameObject the file doesn't hold), by name.
+pub(crate) struct Named {
+    /// Empty for an instance that keeps its prefab's name.
+    pub name: Box<str>,
+    pub file_id: i64,
+    /// The prefab of an instance.
+    pub instance_of: Option<Guid>,
+}
+
+fn named_of(scan: &ScannedFile) -> Box<[Named]> {
+    const GAME_OBJECT: u32 = 1;
+    let mut out = Vec::new();
+    for o in &scan.objects {
+        if o.class_id == GAME_OBJECT && !o.stripped {
+            if let Some(name) = o.name.clone().filter(|n| !n.is_empty()) {
+                out.push(Named { name, file_id: o.file_id, instance_of: None });
+            }
+        } else if let Some(prefab) = o.source_prefab.and_then(|p| p.guid) {
+            // The root's renaming, when the instance has one.
+            let name = o
+                .modifications
+                .iter()
+                .find(|m| &*m.property_path == "m_Name")
+                .and_then(|m| m.value.clone())
+                .unwrap_or_default();
+            out.push(Named { name, file_id: o.file_id, instance_of: Some(prefab) });
+        }
+    }
+    out.into_boxed_slice()
 }
 
 /// Adds `file` unless this scan already did (the lists are filled one file at a time).
@@ -69,13 +102,14 @@ impl Graph {
                 let idx = FileIdx::try_from(self.files.len()).unwrap_or(FileIdx::MAX);
                 let rel: Arc<str> = rel.into();
                 self.by_rel.insert(rel.clone(), idx);
-                self.files.push(FileNode { rel, record, removed: false });
+                self.files.push(FileNode { rel, record, named: Box::default(), removed: false });
                 self.live_files += 1;
                 idx
             }
         };
         let Some(node) = self.files.get_mut(idx as usize) else { return };
         node.record = record;
+        node.named = scan.map(named_of).unwrap_or_default();
         if let Some(guid) = record.guid {
             self.by_guid.insert(guid, idx);
         }
@@ -110,6 +144,7 @@ impl Graph {
         self.unlink(idx, old);
         if let Some(node) = self.files.get_mut(idx as usize) {
             node.removed = true;
+            node.named = Box::default();
             self.live_files -= 1;
         }
     }
@@ -187,6 +222,16 @@ impl Graph {
         self.scanned_files
     }
 
+    /// A file's named objects.
+    pub(crate) fn named(&self, file: FileIdx) -> &[Named] {
+        self.files.get(file as usize).map_or(&[], |f| &f.named)
+    }
+
+    /// Live files with their named objects.
+    pub(crate) fn files_named(&self) -> impl Iterator<Item = (FileIdx, &Arc<str>, &[Named])> {
+        self.files.iter().enumerate().filter(|(_, f)| !f.removed).map(|(i, f)| (i as FileIdx, &f.rel, &*f.named))
+    }
+
     pub(crate) fn rel(&self, file: FileIdx) -> Option<&Arc<str>> {
         self.files.get(file as usize).filter(|f| !f.removed).map(|f| &f.rel)
     }
@@ -210,7 +255,10 @@ impl Graph {
             m.values().map(|v| v.capacity() * size_of::<FileIdx>()).sum::<usize>()
                 + m.capacity() * (size_of::<Guid>() + size_of::<Vec<FileIdx>>() + 8)
         };
-        self.files.iter().map(|f| f.rel.len() + 16).sum::<usize>()
+        self.files
+            .iter()
+            .map(|f| f.rel.len() + 16 + f.named.iter().map(|n| n.name.len() + size_of::<Named>()).sum::<usize>())
+            .sum::<usize>()
             + self.files.capacity() * size_of::<FileNode>()
             + self.by_guid.capacity() * (size_of::<Guid>() + size_of::<FileIdx>() + 8)
             + self.by_rel.capacity() * (size_of::<Arc<str>>() + size_of::<FileIdx>() + 8)
@@ -338,7 +386,7 @@ const TRANSFORM: u32 = 4;
 const RECT_TRANSFORM: u32 = 224;
 
 impl Query<'_> {
-    fn file(&self, idx: FileIdx) -> Option<Arc<ScannedFile>> {
+    pub(crate) fn file(&self, idx: FileIdx) -> Option<Arc<ScannedFile>> {
         self.cache.get(self.graph.rel(idx)?, self.source)
     }
 
@@ -547,7 +595,7 @@ pub(crate) fn game_object_path(file: &ScannedFile, go: i64) -> Vec<Box<str>> {
     }
 }
 
-fn transform_path(file: &ScannedFile, transform: i64) -> Vec<Box<str>> {
+pub(crate) fn transform_path(file: &ScannedFile, transform: i64) -> Vec<Box<str>> {
     let mut names = Vec::new();
     let mut next = Some(transform);
     while let Some(id) = next {

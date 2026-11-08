@@ -4757,6 +4757,7 @@ dependencies = [
  "dunce",
  "ide-core",
  "memchr",
+ "nucleo-matcher",
  "parking_lot",
  "postcard",
  "rayon",

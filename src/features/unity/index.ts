@@ -1,15 +1,16 @@
 /** Unity code insight for C#: event function completion and gutter icons, Unity-aware rename,
- * Code Vision from the asset index;
+ * Code Vision and a Search Everywhere tab from the asset index;
  * navigation in assembly definitions; Unity properties in USS; Unity YAML read-only. */
 import { EditorState } from "@codemirror/state";
 import { CONTRIBUTED_RENAME, registerEditorContribution } from "@/editor/api";
-import { registerEditorBanner } from "@/workbench/contributions";
+import { registerEditorBanner, registerSearchEverywhereTab } from "@/workbench/contributions";
 import { useProject } from "@/platform/project";
 import { clearUnityBases, unityDeps } from "./bases";
 import { assemblyDefinitionSupport } from "./asmdef";
 import { unityMessageSource } from "./completion";
 import { eventFunctionGutter } from "./gutter";
 import { unityLenses } from "./lenses";
+import { unitySearchTab } from "./searchTab";
 import { unityRename } from "./rename";
 import { unityYamlBanner, unityYamlLock } from "./unityYaml";
 import { ussSupport } from "./uss";
@@ -46,7 +47,9 @@ export function activate() {
     if (s.project?.root !== prev.project?.root) clearUnityBases();
   });
   const unregisterBanner = registerEditorBanner(unityYamlBanner);
+  const unregisterSearch = registerSearchEverywhereTab(unitySearchTab);
   return () => {
+    unregisterSearch();
     unregisterBanner();
     unregister();
     unsubscribe();

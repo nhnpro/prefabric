@@ -13,6 +13,7 @@ pub mod lenses;
 pub mod prefab;
 pub mod problems;
 pub mod scan;
+pub mod search;
 mod store;
 #[doc(hidden)]
 pub mod synthetic;

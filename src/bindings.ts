@@ -121,6 +121,8 @@ export const commands = {
 } | null, IdeError>(__TAURI_INVOKE("unity_asset_usages", { doc, pos })),
 	/**  Code Vision of a C# file: how assets use its script class, methods and serialized fields. */
 	unityLenses: (doc: DocId) => typedError<UnityLens[], IdeError>(__TAURI_INVOKE("unity_lenses", { doc })),
+	/**  GameObjects, prefab instances and assets matching `query` (Search Everywhere's Unity tab). */
+	unitySearch: (query: string, limit: number) => typedError<UnitySearch, IdeError>(__TAURI_INVOKE("unity_search", { query, limit })),
 	cancelRequest: (id: RequestId) => __TAURI_INVOKE<void>("cancel_request", { id }),
 	/**
 	 *  Stops a background task the backend reported with `cancellable` set; false when it
@@ -7618,6 +7620,25 @@ export type UnityAssetUsages = {
 	usages: AssetUsage[],
 };
 
+export type UnityHit = {
+	kind: UnityHitKind,
+	name: string,
+	/**  Matched character indices of `name`. */
+	indices: number[],
+	/**  Names from the root down to the GameObject's parent; empty for an asset or a root. */
+	parents: string[],
+	/**  The scene or prefab holding it, or the asset itself. */
+	path: IpcPath,
+	/**  0-based line of the object in the file's YAML (0 for an asset). */
+	line: number,
+};
+
+export type UnityHitKind = "gameObject" | 
+/**  An instance of a prefab in a scene or another prefab. */
+"prefabInstance" | 
+/**  An asset file (a prefab, a scene, a material…). */
+"asset";
+
 export type UnityIndexStatus = {
 	/**  Waiting to start or scanning. */
 	indexing: boolean,
@@ -7652,6 +7673,12 @@ export type UnityProjectInfo = {
 	projects: string[],
 	/**  Prefabric's Unity package in this project. */
 	package?: UnityPackageStatus | null,
+};
+
+export type UnitySearch = {
+	hits: UnityHit[],
+	/**  More matched than the limit. */
+	more: boolean,
 };
 
 export type UpdateCheck = {

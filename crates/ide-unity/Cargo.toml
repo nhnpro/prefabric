@@ -15,6 +15,7 @@ parking_lot.workspace = true
 memchr = "2"
 rayon.workspace = true
 blake3.workspace = true
+nucleo-matcher.workspace = true
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 tracing.workspace = true
 

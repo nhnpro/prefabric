@@ -328,3 +328,30 @@ fn conflicted_assets_are_skipped_and_reported() {
     until(|| usages(&index) == expected_usages());
     assert_eq!(notices(&events).len(), 1);
 }
+
+#[test]
+fn searches_game_objects_instances_and_assets() {
+    let (_project, _store, index, root) = copied();
+    let found = |q: &str| {
+        index
+            .search(q, 20)
+            .hits
+            .into_iter()
+            .map(|h| {
+                let rel = h.path.strip_prefix(&root).unwrap().to_string_lossy().into_owned();
+                format!("{:?} {} [{}] {}:{}", h.kind, h.name, h.parents.join("/"), rel, h.line)
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(found("follower"), ["PrefabInstance Follower [Squad] Assets/Prefabs/Squad.prefab:35"]);
+    assert_eq!(found("hero"), ["PrefabInstance Hero [] Assets/Scenes/Main.unity:398"]);
+    // An instance without its own name has its prefab's.
+    assert!(found("squad").iter().any(|h| h.starts_with("PrefabInstance Squad [] Assets/Scenes/Main.unity")));
+    let player = found("player");
+    assert_eq!(player[0], "GameObject Player [] Assets/Prefabs/Player.prefab:2");
+    assert!(player.contains(&"Asset Player.prefab [] Assets/Prefabs/Player.prefab:0".to_owned()));
+    let limited = index.search("player", 2);
+    assert_eq!((limited.hits.len(), limited.more), (2, true));
+    assert_eq!(index.search("plyr", 1).hits[0].indices, [0, 1, 3, 5]);
+    assert!(index.search("  ", 10).hits.is_empty());
+}
