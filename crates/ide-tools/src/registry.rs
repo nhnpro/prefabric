@@ -912,6 +912,30 @@ pub static TOOLS: &[ToolSpec] = &[
         needs: &[],
     },
     ToolSpec {
+        name: "unity-debugger",
+        display: "Unity debugger (Mono)",
+        kind: Debugger,
+        commands: &["prefabric-unity-debugger"],
+        method: Method::Release {
+            // Prefabric's fork of DotRush's Mono soft-debugger adapter: a framework-dependent
+            // .NET app, run with the IDE's .NET through the bin wrapper.
+            source: ReleaseSource::GitHub { repo: "nhnpro/prefabric-unity-debugger" },
+            assets: &[
+                rule(Mac, Arm64, "prefabric-unity-debugger-*-osx-arm64.tar.gz"),
+                rule(Mac, X64, "prefabric-unity-debugger-*-osx-x64.tar.gz"),
+                rule(Linux, X64, "prefabric-unity-debugger-*-linux-x64.tar.gz"),
+                rule(Linux, Arm64, "prefabric-unity-debugger-*-linux-arm64.tar.gz"),
+                rule(Windows, X64, "prefabric-unity-debugger-*-win-x64.zip"),
+                rule(Windows, Arm64, "prefabric-unity-debugger-*-win-arm64.zip"),
+            ],
+            locate: &["monodbg.dll"],
+        },
+        fallback: None,
+        version: V,
+        homepage: "https://github.com/nhnpro/prefabric-unity-debugger",
+        needs: &[],
+    },
+    ToolSpec {
         name: "bash-debug",
         display: "Bash Debug",
         kind: Debugger,
@@ -1044,8 +1068,9 @@ mod tests {
                 known.insert((d.adapter.clone(), d.command.clone()));
             }
         }
-        // The host selects the formatter of each file (Prettier or oxfmt).
-        for t in TOOLS.iter().filter(|t| !matches!(t.kind, Plugin | Formatter)) {
+        // The host selects the formatter of each file (Prettier or oxfmt); the Unity debugger
+        // serves Unity attach configurations, not a language.
+        for t in TOOLS.iter().filter(|t| !matches!(t.kind, Plugin | Formatter) && t.name != "unity-debugger") {
             assert!(
                 known.contains(&(t.name.to_string(), t.commands[0].to_string())),
                 "{} / {} is not referenced by languages/*.toml",

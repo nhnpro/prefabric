@@ -1281,9 +1281,11 @@ impl Tools {
         cancel: &CancellationToken,
         emit: Emit,
     ) -> IdeResult<()> {
-        // NuGet packages hold framework-dependent .NET apps: they need a .NET to run on.
+        // NuGet packages and `.dll` tools are framework-dependent .NET apps: they need a .NET to run on.
+        let dll = locate.iter().any(|l| l.ends_with(".dll"));
         let dotnet = match source {
             ReleaseSource::NuGet { .. } => Some(self.ensure_dotnet(cancel, emit)?),
+            _ if dll => Some(self.ensure_dotnet(cancel, emit)?),
             _ => None,
         };
         let http = Http::new(&self.system_path)?;
@@ -1296,15 +1298,15 @@ impl Tools {
         let result = self.download_and_unpack(spec, &http, &dl, locate, &staging, cancel, emit);
         let _ = std::fs::remove_dir_all(&staging);
         let target = result?;
+        let bin = self.root.join(spec.name).join("bin");
+        if let (true, Some(dotnet)) = (dll, dotnet.as_deref()) {
+            archive::dotnet_wrapper(&bin, spec.commands[0], dotnet, &target)?;
+            return Ok(());
+        }
         // The app host finds .NET only in its default location; name a private or
         // Homebrew one through DOTNET_ROOT, as for `dotnet tool` installs.
         if let Some(root) = dotnet.as_deref().and_then(|d| self.dotnet_root(d)) {
-            archive::env_wrapper(
-                &self.root.join(spec.name).join("bin"),
-                spec.commands[0],
-                &target,
-                &[("DOTNET_ROOT", &root)],
-            )?;
+            archive::env_wrapper(&bin, spec.commands[0], &target, &[("DOTNET_ROOT", &root)])?;
         }
         Ok(())
     }

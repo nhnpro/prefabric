@@ -337,6 +337,25 @@ pub fn env_wrapper(bin_dir: &Path, command: &str, target: &Path, env: &[(&str, &
     }
 }
 
+/// Creates `bin_dir/<command>` that runs the framework-dependent .NET app `dll` with `dotnet`.
+pub fn dotnet_wrapper(bin_dir: &Path, command: &str, dotnet: &Path, dll: &Path) -> IdeResult<PathBuf> {
+    fs::create_dir_all(bin_dir)?;
+    #[cfg(unix)]
+    {
+        let quote = |p: &Path| format!("'{}'", p.to_string_lossy().replace('\'', r"'\''"));
+        let link = bin_dir.join(command);
+        fs::write(&link, format!("#!/bin/sh\nexec {} {} \"$@\"\n", quote(dotnet), quote(dll)))?;
+        make_executable(&link)?;
+        Ok(link)
+    }
+    #[cfg(not(unix))]
+    {
+        let link = bin_dir.join(format!("{command}.cmd"));
+        fs::write(&link, format!("@echo off\r\n\"{}\" \"{}\" %*\r\n", dotnet.display(), dll.display()))?;
+        Ok(link)
+    }
+}
+
 pub fn link_executable(bin_dir: &Path, command: &str, target: &Path) -> IdeResult<PathBuf> {
     fs::create_dir_all(bin_dir)?;
     #[cfg(unix)]
