@@ -172,10 +172,14 @@ fn find_word(line: &str, word: &str) -> Option<usize> {
 
 impl Smoke {
     async fn start(language: &'static str, checks: &Checks) -> Self {
+        Self::start_fixture(language, checks.fixture, checks.files, checks.warm_up).await
+    }
+
+    async fn start_fixture(language: &'static str, fixture: &str, files: &[(&str, &str)], warm_up: Duration) -> Self {
         let tmp = tempfile::tempdir().unwrap();
-        let root = dunce::canonicalize(tmp.path()).unwrap().join(checks.fixture);
-        copy_dir(&fixture_dir(checks.fixture), &root);
-        for (path, text) in checks.files {
+        let root = dunce::canonicalize(tmp.path()).unwrap().join(fixture);
+        copy_dir(&fixture_dir(fixture), &root);
+        for (path, text) in files {
             let path = root.join(path);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, text).unwrap();
@@ -201,7 +205,7 @@ impl Smoke {
         }));
         host.trust.decide(&root, true, false).unwrap();
         host.open_project(WINDOW, &root).unwrap();
-        Smoke { language, host, root, events, warm_up: checks.warm_up, _tmp: tmp }
+        Smoke { language, host, root, events, warm_up, _tmp: tmp }
     }
 
     fn fail(&self, check: &str, message: impl std::fmt::Display) -> ! {
@@ -889,6 +893,33 @@ const CSHARP: Checks = Checks {
 #[ignore = "language smoke: needs roslyn-language-server"]
 async fn csharp() {
     smoke("csharp", CSHARP).await;
+}
+
+/// Go to Definition on a Unity API opens Roslyn's decompiled source of the Unity assembly, as for
+/// any referenced assembly. Needs the fixture's Unity version installed (its project files point
+/// at its assemblies).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "language smoke: needs roslyn-language-server and Unity 6000.6.8f1"]
+async fn unity_api_definition() {
+    let smoke = Smoke::start_fixture("csharp", "unity-sample", &[], Duration::from_secs(300)).await;
+    let (doc, pos) = smoke.locate(at("Assets/Scripts/Player.cs", "transform.Translate(", "Translate")).await;
+    let found = smoke
+        .retry("go to a Unity API", smoke.warm_up, || async {
+            let found = ops::lsp::lsp_goto(&smoke.host, WINDOW, doc, pos, GotoKind::Definition).await;
+            match &found {
+                Ok(locs) if !locs.is_empty() => Ok(locs.clone()),
+                _ => Err(found),
+            }
+        })
+        .await;
+    let target = &found[0];
+    eprintln!("Translate → {} at {:?}", target.path.display(), target.range.start);
+    let text = std::fs::read_to_string(&*target.path).unwrap();
+    assert!(text.contains("class Transform"), "{}", target.path.display());
+    let line = text.lines().nth(target.range.start.line as usize).unwrap();
+    assert!(line.contains("Translate"), "{line}");
+    // Opens read-only, as decompiled sources do.
+    assert!(std::fs::metadata(&*target.path).unwrap().permissions().readonly());
 }
 
 const JAVA: Checks = Checks {
