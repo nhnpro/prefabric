@@ -25,11 +25,13 @@ import {
   RECENT_LIMIT,
   TAB_LIMIT,
   actionItem,
+  contributedTab,
   fileItem,
   matchActions,
   matchSettings,
   mergeActionResults,
   mergeSymbols,
+  providedItem,
   sectionsFor,
   textItems,
   type SeItem,
@@ -100,6 +102,8 @@ export class SeController {
   private signatures = new Map<SectionId, string>();
   private live = new Map<SectionId, number>();
   private requests = new Map<SectionId, RequestId[]>();
+  /** Contributed tabs' searches in flight. */
+  private aborts = new Map<SectionId, AbortController>();
   private started = 0;
   private req: { query: string; tab: SeTab | null } = { query: "", tab: null };
   private elapsed: number | null = null;
@@ -173,6 +177,8 @@ export class SeController {
     this.live.delete(id);
     for (const r of this.requests.get(id) ?? []) this.deps.cancel(r);
     this.requests.delete(id);
+    this.aborts.get(id)?.abort();
+    this.aborts.delete(id);
   }
 
   private isLive(id: SectionId, gen: number) {
@@ -283,11 +289,30 @@ export class SeController {
         case "text":
           await this.startText(id, gen, text, limit, req);
           break;
+        default:
+          await this.startContributed(id, gen, text, limit);
       }
     } catch {
       // Unavailable sources (no project, no index yet) simply contribute nothing.
       this.set(id, gen, [], false, false);
     }
+  }
+
+  /** A contributed tab's search. */
+  private async startContributed(id: SectionId, gen: number, text: string, limit: number) {
+    const tab = contributedTab(id);
+    if (!tab?.search) return this.set(id, gen, [], false, false);
+    const abort = new AbortController();
+    this.aborts.set(id, abort);
+    const found = await tab.search(text, limit, abort.signal);
+    if (this.aborts.get(id) === abort) this.aborts.delete(id);
+    this.set(
+      id,
+      gen,
+      found.items.slice(0, limit).map(providedItem),
+      found.hasMore || found.items.length > limit,
+      false,
+    );
   }
 
   /** Project endpoints by request path (`/menu/search`), ranked in memory. */

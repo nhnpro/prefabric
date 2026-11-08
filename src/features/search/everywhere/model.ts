@@ -4,22 +4,52 @@
  */
 import type { Action } from "@/platform/actions";
 import type { FileMatch, LineMatch, SymbolMatch, WorkspaceSymbol } from "@/platform/ipc";
-import type { SettingsSearchEntry } from "@/workbench/contributions";
+import {
+  registerSearchEverywhereTab,
+  searchEverywhereTabs,
+  useSearchEverywhereTabs,
+  type SearchEverywhereItem,
+  type SearchEverywhereTab,
+  type SettingsSearchEntry,
+} from "@/workbench/contributions";
 import { tx } from "@/platform/i18n";
 import { basename, isTypeKind, relDir, symbolDisplayName } from "../common/open";
 import { byScore, matchText } from "../common/rank";
 
-export type SeTab = "all" | "classes" | "files" | "symbols" | "actions" | "text";
-export type SectionId = "recent" | "recentActions" | "classes" | "files" | "symbols" | "endpoints" | "actions" | "text";
+/** A tab's id: a built-in tab's, or a contributed one's (`registerSearchEverywhereTab`). */
+export type SeTab = string;
+/** A built-in section, or a contributed tab's (its id). */
+export type SectionId = string;
 
-export const TABS: ReadonlyArray<{ id: SeTab; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "classes", label: "Classes" },
-  { id: "files", label: "Files" },
-  { id: "symbols", label: "Symbols" },
-  { id: "actions", label: "Actions" },
-  { id: "text", label: "Text" },
+const ALL_SECTIONS = ["classes", "files", "symbols", "endpoints", "actions", "text"];
+
+/** The built-in tabs, registered like contributed ones. */
+const BUILTIN_TABS: readonly SearchEverywhereTab[] = [
+  { id: "all", label: "All", order: 0, sections: (empty) => (empty ? ["recent", "recentActions"] : ALL_SECTIONS) },
+  { id: "classes", label: "Classes", order: 10, sections: (empty) => (empty ? [] : ["classes"]) },
+  { id: "files", label: "Files", order: 20, sections: (empty) => (empty ? ["recent"] : ["files"]) },
+  { id: "symbols", label: "Symbols", order: 30, sections: (empty) => (empty ? [] : ["symbols"]) },
+  { id: "actions", label: "Actions", order: 40, sections: (empty) => (empty ? ["recentActions"] : ["actions"]) },
+  { id: "text", label: "Text", order: 50, sections: (empty) => (empty ? [] : ["text"]) },
 ];
+for (const t of BUILTIN_TABS) registerSearchEverywhereTab(t);
+
+/** The tabs shown now, in order. */
+export function seTabs(tabs = useSearchEverywhereTabs.getState().tabs): SearchEverywhereTab[] {
+  return searchEverywhereTabs(tabs).filter((t) => t.visible?.() ?? true);
+}
+
+/** A contributed tab with its own search. */
+export function contributedTab(id: string): SearchEverywhereTab | undefined {
+  const t = useSearchEverywhereTabs.getState().tabs.get(id);
+  return t?.search ? t : undefined;
+}
+
+/** Contributed tabs whose results also show in the All tab. */
+const contributedInAll = () =>
+  seTabs()
+    .filter((t) => t.search && t.inAll)
+    .map((t) => t.id);
 
 export const SECTION_ORDER: readonly SectionId[] = [
   "recent",
@@ -32,7 +62,7 @@ export const SECTION_ORDER: readonly SectionId[] = [
   "text",
 ];
 
-export const SECTION_TITLES: Record<SectionId, string> = {
+const SECTION_TITLES: Record<string, string> = {
   recent: "Recent Files",
   recentActions: "Recent Actions",
   classes: "Classes",
@@ -43,21 +73,23 @@ export const SECTION_TITLES: Record<SectionId, string> = {
   text: "Text",
 };
 
+export function sectionTitle(id: SectionId): string {
+  const t = contributedTab(id);
+  return SECTION_TITLES[id] ?? t?.sectionTitle ?? t?.label ?? id;
+}
+
+/** Sections in display order: the built-ins', then contributed tabs' in tab order. */
+function sectionOrder(): SectionId[] {
+  return [...SECTION_ORDER, ...seTabs().flatMap((t) => (t.search ? [t.id] : []))];
+}
+
 /** Sections a tab queries, for a non-empty and an empty query. */
 export function sectionsFor(tab: SeTab, emptyQuery: boolean): SectionId[] {
-  if (emptyQuery) {
-    switch (tab) {
-      case "all":
-        return ["recent", "recentActions"];
-      case "files":
-        return ["recent"];
-      case "actions":
-        return ["recentActions"];
-      default:
-        return [];
-    }
-  }
-  return tab === "all" ? ["classes", "files", "symbols", "endpoints", "actions", "text"] : [tab];
+  const def = useSearchEverywhereTabs.getState().tabs.get(tab);
+  if (!def) return [];
+  if (def.search) return emptyQuery ? [] : [def.id];
+  const sections = def.sections?.(emptyQuery) ?? [];
+  return tab === "all" && !emptyQuery ? [...sections, ...contributedInAll()] : sections;
 }
 
 export const ALL_TAB_LIMIT = 6;
@@ -132,7 +164,17 @@ export interface SettingItem {
   score: number;
 }
 
-export type SeItem = FileItem | SymbolItem | ActionItem | TextItem | SettingItem;
+/** A contributed tab's result. */
+export interface ProvidedItem extends Omit<SearchEverywhereItem, "indices"> {
+  kind: "provided";
+  indices: number[];
+}
+
+export function providedItem(i: SearchEverywhereItem): ProvidedItem {
+  return { ...i, kind: "provided", indices: i.indices ?? [] };
+}
+
+export type SeItem = FileItem | SymbolItem | ActionItem | TextItem | SettingItem | ProvidedItem;
 
 export type SeRow =
   | { kind: "section"; key: string; section: SectionId; title: string }
@@ -380,7 +422,7 @@ export function textItems(path: string, rel: string, matches: readonly LineMatch
 // Rows
 
 /** Sections the All tab mixes into one relevance-ordered list. */
-const MIXED: readonly SectionId[] = ["classes", "files", "symbols", "endpoints", "actions", "text"];
+const mixed = (): SectionId[] => [...ALL_SECTIONS, ...contributedInAll()];
 
 /**
  * Weight of a text hit: a literal substring in a line ranks below name
@@ -402,6 +444,8 @@ export function itemWeight(item: SeItem, query: string): number {
       return item.score;
     case "text":
       return TEXT_WEIGHT;
+    case "provided":
+      return item.score ?? name(item.title) ?? 0;
   }
 }
 
@@ -418,7 +462,7 @@ interface Mixed {
  */
 export function mixItems(sections: ReadonlyMap<SectionId, SectionState>, query: string): Mixed[] {
   const out: Array<Mixed & { rank: number }> = [];
-  MIXED.forEach((id, rank) => {
+  mixed().forEach((id, rank) => {
     let cap = Infinity;
     for (const item of sections.get(id)?.items ?? []) {
       cap = Math.min(cap, itemWeight(item, query));
@@ -443,13 +487,13 @@ export function buildRows(
   const rows: SeRow[] = [];
   if (opts.mix?.trim()) {
     for (const m of mixItems(sections, opts.mix.trim())) rows.push({ ...m.item, section: m.section });
-    for (const id of MIXED) if (sections.get(id)?.hasMore) rows.push({ kind: "more", key: `+${id}`, section: id });
+    for (const id of mixed()) if (sections.get(id)?.hasMore) rows.push({ kind: "more", key: `+${id}`, section: id });
     return rows;
   }
-  for (const id of SECTION_ORDER) {
+  for (const id of sectionOrder()) {
     const s = sections.get(id);
     if (!s || !s.items.length) continue;
-    if (opts.headers) rows.push({ kind: "section", key: `#${id}`, section: id, title: SECTION_TITLES[id] });
+    if (opts.headers) rows.push({ kind: "section", key: `#${id}`, section: id, title: sectionTitle(id) });
     for (const item of s.items) rows.push({ ...item, section: id });
     if (s.hasMore) rows.push({ kind: "more", key: `+${id}`, section: id });
   }
@@ -480,9 +524,10 @@ export function groupJump(rows: readonly SeRow[], active: number, dir: 1 | -1): 
 // ---------------------------------------------------------------------------
 // "/" commands
 
-export const COMMANDS: ReadonlyArray<{ name: string; tab: SeTab; label: string }> = TABS.filter(
-  (t) => t.id !== "all",
-).map((t) => ({ name: `/${t.id}`, tab: t.id, label: t.label }));
+const commands = (): Array<{ name: string; tab: SeTab; label: string }> =>
+  seTabs()
+    .filter((t) => t.id !== "all")
+    .map((t) => ({ name: `/${t.id}`, tab: t.id, label: t.label }));
 
 export type ParsedCommand = { kind: "list"; rows: SeRow[] } | { kind: "run"; tab: SeTab; rest: string };
 
@@ -495,14 +540,16 @@ export function parseCommand(query: string): ParsedCommand | null {
   if (!m) return null;
   const word = m[1]!.toLowerCase();
   if (m[2] !== undefined) {
-    const cmd = COMMANDS.find((c) => c.name === `/${word}`);
+    const cmd = commands().find((c) => c.name === `/${word}`);
     return cmd ? { kind: "run", tab: cmd.tab, rest: m[2] } : null;
   }
-  const rows: SeRow[] = COMMANDS.filter((c) => c.name.startsWith(`/${word}`)).map((c) => ({
-    kind: "command",
-    key: `cmd:${c.tab}`,
-    ...c,
-  }));
+  const rows: SeRow[] = commands()
+    .filter((c) => c.name.startsWith(`/${word}`))
+    .map((c) => ({
+      kind: "command",
+      key: `cmd:${c.tab}`,
+      ...c,
+    }));
   return rows.length ? { kind: "list", rows } : null;
 }
 
@@ -516,9 +563,9 @@ export function parseCommand(query: string): ParsedCommand | null {
 export function topResultSettled(sections: ReadonlyMap<SectionId, SectionState>, mix?: string): boolean {
   if (mix?.trim()) {
     const top = mixItems(sections, mix.trim())[0]?.weight ?? -Infinity;
-    return MIXED.every((id) => !sections.get(id)?.loading || (id === "text" && top > TEXT_WEIGHT));
+    return mixed().every((id) => !sections.get(id)?.loading || (id === "text" && top > TEXT_WEIGHT));
   }
-  for (const id of SECTION_ORDER) {
+  for (const id of sectionOrder()) {
     const s = sections.get(id);
     if (!s) continue;
     if (s.loading) return false;

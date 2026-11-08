@@ -25,7 +25,7 @@ import {
   type MenuItem,
   T,
 } from "@/ui";
-import { useFileDecoration } from "@/workbench/contributions";
+import { useFileDecoration, useSearchEverywhereTabs } from "@/workbench/contributions";
 import { highlightTokens, languageForPath, type CodeToken } from "@/editor/lsp/markdown";
 import { badgeKind, basename, openInListOrder, openLocation, relDir } from "../common/open";
 import { parseLocationQuery } from "../common/query";
@@ -37,12 +37,12 @@ import { FilterPopup } from "./FilterPopup";
 import {
   MORE_STEP_ALL,
   MORE_STEP_TAB,
-  SECTION_TITLES,
-  TABS,
   buildRows,
   groupJump,
   isSectionRow,
   parseCommand,
+  sectionTitle,
+  seTabs,
   stableIndex,
   topResultSettled,
   type SeRow,
@@ -97,7 +97,11 @@ const INITIAL_SELECTION: Selection = { key: null, anchorKey: null, lead: -1, anc
 
 function SearchEverywhereDialog() {
   const tx = useTx();
-  const tab = useSearchEverywhere((s) => s.tab);
+  const registered = useSearchEverywhereTabs((s) => s.tabs);
+  const tabs = useMemo(() => seTabs(registered), [registered]);
+  const chosenTab = useSearchEverywhere((s) => s.tab);
+  // A contributed tab that is gone (another project) falls back to All.
+  const tab = tabs.some((t) => t.id === chosenTab) ? chosenTab : "all";
   const hint = hintFor(tab, tx);
   const query = useSearchEverywhere((s) => s.query);
   const includeNonProject = useSearchEverywhere((s) => s.includeNonProject);
@@ -253,8 +257,8 @@ function SearchEverywhereDialog() {
     inputRef.current?.focus();
   };
   const cycleTab = (dir: 1 | -1) => {
-    const i = TABS.findIndex((t) => t.id === tab);
-    setTab(TABS[(i + dir + TABS.length) % TABS.length]!.id);
+    const i = tabs.findIndex((t) => t.id === tab);
+    setTab(tabs[(i + dir + tabs.length) % tabs.length]!.id);
   };
 
   const close = () => hideSearchEverywhere();
@@ -295,6 +299,9 @@ function SearchEverywhereDialog() {
         return closeThen(() => void executeActionFrom("search", row.id));
       case "setting":
         return closeThen(() => void executeAction("file.settings", row.pageId));
+      case "provided":
+        if (isNavigationRow(row)) return closeThen(() => void openResult(row, { side }));
+        return closeThen(() => void row.open?.());
     }
   };
 
@@ -338,22 +345,37 @@ function SearchEverywhereDialog() {
     const items: MenuItem[] =
       row.kind === "setting"
         ? [{ label: "Open Settings Page", run: () => activate(row) }]
-        : [
-            { label: "Open", run: () => activate(row) },
-            { label: "Open to the Side", shortcut: formatBinding("Shift+Enter"), run: () => activate(row, true) },
-            { kind: "separator" },
-            { label: "Copy Path", run: () => copy(row.path) },
-            { label: "Copy Path from Project Root", run: () => copy(row.rel) },
-            ...(row.kind === "symbol" ? [{ label: "Copy Name", run: () => copy(row.name) }] : []),
-            ...(row.kind === "file" || row.kind === "text"
-              ? [
-                  {
-                    label: "Find in Directory…",
-                    run: () => closeThen(() => void executeAction("find.inPath", { directory: dirOf(row.path) })),
-                  },
-                ]
-              : []),
-          ];
+        : row.kind === "provided"
+          ? [
+              { label: "Open", run: () => activate(row) },
+              ...(row.path
+                ? [
+                    {
+                      label: "Open to the Side",
+                      shortcut: formatBinding("Shift+Enter"),
+                      run: () => activate(row, true),
+                    },
+                    { kind: "separator" as const },
+                    { label: "Copy Path", run: () => copy(row.path!) },
+                  ]
+                : []),
+            ]
+          : [
+              { label: "Open", run: () => activate(row) },
+              { label: "Open to the Side", shortcut: formatBinding("Shift+Enter"), run: () => activate(row, true) },
+              { kind: "separator" },
+              { label: "Copy Path", run: () => copy(row.path) },
+              { label: "Copy Path from Project Root", run: () => copy(row.rel) },
+              ...(row.kind === "symbol" ? [{ label: "Copy Name", run: () => copy(row.name) }] : []),
+              ...(row.kind === "file" || row.kind === "text"
+                ? [
+                    {
+                      label: "Find in Directory…",
+                      run: () => closeThen(() => void executeAction("find.inPath", { directory: dirOf(row.path) })),
+                    },
+                  ]
+                : []),
+            ];
     setMenu({ anchor, items, placement: "right-start" });
   };
 
@@ -418,7 +440,7 @@ function SearchEverywhereDialog() {
   useEffect(() => {
     if (nothingInProject) widenSearchEverywhere(searchQuery);
   }, [nothingInProject, searchQuery]);
-  const canSplit = activeRow?.kind === "file" || activeRow?.kind === "symbol" || activeRow?.kind === "text";
+  const canSplit = !!activeRow && isNavigationRow(activeRow);
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     e.preventDefault();
@@ -437,7 +459,7 @@ function SearchEverywhereDialog() {
     >
       <div className={styles.header} data-dialog-drag="">
         <div role="tablist" aria-label={tx("Search scope")} className={styles.tabs} onKeyDown={onTabKey}>
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -655,6 +677,8 @@ function describe(row: SeRow | undefined): string {
     case "symbol":
     case "text":
       return `${row.rel}:${row.line + 1}`;
+    case "provided":
+      return row.detail ?? row.location ?? "";
   }
 }
 
@@ -670,6 +694,8 @@ function previewOf(row: SeRow | undefined): { path: string; line: number; highli
       };
     case "text":
       return { path: row.path, line: row.line, highlights: [{ line: row.line, ranges: [[row.col, row.endCol]] }] };
+    case "provided":
+      return row.path ? { path: row.path, line: row.line ?? 0, highlights: [] } : null;
     default:
       return null;
   }
@@ -729,7 +755,7 @@ function ResultRow({
     case "more":
       return (
         <span className={clsx(styles.name, styles.more)}>
-          … {tx("more")} {tx(SECTION_TITLES[row.section]).toLowerCase()}
+          … {tx("more")} {tx(sectionTitle(row.section)).toLowerCase()}
         </span>
       );
     case "file":
@@ -812,6 +838,17 @@ function ResultRow({
           </span>
         </>
       );
+    case "provided":
+      return (
+        <>
+          <span className={styles.icon}>{row.icon ? <Icon name={row.icon} size={16} /> : null}</span>
+          <span className={styles.main}>
+            <HighlightedText className={styles.name} text={row.title} indices={row.indices} tone={tone} />
+            {row.detail && <span className={styles.location}>{row.detail}</span>}
+          </span>
+          {row.location && <span className={styles.right}>{row.location}</span>}
+        </>
+      );
   }
 }
 
@@ -887,11 +924,15 @@ function FileRow({
   );
 }
 
-type NavigationRow = Extract<SeRow, { kind: "file" | "symbol" | "text" }>;
+type NavigationRow =
+  | Extract<SeRow, { kind: "file" | "symbol" | "text" }>
+  | (Extract<SeRow, { kind: "provided" }> & { path: string });
 function isNavigationRow(row: SeRow): row is NavigationRow {
-  return row.kind === "file" || row.kind === "symbol" || row.kind === "text";
+  return row.kind === "file" || row.kind === "symbol" || row.kind === "text" || (row.kind === "provided" && !!row.path);
 }
 function openResult(row: NavigationRow, options: Parameters<typeof openLocation>[2]): Promise<void> {
+  if (row.kind === "provided")
+    return openLocation(row.path, row.line !== undefined ? { line: row.line, col: row.col ?? 0 } : null, options);
   if (row.kind === "file")
     return openLocation(row.path, row.line !== null ? { line: row.line, col: row.col ?? 0 } : null, options);
   return openLocation(

@@ -1537,3 +1537,75 @@ export function registerCloneSource(source: CloneSourceContribution): () => void
 export function cloneSourceList(sources = useCloneSources.getState().sources): CloneSourceContribution[] {
   return [...sources.values()].sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.id.localeCompare(b.id));
 }
+
+// ---------------------------------------------------------------------------
+// Search Everywhere tabs. The built-in tabs (All, Classes, Files…) register here too; a feature
+// adds a tab with its own search, whose results show as a section of the tab and, with `inAll`,
+// of the All tab.
+
+/** A result of a contributed tab. */
+export interface SearchEverywhereItem {
+  /** Unique within the tab. */
+  key: string;
+  title: string;
+  /** Matched character indices of `title`, highlighted. */
+  indices?: number[];
+  /** Muted text after the title (a container, a path). */
+  detail?: string;
+  /** Right-aligned text (a file name). */
+  location?: string;
+  icon?: string;
+  /** A file location: Enter opens it, and it is previewed. */
+  path?: string;
+  line?: number;
+  col?: number;
+  /** Runs on Enter when there is no `path`. */
+  open?: () => void | Promise<void>;
+  /** Relevance among the All tab's results (a name match scores 0–1000). */
+  score?: number;
+}
+
+export interface SearchEverywhereResult {
+  items: SearchEverywhereItem[];
+  /** More results than `limit`: the section offers "more". */
+  hasMore: boolean;
+}
+
+export interface SearchEverywhereTab {
+  /** Tab id, also its `/id` command. */
+  id: string;
+  /** Tab label (source text, translated when shown). */
+  label: string;
+  /** Position among the tabs; the built-ins use 0–50 in steps of 10. */
+  order: number;
+  /** Shown only while this holds (e.g. in a Unity project). */
+  visible?: () => boolean;
+  /** Built-in tabs: the sections the tab queries, for a non-empty and an empty query. */
+  sections?: (emptyQuery: boolean) => string[];
+  /** Contributed tabs: the results for a non-empty query; `signal` aborts a superseded search. */
+  search?: (query: string, limit: number, signal: AbortSignal) => Promise<SearchEverywhereResult>;
+  /** The results' section title; the label by default. */
+  sectionTitle?: string;
+  /** The results also appear in the All tab. */
+  inAll?: boolean;
+}
+
+export const useSearchEverywhereTabs = create<{ tabs: Map<string, SearchEverywhereTab> }>(() => ({
+  tabs: new Map(),
+}));
+
+export function registerSearchEverywhereTab(tab: SearchEverywhereTab): () => void {
+  useSearchEverywhereTabs.setState((s) => ({ tabs: new Map(s.tabs).set(tab.id, tab) }));
+  return () =>
+    useSearchEverywhereTabs.setState((s) => {
+      if (s.tabs.get(tab.id) !== tab) return s;
+      const tabs = new Map(s.tabs);
+      tabs.delete(tab.id);
+      return { tabs };
+    });
+}
+
+/** The registered tabs in order, visible or not. */
+export function searchEverywhereTabs(tabs = useSearchEverywhereTabs.getState().tabs): SearchEverywhereTab[] {
+  return [...tabs.values()].sort((a, b) => a.order - b.order);
+}
