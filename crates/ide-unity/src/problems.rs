@@ -18,7 +18,8 @@ pub(crate) enum Problem {
 
 /// What a serialized asset's content allows.
 pub(crate) fn problem(bytes: &[u8]) -> Problem {
-    if !bytes.starts_with(b"%YAML") {
+    // An empty file is a placeholder, not a binary asset.
+    if !bytes.is_empty() && !bytes.starts_with(b"%YAML") {
         return Problem::Binary;
     }
     let marker = |m: &[u8]| bytes.starts_with(m) || memmem::find(bytes, &[b"\n", m].concat()).is_some();
@@ -78,7 +79,7 @@ mod tests {
     fn tells_binary_and_conflicted_assets() {
         assert_eq!(problem(b"%YAML 1.1\n--- !u!1 &1\nGameObject:\n"), Problem::None);
         assert_eq!(problem(b"\0\0\0\0\x01\x02 binary"), Problem::Binary);
-        assert_eq!(problem(b""), Problem::Binary);
+        assert_eq!(problem(b""), Problem::None);
         let conflicted =
             b"%YAML 1.1\n--- !u!1 &1\nGameObject:\n<<<<<<< HEAD\n  m_Name: A\n=======\n  m_Name: B\n>>>>>>> feature\n";
         assert_eq!(problem(conflicted), Problem::Conflict);

@@ -201,7 +201,14 @@ export async function fetchUsages(
     if (groups.length) onAssets?.(groups);
     return groups;
   });
-  const code = await fetchCodeUsages(c, request);
+  let code: FetchedUsages;
+  try {
+    code = await fetchCodeUsages(c, request);
+  } catch (e) {
+    // The asset usages still arrive (through `onAssets`) and stay next to the server's error.
+    await assets;
+    throw e;
+  }
   return { ...code, groups: [...(await assets), ...code.groups] };
 }
 

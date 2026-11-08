@@ -17,7 +17,7 @@ pub(crate) const FILES: TableDefinition<&str, &[u8]> = TableDefinition::new("fil
 const SCANS: TableDefinition<&str, &[u8]> = TableDefinition::new("scans");
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 /// Bump when a stored record or its encoding changes.
-const SCHEMA: &str = "prefabric-unity-4";
+const SCHEMA: &str = "prefabric-unity-5";
 
 type Result<T> = std::result::Result<T, String>;
 

@@ -6,8 +6,9 @@ use crate::scan::{Guid, Object, ScannedFile, scan};
 use ide_core::IpcPath;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +70,8 @@ const MONO_BEHAVIOUR: u32 = 114;
 const MAX_NESTING: usize = 8;
 /// GameObjects shown, at most (a huge scene stays responsive).
 const MAX_NODES: usize = 20_000;
+/// Transforms nested deeper than this aren't shown (and a broken file can't recurse forever).
+const MAX_DEPTH: usize = 256;
 
 fn is_transform(o: &Object) -> bool {
     matches!(o.class_id, TRANSFORM | RECT_TRANSFORM)
@@ -79,11 +82,32 @@ struct Builder<'a> {
     nodes: usize,
     /// Prefabs being expanded (a prefab that instances itself stops there).
     open: HashSet<Guid>,
+    /// Prefabs read so far: a prefab instanced many times is read once.
+    prefabs: HashMap<Guid, Option<Rc<Indexed>>>,
+    /// Transforms shown in the current branch, by file and id: a cyclic `m_Children` stops.
+    branch: HashSet<(usize, i64)>,
+}
+
+/// A scanned file with its objects by id.
+struct Indexed {
+    file: ScannedFile,
+    ids: HashMap<i64, usize>,
+}
+
+impl Indexed {
+    fn new(file: ScannedFile) -> Self {
+        let ids = file.objects.iter().enumerate().map(|(i, o)| (o.file_id, i)).collect();
+        Indexed { file, ids }
+    }
+
+    fn object(&self, id: i64) -> Option<&Object> {
+        self.ids.get(&id).map(|&i| &self.file.objects[i])
+    }
 }
 
 /// One file being shown: its own objects, or a prefab's under an instance of it.
 struct Level<'f> {
-    file: &'f ScannedFile,
+    file: &'f Indexed,
     /// Inside an instance: the instance's line in the shown file, and its name overrides.
     instance: Option<(u32, &'f [(i64, String)])>,
 }
@@ -94,8 +118,9 @@ impl UnityIndex {
         if !bytes.starts_with(b"%YAML") {
             return Hierarchy { roots: Vec::new(), unreadable: true };
         }
-        let file = scan(bytes);
-        let mut b = Builder { index: self, nodes: 0, open: HashSet::new() };
+        let file = Indexed::new(scan(bytes));
+        let mut b =
+            Builder { index: self, nodes: 0, open: HashSet::new(), prefabs: HashMap::new(), branch: HashSet::new() };
         Hierarchy { roots: b.roots(&Level { file: &file, instance: None }, 0), unreadable: false }
     }
 }
@@ -104,9 +129,9 @@ impl Builder<'_> {
     fn roots(&mut self, level: &Level<'_>, depth: usize) -> Vec<HierarchyNode> {
         let file = level.file;
         let mut roots: Vec<(u32, HierarchyNode)> = Vec::new();
-        for o in &file.objects {
+        for o in &file.file.objects {
             let node = if is_transform(o) && !o.stripped && o.father.is_none() {
-                self.game_object(level, o, depth)
+                self.game_object(level, o, depth, 0)
             } else if o.source_prefab.is_some() && o.transform_parent.is_none() {
                 self.instance(level, o, depth)
             } else {
@@ -119,11 +144,30 @@ impl Builder<'_> {
     }
 
     /// The GameObject of `transform`, with its subtree.
-    fn game_object(&mut self, level: &Level<'_>, transform: &Object, depth: usize) -> Option<HierarchyNode> {
-        if self.nodes >= MAX_NODES {
+    fn game_object(
+        &mut self,
+        level: &Level<'_>,
+        transform: &Object,
+        depth: usize,
+        nesting: usize,
+    ) -> Option<HierarchyNode> {
+        let key = (std::ptr::from_ref(level.file) as usize, transform.file_id);
+        if self.nodes >= MAX_NODES || nesting >= MAX_DEPTH || !self.branch.insert(key) {
             return None;
         }
         self.nodes += 1;
+        let node = self.game_object_below(level, transform, depth, nesting);
+        self.branch.remove(&key);
+        node
+    }
+
+    fn game_object_below(
+        &mut self,
+        level: &Level<'_>,
+        transform: &Object,
+        depth: usize,
+        nesting: usize,
+    ) -> Option<HierarchyNode> {
         let file = level.file;
         let go = transform.game_object.and_then(|id| file.object(id))?;
         let own = level.instance.is_none();
@@ -137,7 +181,7 @@ impl Builder<'_> {
             let node = match child.prefab_instance.filter(|_| child.stripped) {
                 // A nested instance's root: the instance stands for it.
                 Some(instance) => file.object(instance).and_then(|i| self.instance(level, i, depth)),
-                None => self.game_object(level, child, depth),
+                None => self.game_object(level, child, depth, nesting + 1),
             };
             children.extend(node);
         }
@@ -174,9 +218,14 @@ impl Builder<'_> {
         let prefab = guid.and_then(|g| self.index.path_of(g));
         let line = level.instance.map_or(o.line, |(line, _)| line);
         let source = match (guid, &prefab) {
-            (Some(g), Some(p)) if depth < MAX_NESTING && !self.open.contains(&g) => {
-                std::fs::read(p).ok().filter(|b| b.starts_with(b"%YAML")).map(|b| (g, scan(&b)))
-            }
+            (Some(g), Some(p)) if depth < MAX_NESTING && !self.open.contains(&g) => self
+                .prefabs
+                .entry(g)
+                .or_insert_with(|| {
+                    std::fs::read(p).ok().filter(|b| b.starts_with(b"%YAML")).map(|b| Rc::new(Indexed::new(scan(&b))))
+                })
+                .clone()
+                .map(|src| (g, src)),
             _ => None,
         };
         // Renamings of the prefab's objects, by their id in the prefab.
@@ -326,6 +375,18 @@ mod tests {
         assert_eq!(follower.children[0].line, follower.line);
         let player = &follower.components[3];
         assert_eq!(player.script.as_ref().map(|p| p.ends_with("Player.cs")), Some(true));
+    }
+
+    #[test]
+    fn cyclic_children_stop() {
+        let store = tempfile::tempdir().unwrap();
+        let index = UnityIndex::open(Path::new(PROJECT), store.path(), Arc::new(NullSink), Box::new(|| true)).unwrap();
+        // Root lists B, B lists the root again and itself.
+        let yaml = b"%YAML 1.1\n--- !u!1 &1\nGameObject:\n  m_Component:\n  - component: {fileID: 2}\n  m_Name: Root\n--- !u!4 &2\nTransform:\n  m_GameObject: {fileID: 1}\n  m_Children:\n  - {fileID: 4}\n  m_Father: {fileID: 0}\n--- !u!1 &3\nGameObject:\n  m_Component:\n  - component: {fileID: 4}\n  m_Name: B\n--- !u!4 &4\nTransform:\n  m_GameObject: {fileID: 3}\n  m_Children:\n  - {fileID: 2}\n  - {fileID: 4}\n  m_Father: {fileID: 2}\n";
+        let h = index.hierarchy(yaml);
+        let mut out = Vec::new();
+        outline(&h.roots, 0, &mut out);
+        assert_eq!(out, ["Root [Transform] 0", "  B [Transform] 0"]);
     }
 
     #[test]

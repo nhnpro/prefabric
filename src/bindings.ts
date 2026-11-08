@@ -1814,6 +1814,11 @@ export type AssetUsage = {
 	gameObject: string[],
 	/**  The prefab (relative to the project) whose instance brings the component. */
 	through: string | null,
+	/**
+	 *  The component's file ID (as text: IDs exceed 2^53): tells apart same-named GameObjects of
+	 *  one instance. `None` for a method binding.
+	 */
+	component: string | null,
 	usage: AssetUsageKind,
 };
 

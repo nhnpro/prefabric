@@ -7,6 +7,7 @@ const assets: AssetUsage[] = [
     line: 121,
     gameObject: ["Squad", "Follower"],
     through: "Assets/Prefabs/Squad.prefab",
+    component: "11",
     usage: { kind: "component" },
   },
   {
@@ -14,6 +15,7 @@ const assets: AssetUsage[] = [
     line: 121,
     gameObject: ["Squad", "Leader"],
     through: "Assets/Prefabs/Squad.prefab",
+    component: "12",
     usage: { kind: "component" },
   },
   {
@@ -21,6 +23,7 @@ const assets: AssetUsage[] = [
     line: 82,
     gameObject: ["Player"],
     through: null,
+    component: "13",
     usage: { kind: "component" },
   },
 ];
@@ -43,7 +46,7 @@ vi.mock("./ipc", async (orig) => ({
 }));
 
 const { fetchUsages } = await import("./usages");
-const { assetUsageText } = await import("./assetUsages");
+const { assetUsageKey, assetUsageText } = await import("./assetUsages");
 
 const caret = { doc: 1, path: "/p/Assets/Scripts/Player.cs", line: 5, col: 18, word: "Player", view: null };
 
@@ -79,6 +82,11 @@ describe("asset usages in Find Usages", () => {
       assetUsageText({ ...assets[2]!, gameObject: ["Walk"], usage: { kind: "animationEvent", time: "0.5" } }, tx)
         .detail,
     ).toBe("Animation event at 0.5 s");
+  });
+
+  it("tell apart same-named GameObjects of one instance by their component", () => {
+    const wheel = { ...assets[0]!, gameObject: ["Car", "Wheel"] };
+    expect(assetUsageKey({ ...wheel, component: "1" })).not.toBe(assetUsageKey({ ...wheel, component: "2" }));
   });
 
   it("aren't asked for outside C# files", async () => {

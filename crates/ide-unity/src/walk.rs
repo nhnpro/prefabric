@@ -41,6 +41,11 @@ pub(crate) fn ignored(name: &str) -> bool {
 }
 
 pub(crate) fn is_scanned(rel: &str) -> bool {
+    // Baked lighting is binary even in Force Text projects, and holds no script references.
+    let name = rel.rsplit('/').next().unwrap_or(rel);
+    if name.ends_with("LightingData.asset") {
+        return false;
+    }
     rel.rsplit_once('.').is_some_and(|(_, ext)| SCANNED.iter().any(|s| ext.eq_ignore_ascii_case(s)))
 }
 
@@ -147,5 +152,6 @@ mod tests {
             is_scanned("Assets/S.unity") && is_scanned("Assets/a.PREFAB") && is_scanned("Assets/x.overrideController")
         );
         assert!(!is_scanned("Assets/P.cs") && !is_scanned("Assets/noext"));
+        assert!(!is_scanned("Assets/Scenes/Main/LightingData.asset") && is_scanned("Assets/Settings.asset"));
     }
 }

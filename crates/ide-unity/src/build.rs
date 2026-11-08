@@ -119,17 +119,24 @@ pub(crate) fn asset_rel(root: &Path, path: &Path) -> Option<String> {
     }
     let rel = parts.join("/");
     let rel = rel.strip_suffix(".meta").map(str::to_owned).unwrap_or(rel);
-    let in_roots = rel.starts_with("Assets/") || (rel.starts_with("Packages/") && rel.matches('/').count() >= 2);
+    // `Packages/<name>` itself: an embedded package added or removed as a whole.
+    let in_roots = rel.starts_with("Assets/") || (rel.starts_with("Packages/") && rel.len() > "Packages/".len());
     in_roots.then_some(rel)
 }
 
-/// Applies changes to the assets `rels` (files or folders, existing or not) to a scanned project.
-pub(crate) fn apply(root: &Path, graph: &RwLock<Graph>, source: &dyn Source, cache: &Cache, rels: Vec<String>) {
+/// Applies changes to the assets `rels` (files or folders, existing or not) to a scanned project;
+/// whether anything queries see changed (not only file stamps).
+pub(crate) fn apply(root: &Path, graph: &RwLock<Graph>, source: &dyn Source, cache: &Cache, rels: Vec<String>) -> bool {
+    let mut changed = false;
     let mut files = Vec::new();
     for rel in rels {
         let abs = root.join(&rel);
+        // `Packages/manifest.json` and the like aren't assets; a package is a folder.
+        let package = rel.starts_with("Packages/") && rel.matches('/').count() == 1;
         if abs.is_dir() {
             files.extend(walk::files_under(&abs, &rel));
+        } else if package {
+            files.extend(graph.read().rels_under(&rel));
         } else if abs.exists() || graph.read().record(&rel).is_some() {
             files.push(rel);
         } else {
@@ -145,9 +152,12 @@ pub(crate) fn apply(root: &Path, graph: &RwLock<Graph>, source: &dyn Source, cac
         let Some(asset) = Stamp::of(&abs).filter(|_| abs.is_file()) else {
             if let Some(known) = known {
                 let old = known.scanned.then(|| source.load(&rel)).flatten();
-                graph.write().remove(&rel, old.as_ref());
+                // Under the write lock: a query (it holds the read lock) can't cache the old scan.
+                let mut g = graph.write();
+                g.remove(&rel, old.as_ref());
                 source.remove(&rel);
                 cache.remove(&rel);
+                changed = true;
             }
             continue;
         };
@@ -156,8 +166,11 @@ pub(crate) fn apply(root: &Path, graph: &RwLock<Graph>, source: &dyn Source, cac
             continue;
         }
         let (record, scan) = read(&rel, &abs, asset, meta, known.as_ref());
-        if record.scanned && scan.is_none() && known.is_some_and(|k| k.guid == record.guid) {
-            // Saved without a change: only the stamps move.
+        if scan.is_none()
+            && known
+                .is_some_and(|k| k.guid == record.guid && k.scanned == record.scanned && k.problem == record.problem)
+        {
+            // Saved without a change (or a file that isn't scanned, like a script): only the stamps move.
             graph.write().touch(&rel, record);
             source.put_record(&rel, record);
             continue;
@@ -169,10 +182,13 @@ pub(crate) fn apply(root: &Path, graph: &RwLock<Graph>, source: &dyn Source, cac
             None if record.scanned => old.clone(),
             None => None,
         };
-        graph.write().set(&rel, record, scan.as_ref(), old.as_ref());
+        let mut g = graph.write();
+        g.set(&rel, record, scan.as_ref(), old.as_ref());
         source.put(&rel, record, scan.as_ref());
         cache.remove(&rel);
+        changed = true;
     }
+    changed
 }
 
 pub(crate) fn content_hash(bytes: &[u8]) -> u64 {
@@ -242,4 +258,25 @@ pub(crate) fn full_scan(
         return Some((graph, Arc::new(StoreSource(store.clone()))));
     }
     Some((graph, Arc::new(MemorySource(RwLock::new(memory)))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::asset_rel;
+    use std::path::Path;
+
+    #[test]
+    fn changed_paths_map_to_assets() {
+        let root = Path::new("/p");
+        let rel = |p: &str| asset_rel(root, &root.join(p));
+        assert_eq!(rel("Assets/A.prefab.meta").as_deref(), Some("Assets/A.prefab"));
+        assert_eq!(
+            rel("Packages/com.x.tools/Runtime/B.prefab").as_deref(),
+            Some("Packages/com.x.tools/Runtime/B.prefab")
+        );
+        // A package folder added or removed as a whole.
+        assert_eq!(rel("Packages/com.x.tools").as_deref(), Some("Packages/com.x.tools"));
+        assert_eq!(rel("Packages"), None);
+        assert_eq!(rel("Library/x.asset"), None);
+    }
 }

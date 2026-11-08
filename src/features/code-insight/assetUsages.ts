@@ -48,5 +48,5 @@ export function assetUsageText(a: AssetUsage, tx: (text: string) => string): { l
 
 /** Identifies an asset usage among those of its file (several GameObjects can share a line). */
 export function assetUsageKey(a: AssetUsage): string {
-  return `${a.gameObject.join("/")}|${a.through ?? ""}|${a.usage.kind}`;
+  return `${a.gameObject.join("/")}|${a.through ?? ""}|${a.component ?? ""}|${a.usage.kind}`;
 }

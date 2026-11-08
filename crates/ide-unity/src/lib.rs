@@ -142,7 +142,9 @@ impl Shared {
                 continue;
             }
             let Some(indexed) = self.indexed.read().clone() else { continue };
-            build::apply(&self.root, &indexed.graph, &*indexed.source, &indexed.cache, rels);
+            if !build::apply(&self.root, &indexed.graph, &*indexed.source, &indexed.cache, rels) {
+                continue;
+            }
             let files = indexed.graph.read().file_count();
             self.set(false, files);
             self.report(store.as_deref());

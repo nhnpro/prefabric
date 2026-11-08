@@ -187,10 +187,20 @@ pub async fn hierarchy(host: &Host, window: &str, path: ide_core::IpcPath) -> Id
     let project = host.project(window)?;
     let Some(index) = project.unity.clone() else { return Ok(Hierarchy { roots: Vec::new(), unreadable: true }) };
     let path = std::path::PathBuf::from(path);
-    if !path.starts_with(index.root()) {
-        return Err(IdeError::invalid(format!("{} is outside the Unity project", path.display())));
+    let scene = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("unity") || e.eq_ignore_ascii_case("prefab"));
+    if !scene {
+        return Err(IdeError::invalid(format!("{} is not a scene or prefab", path.display())));
     }
-    blocking(move || ide_unity::hierarchy::read(&index, &path).map_err(|e| IdeError::internal(e.to_string()))).await
+    blocking(move || {
+        // Resolved first: `..` and symlinks can't lead outside the project.
+        let real = dunce::canonicalize(&path).map_err(|e| IdeError::internal(e.to_string()))?;
+        let root = dunce::canonicalize(index.root()).unwrap_or_else(|_| index.root().to_path_buf());
+        if !real.starts_with(&root) {
+            return Err(IdeError::invalid(format!("{} is outside the Unity project", path.display())));
+        }
+        ide_unity::hierarchy::read(&index, &real).map_err(|e| IdeError::internal(e.to_string()))
+    })
+    .await
 }
 
 pub fn register(d: &mut crate::rpc::Dispatcher) {

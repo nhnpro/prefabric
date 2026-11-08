@@ -15,6 +15,8 @@ import { assemblyDefinitionSupport } from "./asmdef";
 import { unityMessageSource } from "./completion";
 import { eventFunctionGutter } from "./gutter";
 import { hierarchyActions, hierarchyWrapper } from "./hierarchy";
+import { showYamlOnNavigation } from "./hierarchy/follow";
+import { isSceneOrPrefab } from "./hierarchy/modes";
 import { unityLenses } from "./lenses";
 import { unitySearchTab } from "./searchTab";
 import { unityRename } from "./rename";
@@ -46,7 +48,7 @@ export function activate() {
           : ctx.language === "css" && !ctx.virtual
             ? ussSupport(ctx.path)
             : ctx.language === "yaml" && !ctx.virtual
-              ? unityYamlLock(ctx.path)
+              ? [unityYamlLock(ctx.path), isSceneOrPrefab(ctx.path) ? showYamlOnNavigation(ctx.path) : []]
               : [],
   });
   const unsubscribe = useProject.subscribe((s, prev) => {

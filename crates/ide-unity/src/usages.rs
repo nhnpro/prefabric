@@ -59,6 +59,9 @@ pub struct AssetUsage {
     pub game_object: Vec<String>,
     /// The prefab (relative to the project) whose instance brings the component.
     pub through: Option<String>,
+    /// The component's file ID (as text: IDs exceed 2^53): tells apart same-named GameObjects of
+    /// one instance. `None` for a method binding.
+    pub component: Option<String>,
     pub usage: AssetUsageKind,
 }
 
@@ -78,6 +81,7 @@ impl UnityIndex {
                     line: u.line,
                     game_object: names(u.game_object),
                     through: u.through.map(|t| t.to_string()),
+                    component: Some(u.component.to_string()),
                     usage: AssetUsageKind::Component,
                 })
                 .collect(),
@@ -89,6 +93,7 @@ impl UnityIndex {
                     line: b.line,
                     game_object: names(b.owner),
                     through: None,
+                    component: None,
                     usage: match b.kind {
                         BindingKind::UnityEvent { field, .. } => AssetUsageKind::UnityEvent { field: field.into() },
                         BindingKind::AnimationEvent { time } => AssetUsageKind::AnimationEvent { time: time.into() },
@@ -109,6 +114,7 @@ impl UnityIndex {
                         line,
                         game_object: names(v.usage.game_object),
                         through: v.usage.through.map(|t| t.to_string()),
+                        component: Some(v.usage.component.to_string()),
                         usage: AssetUsageKind::FieldValue {
                             value: v.value.map(String::from),
                             overridden: v.overridden_at.is_some(),
