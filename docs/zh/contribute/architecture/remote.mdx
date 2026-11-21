@@ -42,13 +42,13 @@ openidea-server --stdio | --mcp-stdio [--project <path>] | --connect <host> <por
 ```
 
 - `--stdio` 通过 stdin/stdout 为一个桌面客户端提供服务。stdout 承载协议，所以日志写到 stderr（用 `OPENIDEA_LOG` 过滤）。
-- 状态保存在 `OPENIDEA_SERVER_HOME`（默认 `~/.openidea`）下的 `config/` 和 `data/` 中。可以在 `config/languages/` 里追加语言定义。
+- 状态保存在 `OPENIDEA_SERVER_HOME`（默认 `~/.prefabric`）下的 `config/` 和 `data/` 中。可以在 `config/languages/` 里追加语言定义。
 - SSH exec channel 只给最小的环境变量，所以服务端每次启动都会读取登录 shell 的环境，并把 IDE 托管的工具目录加入 `PATH`。
 - `--version` 打印应用版本和协议版本。
 
 ### 安装到远程机器
 
-桌面端根据远程的操作系统和架构（来自 `uname -sm`）选择服务端二进制：先看是否设置了 `OPENIDEA_SERVER_BINARY`，平台相同时再用应用旁边自带的那个；否则使用该平台当前版本的 release 构建，只下载一次，放在 `<data dir>/server/<版本>/<os>-<arch>/`。离线时先用主机上已装的当前版本构建，再用不带版本的 `<data dir>/server/<os>-<arch>/openidea-server`。服务端在 `initialize` 中回报版本；版本不同的服务端缺少某个命令时，错误会写明两边的版本。之后把二进制上传到远程主机的 `~/.openidea/server/`，每个版本一个目录，按内容哈希区分，并删除同版本的其他构建。CI 会持续验证静态 Linux（musl）构建。
+桌面端根据远程的操作系统和架构（来自 `uname -sm`）选择服务端二进制：先看是否设置了 `OPENIDEA_SERVER_BINARY`，平台相同时再用应用旁边自带的那个；否则使用该平台当前版本的 release 构建，只下载一次，放在 `<data dir>/server/<版本>/<os>-<arch>/`。离线时先用主机上已装的当前版本构建，再用不带版本的 `<data dir>/server/<os>-<arch>/openidea-server`。服务端在 `initialize` 中回报版本；版本不同的服务端缺少某个命令时，错误会写明两边的版本。之后把二进制上传到远程主机的 `~/.prefabric/server/`，每个版本一个目录，按内容哈希区分，并删除同版本的其他构建。CI 会持续验证静态 Linux（musl）构建。
 
 ## 协议
 

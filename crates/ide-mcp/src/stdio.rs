@@ -117,13 +117,13 @@ async fn relay(
 ) -> Option<Value> {
     let failure = match post(discovery, project, message, scope, sent, state).await {
         Ok(Answer::Streamed { answered: true }) => return None,
-        Ok(Answer::Streamed { answered: false }) => "OpenIDEA's answer ended early".to_owned(),
+        Ok(Answer::Streamed { answered: false }) => "Prefabric's answer ended early".to_owned(),
         Ok(Answer::Body(StatusCode::ACCEPTED, _)) => return None,
         Ok(Answer::Body(_, body)) if !body.is_empty() => match serde_json::from_slice::<Value>(&body) {
             Ok(reply) => return Some(reply),
             Err(_) => String::from_utf8_lossy(&body).trim().to_owned(),
         },
-        Ok(Answer::Body(status, _)) => format!("OpenIDEA answered {status}"),
+        Ok(Answer::Body(status, _)) => format!("Prefabric answered {status}"),
         Err(e) => e,
     };
     let errors: Vec<Value> = requests(message).into_iter().map(|id| error_response(id, NOT_OPEN, &failure)).collect();
@@ -163,7 +163,7 @@ async fn post(
 ) -> Result<Answer, String> {
     let not_running = || {
         format!(
-            "OpenIDEA's MCP server is not running. Start OpenIDEA, open {} in it, and turn on Settings › Agents › MCP Server",
+            "Prefabric's MCP server is not running. Start Prefabric, open {} in it, and turn on Settings › Agents › MCP Server",
             project.display()
         )
     };
@@ -249,7 +249,7 @@ async fn post_one(
 ) -> Result<Answer, String> {
     let not_running = || {
         format!(
-            "OpenIDEA's MCP server is not running. Start OpenIDEA, open {} in it, and turn on Settings › Agents › MCP Server",
+            "Prefabric's MCP server is not running. Start Prefabric, open {} in it, and turn on Settings › Agents › MCP Server",
             project.display()
         )
     };
@@ -257,7 +257,7 @@ async fn post_one(
     let stream = tokio::net::TcpStream::connect(at).await.map_err(|_| not_running())?;
     let (mut sender, conn) = hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream))
         .await
-        .map_err(|e| format!("cannot reach OpenIDEA: {e}"))?;
+        .map_err(|e| format!("cannot reach Prefabric: {e}"))?;
     tokio::spawn(conn);
     let request = Request::post(format!("/mcp?project={}", crate::encode_query(&project.to_string_lossy())))
         .header(header::HOST, at.to_string())
@@ -267,7 +267,7 @@ async fn post_one(
         .header(header::ACCEPT, "application/json, text/event-stream")
         .body(Full::new(Bytes::from(message.to_string())))
         .map_err(|e| e.to_string())?;
-    let response = sender.send_request(request).await.map_err(|e| format!("cannot reach OpenIDEA: {e}"))?;
+    let response = sender.send_request(request).await.map_err(|e| format!("cannot reach Prefabric: {e}"))?;
     let status = response.status();
     let streamed = response
         .headers()
@@ -275,12 +275,12 @@ async fn post_one(
         .is_some_and(|v| v.to_str().is_ok_and(|v| v.starts_with("text/event-stream")));
     let mut body = response.into_body();
     if !streamed {
-        let body = body.collect().await.map_err(|e| format!("OpenIDEA's answer: {e}"))?.to_bytes();
+        let body = body.collect().await.map_err(|e| format!("Prefabric's answer: {e}"))?.to_bytes();
         return Ok(Answer::Body(status, body));
     }
     let (mut buffer, mut answered) = (Vec::new(), false);
     while let Some(frame) = body.frame().await {
-        let frame = frame.map_err(|e| format!("OpenIDEA's answer: {e}"))?;
+        let frame = frame.map_err(|e| format!("Prefabric's answer: {e}"))?;
         let Ok(data) = frame.into_data() else { continue };
         buffer.extend_from_slice(&data);
         for data in take_events(&mut buffer) {

@@ -1,6 +1,6 @@
 # Writing OpenIDEA plugins
 
-OpenIDEA plugins are sandboxed **WebAssembly components** (wasmtime, component
+Prefabric plugins are sandboxed **WebAssembly components** (wasmtime, component
 model, WASI preview 2). A plugin can register commands (they become IDE actions
 you can search for and bind to keys), read project files, edit the focused
 editor, react to workbench events, run background tasks, show notifications
@@ -1152,7 +1152,7 @@ at most 64 KiB. Unknown/unowned ids return `not-found` without revealing whether
 another owner's source exists. The host checks stored ownership even when a
 user source happens to use the generated id format.
 
-Owned sources persist in `.openidea/data-sources.toml` with `pluginOwner` and
+Owned sources persist in `.prefabric/data-sources.toml` with `pluginOwner` and
 `pluginSourceId`; updates preserve unrelated entries, comments and formatting.
 Plugin edits require the normal `[[data-source]]` table format; inline table arrays
 are rejected. No password is written there. The Database tree refreshes on source changes
@@ -2614,7 +2614,7 @@ desktop's keychain; the server asks for one when a request header needs it.
 Status items, notifications, tasks, views, custom editors and terminals of
 remote plugins show in that window; a custom editor edits the remote
 document.
-Project plugins (`.openidea/plugins`) don't run in remote projects yet, and a
+Project plugins (`.prefabric/plugins`) don't run in remote projects yet, and a
 plugin's storage on the server starts empty.
 
 ### Sandbox and limits
@@ -2858,7 +2858,7 @@ granted, and starts the approved program.
 - **Linked plugins:** `openidea-plugin link <dir>` (§1). Listed with a _linked_
   tag; capabilities are granted per folder.
 - **Project plugins:** put (or symlink) the package in
-  `<project>/.openidea/plugins/<name>/`. They load only in trusted projects and
+  `<project>/.prefabric/plugins/<name>/`. They load only in trusted projects and
   only after you approve their capabilities.
 - **Where:** installing, removing, enabling, granting and reloading plugins
   work on the welcome screen and in trusted projects. A project opened in

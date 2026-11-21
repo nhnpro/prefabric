@@ -209,7 +209,7 @@ pub fn unpack(archive: &Path, dest: &Path) -> Result<Unpacked, String> {
     }
     // An IntelliJ plugin or any other zip: say what is missing rather than fail later.
     let prefix = package_prefix(&names).ok_or_else(|| {
-        format!("{} is not an OpenIDEA plugin: no {MANIFEST_FILE} at its root or in its only folder", archive.display())
+        format!("{} is not a Prefabric plugin: no {MANIFEST_FILE} at its root or in its only folder", archive.display())
     })?;
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     let (mut files, mut signature, mut total, mut manifest) = (Vec::new(), None, 0u64, false);
@@ -926,7 +926,7 @@ mod tests {
             let path = tmp.path().join(name);
             zip_of(&path, entries);
             let err = unpack(&path, &tmp.path().join(name).with_extension("out")).unwrap_err();
-            assert!(err.contains("is not an OpenIDEA plugin"), "{name}: {err}");
+            assert!(err.contains("is not a Prefabric plugin"), "{name}: {err}");
         }
     }
 

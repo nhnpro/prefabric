@@ -3,11 +3,11 @@ title: "Build tools"
 description: "Build the project from the Build menu, work with Maven and Gradle in their tool windows, and manage .NET, CMake, Cargo, Go and npm projects."
 ---
 
-OpenIDEA does not have its own build system. It reads your build files, runs the build tool you already use, and shows the results in the IDE.
+Prefabric does not have its own build system. It reads your build files, runs the build tool you already use, and shows the results in the IDE.
 
 ## Build menu
 
-The **Build** menu works with every supported build system. OpenIDEA picks the build system of the project, or of the module that holds the current file.
+The **Build** menu works with every supported build system. Prefabric picks the build system of the project, or of the module that holds the current file.
 
 | Action                                              | macOS  | Windows / Linux |
 | --------------------------------------------------- | ------ | --------------- |
@@ -33,7 +33,7 @@ Output streams into the **Build** tool window (bottom). Compiler errors and warn
 
 ## Maven
 
-When the project has a `pom.xml`, a **Maven** tool window appears on the right. On first open, OpenIDEA imports the project with Maven in the background (effective POMs and dependency trees).
+When the project has a `pom.xml`, a **Maven** tool window appears on the right. On first open, Prefabric imports the project with Maven in the background (effective POMs and dependency trees).
 
 The tree shows **Profiles**, then each project with **Lifecycle**, **Plugins** (expand to see goals), **Dependencies**, **Run Configurations** and its modules. Double-click a goal to run it, or select several and run them together. Right-click a goal for **Run '…'**, **Debug '…'** and **Create Run Configuration…**. Running a goal from the tree creates a temporary run configuration.
 
@@ -75,7 +75,7 @@ When you edit a POM in the editor, the tool window shows **Build files changed s
 
 ## Gradle
 
-When the project has Gradle build files, a **Gradle** tool window appears on the right. On first open, OpenIDEA reads the task list with Gradle in the background.
+When the project has Gradle build files, a **Gradle** tool window appears on the right. On first open, Prefabric reads the task list with Gradle in the background.
 
 The tree shows the root project with its **Tasks** (grouped), **Run Configurations** and subprojects. Double-click a task to run it. The toolbar has **Reload All Gradle Projects**, **Link Gradle Projects** (add a build the project did not find), **Run Gradle Task**, **Execute Gradle Task…**, **Toggle Offline Mode** (`--offline`) and **Analyze Dependencies…**.
 
@@ -89,7 +89,7 @@ In build scripts, **Navigate › Declaration or Usages** on a version catalog al
 
 | Setting                 | What it does                                                                                                                     |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Build and run using** | **Gradle** runs a main class as a `JavaExec` task; **OpenIDEA** launches it on the Java language server's classpath              |
+| **Build and run using** | **Gradle** runs a main class as a `JavaExec` task; **Prefabric** launches it on the Java language server's classpath             |
 | **Gradle JVM**          | JDK for Gradle sync, tasks, run configurations and tests                                                                         |
 | **Distribution**        | **Gradle wrapper** (or a `mise` / `asdf` pinned Gradle, then Gradle on `PATH`), or **Local installation** with a **Gradle home** |
 | **Gradle user home**    | Sets `GRADLE_USER_HOME`                                                                                                          |

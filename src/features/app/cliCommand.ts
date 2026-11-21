@@ -15,10 +15,10 @@ async function installCli(): Promise<void> {
     const result = await call(commands.appCliInstall());
     const hint = result.pathDirectory
       ? tx`Add ${result.pathDirectory} to the beginning of PATH, then open a new terminal.`
-      : tx("Open a new terminal to use the openidea command.");
+      : tx("Open a new terminal to use the prefabric command.");
     notifications().notify({
       level: "info",
-      title: tx("The openidea command is installed"),
+      title: tx("The prefabric command is installed"),
       body: `${result.path}\n${hint}`,
       key: KEY,
     });
@@ -26,7 +26,7 @@ async function installCli(): Promise<void> {
     if (!isCancelled(e))
       notifications().notify({
         level: "error",
-        title: tx("Cannot install the openidea command"),
+        title: tx("Cannot install the prefabric command"),
         body: errorText(e),
         key: KEY,
       });
@@ -38,7 +38,7 @@ async function uninstallCli(): Promise<void> {
     const links = await call(commands.appCliUninstall());
     notifications().notify({
       level: "info",
-      title: tx(links.length ? "The openidea command is uninstalled" : "The openidea command is not installed"),
+      title: tx(links.length ? "The prefabric command is uninstalled" : "The prefabric command is not installed"),
       body: links.join("\n") || undefined,
       key: KEY,
     });
@@ -46,7 +46,7 @@ async function uninstallCli(): Promise<void> {
     if (!isCancelled(e))
       notifications().notify({
         level: "error",
-        title: tx("Cannot uninstall the openidea command"),
+        title: tx("Cannot uninstall the prefabric command"),
         body: errorText(e),
         key: KEY,
       });
@@ -57,14 +57,14 @@ export function cliActions(): Action[] {
   return [
     {
       id: "app.installCli",
-      title: tx("Install 'openidea' Command"),
+      title: tx("Install 'prefabric' Command"),
       category: tx("Tools"),
       keywords: ["cli", "shell", "terminal", "path", "command line", "launcher"],
       run: installCli,
     },
     {
       id: "app.uninstallCli",
-      title: tx("Uninstall 'openidea' Command"),
+      title: tx("Uninstall 'prefabric' Command"),
       category: tx("Tools"),
       keywords: ["cli", "shell", "terminal", "path", "command line", "launcher"],
       run: uninstallCli,

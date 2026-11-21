@@ -209,7 +209,10 @@ fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
 fn background_control_name(name: &std::ffi::OsStr) -> bool {
     let name = name.to_string_lossy();
     let name = name.split(':').next().unwrap_or_default().trim_end_matches(['.', ' ']);
-    matches!(name.to_ascii_lowercase().as_str(), ".git" | ".hg" | ".svn" | ".idea" | ".openidea" | ".vscode")
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        ".git" | ".hg" | ".svn" | ".idea" | ".prefabric" | ".openidea" | ".vscode"
+    )
 }
 
 /// Whether `path` (absolute, or relative to `root`) lands inside `root`,

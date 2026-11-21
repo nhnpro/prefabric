@@ -113,12 +113,12 @@ describe("SkillsPicker", () => {
     expect(screen.queryByText("playwright")).not.toBeInTheDocument();
   });
 
-  it("stays honest about ACP agents, whose / menu OpenIDEA only filters", async () => {
+  it("stays honest about ACP agents, whose / menu Prefabric only filters", async () => {
     render(<Harness provider="cursor-acp" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Skills" }));
     expect(
-      await screen.findByText("This agent keeps its own / menu: off only stops OpenIDEA offering the skill."),
+      await screen.findByText("This agent keeps its own / menu: off only stops Prefabric offering the skill."),
     ).toBeInTheDocument();
   });
 
@@ -127,7 +127,7 @@ describe("SkillsPicker", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Skills" }));
     expect(
-      screen.queryByText("This agent keeps its own / menu: off only stops OpenIDEA offering the skill."),
+      screen.queryByText("This agent keeps its own / menu: off only stops Prefabric offering the skill."),
     ).not.toBeInTheDocument();
   });
 

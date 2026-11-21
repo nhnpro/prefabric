@@ -70,7 +70,7 @@ fn run_command(&mut self, _id: &str, ctx: &Invocation, _arg: Option<&str>) -> Re
 
 ## 存储位置
 
-- 插件自有的数据源写在项目的 `.openidea/data-sources.toml` 中，带 `pluginOwner` 和 `pluginSourceId`。
+- 插件自有的数据源写在项目的 `.prefabric/data-sources.toml` 中，带 `pluginOwner` 和 `pluginSourceId`。
   更新时会保留无关的条目、注释和格式。文件必须使用常规的 `[[data-source]]` 表格式，内联表数组会被拒绝。
   这里不会写入任何密码。
 - 数据源变化时数据库树会刷新，并用插件 id 标注插件自有的数据源。复制它会得到一份归用户所有的副本。

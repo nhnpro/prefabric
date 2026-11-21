@@ -272,7 +272,7 @@ impl PluginHost {
         self.apply_revocations();
         if let Some(format) = newer {
             return Err(IdeError::unavailable(format!(
-                "the marketplace needs a newer OpenIDEA (index format {format}); its revocations still apply"
+                "the marketplace needs a newer Prefabric (index format {format}); its revocations still apply"
             )));
         }
         let plugins = self.market_plugins();
@@ -342,7 +342,7 @@ impl PluginHost {
             .ok_or_else(|| IdeError::not_found(format!("{id} is not in the marketplace")))?;
         if !compatible {
             return Err(IdeError::unavailable(format!(
-                "{} {} needs plugin API {}: update OpenIDEA",
+                "{} {} needs plugin API {}: update Prefabric",
                 entry.name, entry.version, entry.engine
             )));
         }

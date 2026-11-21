@@ -389,7 +389,7 @@ fn jdtls_m2e_gets_effective_settings_with_local_repository() {
     s.languages.java.maven.local_repository = repo.to_string_lossy().into_owned();
     let mut cfg = server("jdtls");
     configure_server(&mut cfg, tmp.path(), tmp.path(), &s);
-    let derived = tmp.path().join(".openidea").join("maven-settings.xml");
+    let derived = tmp.path().join(".prefabric").join("maven-settings.xml");
     assert_eq!(user_settings(&cfg), Some(derived.clone()));
     let text = std::fs::read_to_string(&derived).unwrap();
     assert!(text.contains(&format!("<localRepository>{}</localRepository>", repo.to_string_lossy())));

@@ -27,7 +27,7 @@ description: "在服务工具窗口中管理运行配置、Docker 容器、镜�
 
 ## Docker
 
-OpenIDEA 通过 `docker` 命令行操作 Docker，所以只要能提供可用的 `docker` 命令即可：Docker Desktop、OrbStack、Colima、Rancher Desktop 或者原生 Docker Engine 都行。它会在 `OPENIDEA_DOCKER`、`PATH` 以及这些工具的常见安装目录中查找 `docker`。
+Prefabric 通过 `docker` 命令行操作 Docker，所以只要能提供可用的 `docker` 命令即可：Docker Desktop、OrbStack、Colima、Rancher Desktop 或者原生 Docker Engine 都行。它会在 `OPENIDEA_DOCKER`、`PATH` 以及这些工具的常见安装目录中查找 `docker`。
 
 ### 连接
 
@@ -42,7 +42,7 @@ OpenIDEA 通过 `docker` 命令行操作 Docker，所以只要能提供可用的
 
 ### 镜像注册表
 
-**添加服务 › Docker 注册表…** 用于保存注册表凭据（**地址：** 如 `docker.io`、`ghcr.io`、`registry.example.com:5000`，**用户名：**，**密码：**）。可以在对话框里点 **测试连接**，或在注册表节点上用 **测试登录**。从该注册表拉取镜像时，OpenIDEA 会在临时的 Docker 配置中用这些凭据登录，不会改动你自己的 `~/.docker/config.json`。
+**添加服务 › Docker 注册表…** 用于保存注册表凭据（**地址：** 如 `docker.io`、`ghcr.io`、`registry.example.com:5000`，**用户名：**，**密码：**）。可以在对话框里点 **测试连接**，或在注册表节点上用 **测试登录**。从该注册表拉取镜像时，Prefabric 会在临时的 Docker 配置中用这些凭据登录，不会改动你自己的 `~/.docker/config.json`。
 
 ### 树中的内容
 
@@ -77,7 +77,7 @@ OpenIDEA 通过 `docker` 命令行操作 Docker，所以只要能提供可用的
 
 ## Dockerfile 与 Compose 文件
 
-OpenIDEA 能识别 `Dockerfile`、`Containerfile`、`Dockerfile.<名称>`、`*.dockerfile`、`*.containerfile`，以及 Compose 文件（文件名包含 `compose` 的 YAML，或者内容看起来像 Compose 的 YAML）。按内容识别出的文件顶部会有横幅，可以选择 **不是 Compose 文件** 或 **保留为 Docker Compose**。
+Prefabric 能识别 `Dockerfile`、`Containerfile`、`Dockerfile.<名称>`、`*.dockerfile`、`*.containerfile`，以及 Compose 文件（文件名包含 `compose` 的 YAML，或者内容看起来像 Compose 的 YAML）。按内容识别出的文件顶部会有横幅，可以选择 **不是 Compose 文件** 或 **保留为 Docker Compose**。
 
 边栏中会显示运行图标：
 
@@ -132,12 +132,12 @@ OpenIDEA 能识别 `Dockerfile`、`Containerfile`、`Dockerfile.<名称>`、`*.d
 
 部署下的 **选项** 页面：
 
-| 选项                                 | 默认值                                                      |
-| ------------------------------------ | ----------------------------------------------------------- |
-| **按名称排除项目**                   | `.git;.svn;.hg;.idea;.openidea;.DS_Store;*.pyc;__pycache__` |
-| **自动将更改的文件上传到默认服务器** | **从不**（可选 **显式保存时**、**始终**）                   |
-| **删除本地文件时删除远程文件**       | 关                                                          |
-| **保留文件时间戳**                   | 开                                                          |
+| 选项                                 | 默认值                                                       |
+| ------------------------------------ | ------------------------------------------------------------ |
+| **按名称排除项目**                   | `.git;.svn;.hg;.idea;.prefabric;.DS_Store;*.pyc;__pycache__` |
+| **自动将更改的文件上传到默认服务器** | **从不**（可选 **显式保存时**、**始终**）                    |
+| **删除本地文件时删除远程文件**       | 关                                                           |
+| **保留文件时间戳**                   | 开                                                           |
 
 自动上传只在受信任的项目中进行。自动传输失败时会提示，成功时不打扰。
 
@@ -152,7 +152,7 @@ OpenIDEA 能识别 `Dockerfile`、`Containerfile`、`Dockerfile.<名称>`、`*.d
 - **在浏览器中打开（已部署）**：在 Web 服务器上打开文件对应的 URL。
 - **浏览远程主机**：打开 **远程主机** 工具窗口，以树的形式浏览服务器文件，支持 **打开**（编辑本地副本，保存时自动上传回去）、**下载到项目**、**新建文件夹…**、**重命名…**、**删除…**、**刷新** 和 **复制路径**。
 
-遇到未知的主机密钥时会先让你确认；SSH 配置没有保存密码时，OpenIDEA 会询问密码或密钥口令。
+遇到未知的主机密钥时会先让你确认；SSH 配置没有保存密码时，Prefabric 会询问密码或密钥口令。
 
 ## 暂不支持
 

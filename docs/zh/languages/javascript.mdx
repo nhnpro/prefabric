@@ -3,7 +3,7 @@ title: "JavaScript 与 TypeScript"
 description: "JavaScript、TypeScript、Vue、Svelte、Astro 和 Angular 的语言服务器、Node.js 识别、npm 脚本、测试、调试与框架支持。"
 ---
 
-OpenIDEA 打开 JavaScript（`.js`、`.mjs`、`.cjs`、`.jsx`）和 TypeScript（`.ts`、`.mts`、`.cts`、`.tsx`）文件即可获得语法高亮和代码结构，无需任何配置；补全、跳转、重构和诊断由 TypeScript 语言服务器提供。Vue、Svelte、Astro 和 Angular 项目还会额外启动各自框架的语言服务器。所有语言的支持情况见[支持矩阵](/zh/languages/index)。
+Prefabric 打开 JavaScript（`.js`、`.mjs`、`.cjs`、`.jsx`）和 TypeScript（`.ts`、`.mts`、`.cts`、`.tsx`）文件即可获得语法高亮和代码结构，无需任何配置；补全、跳转、重构和诊断由 TypeScript 语言服务器提供。Vue、Svelte、Astro 和 Angular 项目还会额外启动各自框架的语言服务器。所有语言的支持情况见[支持矩阵](/zh/languages/index)。
 
 ## 语言服务器
 
@@ -69,7 +69,7 @@ Vue、Astro 和 Angular 服务器也会使用这里选择的版本。TypeScript 
 
 ## 运行与测试
 
-打开项目时，OpenIDEA 会自动检测运行配置：
+打开项目时，Prefabric 会自动检测运行配置：
 
 - 每个 `package.json` 脚本一个配置（`npm run build`、`pnpm run dev` 等），覆盖根包、嵌套包和 workspace 成员。名为 `test`、`jest`、`vitest` 或 `test:*` 的脚本是测试配置。
 - `deno.json` / `deno.jsonc` 中每个 task 一个配置（`deno task <name>`）。

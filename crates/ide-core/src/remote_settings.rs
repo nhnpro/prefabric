@@ -99,7 +99,7 @@ impl Default for DeploymentSettings {
             auto_upload: AutoUpload::Never,
             delete_remote: false,
             preserve_timestamps: true,
-            exclude: [".git", ".svn", ".hg", ".idea", ".openidea", ".DS_Store", "*.pyc", "__pycache__"]
+            exclude: [".git", ".svn", ".hg", ".idea", ".prefabric", ".openidea", ".DS_Store", "*.pyc", "__pycache__"]
                 .map(String::from)
                 .to_vec(),
         }

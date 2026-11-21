@@ -1,7 +1,7 @@
 //! The HTTP side: one endpoint, `/mcp`, on the loopback interface.
 
 use crate::discovery::Discovery;
-use crate::{CancellationToken, PROJECT_HEADER, ToolRegistry, protocol};
+use crate::{CancellationToken, LEGACY_PROJECT_HEADER, PROJECT_HEADER, ToolRegistry, protocol};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Either, Full, Limited};
 use hyper::body::{Frame, Incoming};
@@ -403,7 +403,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 /// The project the request names: the header (UTF-8), else `?project=` (percent-encoded).
 fn project_of(req: &Request<Incoming>) -> Option<String> {
-    if let Some(value) = req.headers().get(PROJECT_HEADER) {
+    if let Some(value) = req.headers().get(PROJECT_HEADER).or_else(|| req.headers().get(LEGACY_PROJECT_HEADER)) {
         return String::from_utf8(value.as_bytes().to_vec()).ok();
     }
     req.uri().query()?.split('&').find_map(|pair| {

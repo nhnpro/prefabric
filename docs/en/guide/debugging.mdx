@@ -3,7 +3,7 @@ title: "Debugging"
 description: "Set breakpoints, step through code, inspect variables and evaluate expressions with the built-in Debug Adapter Protocol client."
 ---
 
-OpenIDEA debugs programs through the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) (DAP). Each language names its debug adapter in its definition (`languages/<id>.toml`, `[debugger]` table), and the IDE starts that adapter when you debug a run configuration. Commands and shortcuts follow IntelliJ IDEA, so most of what you know from IDEA works the same way.
+Prefabric debugs programs through the [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) (DAP). Each language names its debug adapter in its definition (`languages/<id>.toml`, `[debugger]` table), and the IDE starts that adapter when you debug a run configuration. Commands and shortcuts follow IntelliJ IDEA, so most of what you know from IDEA works the same way.
 
 ## Start a debug session
 
@@ -15,7 +15,7 @@ Any [run configuration](/en/guide/run) with a debug adapter can be debugged:
 
 The **Debug adapter** field in **Run › Edit Configurations…** decides which debugger a configuration uses. Set it to **None** to turn debugging off for that configuration.
 
-Before the session starts, OpenIDEA saves all open files. When the adapter is missing, the IDE says so and, for debuggers it can install, offers **Install and Debug**.
+Before the session starts, Prefabric saves all open files. When the adapter is missing, the IDE says so and, for debuggers it can install, offers **Install and Debug**.
 
 The Debug tool window (`⌘5` / `Alt+5`) opens with one tab per session. It has two views:
 

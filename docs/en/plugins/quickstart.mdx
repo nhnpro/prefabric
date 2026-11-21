@@ -1,13 +1,13 @@
 ---
 title: "Quickstart"
-description: "Install the plugin tool, scaffold a Rust plugin, build it, link it into OpenIDEA and run its commands."
+description: "Install the plugin tool, scaffold a Rust plugin, build it, link it into Prefabric and run its commands."
 ---
 
 This walkthrough creates a code plugin with two commands, tests it, builds it to WebAssembly and loads it into the IDE without installing it.
 
 ## Prerequisites
 
-- OpenIDEA installed.
+- Prefabric installed.
 - Rust through [rustup](https://rustup.rs). `openidea-plugin build` adds the `wasm32-wasip2` target through rustup if it is missing; you can also add it yourself with `rustup target add wasm32-wasip2`.
 
 <Steps>
@@ -82,7 +82,7 @@ This walkthrough creates a code plugin with two commands, tests it, builds it to
     `link` adds the folder to `links.json` in the IDE's plugins directory. Linked plugins are read from the folder itself, so you never reinstall while developing. `openidea-plugin links` lists linked folders and `openidea-plugin unlink` removes one.
 
     <Note>
-    The plugins directory is `$OPENIDEA_PLUGINS_DIR`, or `ai.l0ng.openidea/plugins` in your system's app data directory. A development build of OpenIDEA from source uses its own data directory: point `OPENIDEA_PLUGINS_DIR` at its `plugins` folder when you link. See [Data directories](/en/reference/data-directories).
+    The plugins directory is `$OPENIDEA_PLUGINS_DIR`, or `dev.prefabric.ide/plugins` in your system's app data directory. A development build of Prefabric from source uses its own data directory: point `OPENIDEA_PLUGINS_DIR` at its `plugins` folder when you link. See [Data directories](/en/reference/data-directories).
     </Note>
 
   </Step>

@@ -276,7 +276,7 @@ gate = k.OpenEventW(0x00100000, 0, os.environ.pop('OPENIDEA_LAUNCH_EVENT'))
 if not interrupt or not gate:
     raise ctypes.WinError(ctypes.get_last_error())
 if k.WaitForSingleObject(gate, 30000) != 0:
-    raise RuntimeError('OpenIDEA kernel launch gate failed')
+    raise RuntimeError('Prefabric kernel launch gate failed')
 k.CloseHandle(gate)
 os.environ['JPY_INTERRUPT_EVENT'] = str(interrupt)
 try:

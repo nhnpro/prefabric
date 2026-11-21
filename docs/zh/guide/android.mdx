@@ -3,11 +3,11 @@ title: "Android 与 Logcat"
 description: "在 Logcat 工具窗口中查看已连接 Android 设备或模拟器的日志。"
 ---
 
-OpenIDEA 目前的 Android 支持就是 **Logcat 日志** 工具窗口：通过 `adb` 实时显示已连接设备或模拟器的日志，并提供级别和文本过滤。它不负责构建、安装或运行 Android 应用，也不管理模拟器、不编辑 Android 资源。
+Prefabric 目前的 Android 支持就是 **Logcat 日志** 工具窗口：通过 `adb` 实时显示已连接设备或模拟器的日志，并提供级别和文本过滤。它不负责构建、安装或运行 Android 应用，也不管理模拟器、不编辑 Android 资源。
 
 ## 准备 adb
 
-Logcat 调用的是 Android SDK platform-tools 里的 `adb`，OpenIDEA 不自带。查找顺序如下：
+Logcat 调用的是 Android SDK platform-tools 里的 `adb`，Prefabric 不自带。查找顺序如下：
 
 1. 环境变量 `OPENIDEA_ADB`（可执行文件的完整路径）。
 2. `ANDROID_HOME` 或 `ANDROID_SDK_ROOT` 下的 `platform-tools/`。
@@ -16,7 +16,7 @@ Logcat 调用的是 Android SDK platform-tools 里的 `adb`，OpenIDEA 不自带
 
 <Note>
   在 macOS 上，从程序坞启动的应用读不到 shell 配置文件里导出的环境变量。如果依赖 `ANDROID_HOME`，请把 SDK
-  装在默认位置，或者从终端启动 OpenIDEA。
+  装在默认位置，或者从终端启动 Prefabric。
 </Note>
 
 ## 打开 Logcat

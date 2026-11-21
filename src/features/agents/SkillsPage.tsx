@@ -248,7 +248,7 @@ export function SkillsPage({ backend = defaultSkillsBackend }: { backend?: Skill
         {grouped.length === 0 && !error && (
           <div className={styles.emptyBox}>
             <T>
-              No skills found in .agents/skills, .openidea/skills, ~/.agents/skills, or the CLI folders of Claude Code,
+              No skills found in .agents/skills, .prefabric/skills, ~/.agents/skills, or the CLI folders of Claude Code,
               GitHub Copilot, Codex, and Cursor.
             </T>
           </div>
@@ -387,7 +387,7 @@ function SkillCard({
             <span className={styles.hint}>
               <Icon name={providerIcon(group.agent)} size={12} />{" "}
               <T>
-                This CLI discovers the folder itself: off hides the skill from OpenIDEA's / menu and applies only where
+                This CLI discovers the folder itself: off hides the skill from Prefabric's / menu and applies only where
                 the CLI supports disabling.
               </T>
             </span>

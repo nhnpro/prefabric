@@ -1,18 +1,18 @@
 ---
 title: "Unity"
-description: "把 OpenIDEA 设为 Unity 的外部脚本编辑器，浏览 Unity 项目，并让 .meta 文件始终跟随资源。"
+description: "把 Prefabric 设为 Unity 的外部脚本编辑器，浏览 Unity 项目，并让 .meta 文件始终跟随资源。"
 ---
 
-只要文件夹里有 `Assets` 目录和 `ProjectSettings/ProjectVersion.txt`，OpenIDEA 就会把它识别为 Unity 项目：接收 Unity 发来的打开脚本请求，隐藏 Unity 的缓存目录，移动资源时连同 `.meta` 文件一起处理，并通过 C# 语言服务器提供代码智能。不需要安装任何 Unity 包或编辑器插件。
+只要文件夹里有 `Assets` 目录和 `ProjectSettings/ProjectVersion.txt`，Prefabric 就会把它识别为 Unity 项目：接收 Unity 发来的打开脚本请求，隐藏 Unity 的缓存目录，移动资源时连同 `.meta` 文件一起处理，并通过 C# 语言服务器提供代码智能。不需要安装任何 Unity 包或编辑器插件。
 
-## 把 OpenIDEA 设为外部脚本编辑器
+## 把 Prefabric 设为外部脚本编辑器
 
 <Steps>
   <Step title="在 Unity 中打开 External Tools">
     在 Unity 中打开 **Edit › Preferences › External Tools**（macOS 上是 **Unity › Settings** 或 **Unity › Preferences**，再进入 **External Tools**）。
   </Step>
-  <Step title="选择 OpenIDEA">
-    在 **External Script Editor** 中点 **Browse**，选择 OpenIDEA 的可执行文件（macOS 上选 `OpenIDEA.app`）。
+  <Step title="选择 Prefabric">
+    在 **External Script Editor** 中点 **Browse**，选择 Prefabric 的可执行文件（macOS 上选 `Prefabric.app`）。
   </Step>
   <Step title="填写参数">
     把 **External Script Editor Args** 设为：
@@ -26,7 +26,7 @@ description: "把 OpenIDEA 设为 Unity 的外部脚本编辑器，浏览 Unity 
   </Step>
 </Steps>
 
-之后在 Unity 的 Project 窗口双击脚本，或在 Console 中双击源码位置，OpenIDEA 会打开项目（如果已有窗口打开了该项目，就切到那个窗口），打开文件并把光标放到对应的行和列。其他已打开的标签页保持不变。
+之后在 Unity 的 Project 窗口双击脚本，或在 Console 中双击源码位置，Prefabric 会打开项目（如果已有窗口打开了该项目，就切到那个窗口），打开文件并把光标放到对应的行和列。其他已打开的标签页保持不变。
 
 ### 参数说明
 
@@ -43,10 +43,10 @@ description: "把 OpenIDEA 设为 Unity 的外部脚本编辑器，浏览 Unity 
 
 文件也可以不写 `--file`，作为第二个路径跟在项目文件夹后面（`$(ProjectPath) --line $(Line) --column $(Column) $(File)`）；相对路径按工作目录解析。
 
-自己在命令行调用可执行文件时，按所用 shell 的规则给路径加引号。另行安装的 `openidea` 命令语法不同（`--line`、`--column` 写在文件前面，没有 `--file`），见[命令行](/zh/reference/cli)。
+自己在命令行调用可执行文件时，按所用 shell 的规则给路径加引号。另行安装的 `prefabric` 命令语法不同（`--line`、`--column` 写在文件前面，没有 `--file`），见[命令行](/zh/reference/cli)。
 
 <Note>
-  在 Windows 上，请让 Unity 和 OpenIDEA 以相同的权限运行（都以管理员身份，或都不是）。如果正在运行的 OpenIDEA
+  在 Windows 上，请让 Unity 和 Prefabric 以相同的权限运行（都以管理员身份，或都不是）。如果正在运行的 Prefabric
   对双击没有反应，用一致的权限重启两者后再试。
 </Note>
 
@@ -90,7 +90,7 @@ Unity 写出这些文件后，IDE 会自动感知并加载，无需重新打开�
 
 ## 限制
 
-- OpenIDEA 不会生成 Unity 的 C# 项目文件，需要由 Unity 生成。
-- 没有 Unity 调试集成：无法从 OpenIDEA 附加到 Unity 编辑器或播放器。
+- Prefabric 不会生成 Unity 的 C# 项目文件，需要由 Unity 生成。
+- 没有 Unity 调试集成：无法从 Prefabric 附加到 Unity 编辑器或播放器。
 - 没有 Unity 专用的检查、运行配置，也不支持 ShaderLab。
 - 从 Unity 打开文件只支持本地项目，不支持 WSL 中的项目。

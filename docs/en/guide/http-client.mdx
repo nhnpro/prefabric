@@ -78,7 +78,7 @@ Put environments in `http-client.env.json`, and secrets in `http-client.private.
 }
 ```
 
-OpenIDEA looks for each file in the request file's folder, then in each parent folder up to the project root, and uses the closest one. Files at different levels are not merged. Only string, number and boolean values are used.
+Prefabric looks for each file in the request file's folder, then in each parent folder up to the project root, and uses the closest one. Files at different levels are not merged. Only string, number and boolean values are used.
 
 Pick the environment in the editor toolbar under **Run with:** (**No Environment** or one of the names). The choice is remembered per file. Click **Reload Environments** after editing the files.
 
@@ -120,7 +120,7 @@ There is no separate HTTP client settings page.
 
 ## Endpoints and Spring
 
-OpenIDEA indexes Spring Web endpoints (`@RestController` / `@Controller` classes with `@RequestMapping`, `@GetMapping` and similar) in Java and Kotlin:
+Prefabric indexes Spring Web endpoints (`@RestController` / `@Controller` classes with `@RequestMapping`, `@GetMapping` and similar) in Java and Kotlin:
 
 - A gutter icon on each mapping and controller. **Generate Request in HTTP Client** and **Generate Requests for Controller** (also in the editor context menu and as intentions) add requests to a scratch file `generated-requests.http` and open it.
 - Generated requests use `http://localhost:<server.port>` plus the context path from `application.properties` or `application.yml` (port 8080 by default). Path variables become `{{var}}`, and a JSON skeleton of the `@RequestBody` type is filled in.

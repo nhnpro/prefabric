@@ -481,7 +481,7 @@ fn link(dir: &Path, add: bool) -> Result<(), String> {
     std::fs::write(&tmp, json)
         .and_then(|()| std::fs::rename(&tmp, &file))
         .map_err(|e| format!("{}: {e}", file.display()))?;
-    println!("open Settings › Plugins in OpenIDEA to load the change");
+    println!("open Settings › Plugins in Prefabric to load the change");
     Ok(())
 }
 

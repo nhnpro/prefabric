@@ -60,7 +60,9 @@ impl SourceMirror {
             if kind.is_dir() {
                 if !matches!(
                     entry.file_name().to_str(),
-                    Some(".git" | ".gradle" | "build" | "target" | "node_modules" | ".idea" | ".openidea")
+                    Some(
+                        ".git" | ".gradle" | "build" | "target" | "node_modules" | ".idea" | ".prefabric" | ".openidea"
+                    )
                 ) {
                     self.scan(&path)?;
                 }

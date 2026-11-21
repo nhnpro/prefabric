@@ -4185,7 +4185,7 @@ fn a_zipped_plugin_folder_installs_like_the_folder() {
     zip.start_file("my-plugin/lib/my-plugin.jar", zip::write::SimpleFileOptions::default()).unwrap();
     zip.finish().unwrap();
     let err = f.host.unpack_package(&other).unwrap_err().message;
-    assert!(err.contains("is not an OpenIDEA plugin"), "{err}");
+    assert!(err.contains("is not a Prefabric plugin"), "{err}");
 }
 
 /// What the UI writes for an imported IntelliJ theme goes through the install page.

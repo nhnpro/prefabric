@@ -3,7 +3,7 @@ title: "Themes"
 description: "Write a colour theme plugin: the theme and editor scheme files, how themes are applied, importing IntelliJ themes, porting VS Code themes, and the full token reference."
 ---
 
-OpenIDEA ships five built-in themes: Islands Light, Islands Dark, High Contrast,
+Prefabric ships five built-in themes: Islands Light, Islands Dark, High Contrast,
 Solarized Light and Solarized Dark. Other themes come from **theme plugins**.
 
 A theme plugin is data only. Like an IntelliJ theme (a `.theme.json` plus an optional
@@ -132,7 +132,7 @@ There is no build step: the package is the folder.
 </Steps>
 
 To iterate without reinstalling, link the folder with `openidea-plugin link` (it is read in
-place), or put or symlink it in `<project>/.openidea/plugins/<name>/` of a trusted project.
+place), or put or symlink it in `<project>/.prefabric/plugins/<name>/` of a trusted project.
 Then press **Reload** on the plugin, or run the **Reload Plugins** action, to pick up your
 edits. If a file or value is invalid, **Settings › Plugins** shows the load error with the
 file and line.
@@ -153,7 +153,7 @@ Plugins** (a project must be open):
   Marketplace (`.jar`, or a `.zip` with the plugin's `lib/*.jar`) or a `.theme.json` (its
   `editorScheme` file is read from the same folder).
 
-The whole plugin becomes one OpenIDEA theme plugin, `intellij.<plugin id>`, with each of its
+The whole plugin becomes one Prefabric theme plugin, `intellij.<plugin id>`, with each of its
 themes and their editor schemes. It is installed through the usual install page, and the
 theme in use doesn't change: choose one of its themes under **Theme** in **Settings ›
 Appearance & Behavior › Appearance**. Importing the plugin again replaces it. Both commands
@@ -181,7 +181,7 @@ argument; themes that ship no `.icls` keep the built-in syntax colours.
 
 #### `.theme.json` to UI theme
 
-| OpenIDEA token                                     | IntelliJ `ui` key (first present wins)                                    |
+| Prefabric token                                    | IntelliJ `ui` key (first present wins)                                    |
 | -------------------------------------------------- | ------------------------------------------------------------------------- |
 | `--bg-app`                                         | `Panel.background`                                                        |
 | `--bg-frame`                                       | `MainWindow.background`, `MainToolbar.background`                         |
@@ -218,7 +218,7 @@ The full table is `UI_KEYS` in
 
 #### `.icls` to editor scheme
 
-| OpenIDEA token                                                                       | `.icls` option                                                                                                                   |
+| Prefabric token                                                                      | `.icls` option                                                                                                                   |
 | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | `--fg-editor`, `--bg-editor`                                                         | attribute `TEXT` (foreground, background)                                                                                        |
 | `--caret`, `--bg-current-line`                                                       | colour `CARET_COLOR`, `CARET_ROW_COLOR`                                                                                          |
@@ -254,7 +254,7 @@ A VS Code theme (`themes/*.json` in the extension) has `type` (`dark` / `light` 
 `colors` (workbench) and `tokenColors` (TextMate scopes). Set `kind` from `type`, then map
 by hand:
 
-| OpenIDEA token                                                                                         | VS Code `colors` key                                                                                                                                                                                 |
+| Prefabric token                                                                                        | VS Code `colors` key                                                                                                                                                                                 |
 | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--bg-frame`                                                                                           | `titleBar.activeBackground`, `activityBar.background`                                                                                                                                                |
 | `--bg-island`, `--bg-app`                                                                              | `editor.background`, `sideBar.background`                                                                                                                                                            |
@@ -293,7 +293,7 @@ by hand:
 
 `tokenColors` to syntax tokens, by TextMate scope:
 
-| OpenIDEA token                                            | Scope                                                          |
+| Prefabric token                                           | Scope                                                          |
 | --------------------------------------------------------- | -------------------------------------------------------------- |
 | `--syn-keyword`                                           | `keyword`, `storage.type`, `storage.modifier`                  |
 | `--syn-string`                                            | `string`                                                       |

@@ -5,7 +5,7 @@ description: "打开和搜索设置窗口，区分全局值与项目值，以及
 
 ## 打开设置
 
-- macOS：**OpenIDEA › 设置…** 或 `⌘,`
+- macOS：**Prefabric › 设置…** 或 `⌘,`
 - Windows 和 Linux：**文件 › 设置…** 或 `Ctrl+Alt+S`
 
 设置在独立窗口中打开。左侧的树和 IntelliJ IDEA 一样分组：**外观与行为**、**按键映射**、**编辑器**、**插件**、**版本控制**、**构建、执行、部署**、**语言和框架**、**工具** 和 **安全**。已安装的插件也可以添加自己的设置页。
@@ -29,7 +29,7 @@ description: "打开和搜索设置窗口，区分全局值与项目值，以及
 - **全局** 值对所有项目生效。
 - **项目** 值只对某个项目生效，并覆盖全局值。
 
-支持项目值的页面顶部有 **全局** / **此项目** 切换。选中 **此项目** 时，修改会保存到项目中的 `.openidea/settings.toml`，并覆盖全局值。如果希望团队共享这些值，把该文件提交到版本库即可。
+支持项目值的页面顶部有 **全局** / **此项目** 切换。选中 **此项目** 时，修改会保存到项目中的 `.prefabric/settings.toml`，并覆盖全局值。如果希望团队共享这些值，把该文件提交到版本库即可。
 
 有些设置只能全局配置，例如 MCP 服务器和 HTTP 代理。项目文件永远不能把项目标记为受信任，信任决定只保存在你的用户数据中（参见[快速上手](/zh/guide/quickstart)）。
 
@@ -41,13 +41,13 @@ description: "打开和搜索设置窗口，区分全局值与项目值，以及
 
 在 **文件 › 管理 IDE 设置** 下：
 
-- **导出设置…**：把全局设置写入一个 JSON 文件（默认名为 `openidea-settings.json`），同时包含实时模板、文件模板、后缀模板、宏、工具窗口布局和部分视图选项。
+- **导出设置…**：把全局设置写入一个 JSON 文件（默认名为 `prefabric-settings.json`），同时包含实时模板、文件模板、后缀模板、宏、工具窗口布局和部分视图选项。
 - **导入设置…**：用导出文件中的设置替换当前全局设置。按提示重启后，导入的模板、宏、布局和视图选项才会生效。在这里选择 JetBrains 的 `settings.zip`，则会改为从 JetBrains IDE 导入。
 - **从 JetBrains IDE 导入设置…**：从本机安装的 JetBrains IDE 导入。参见[从其他 IDE 迁移](/zh/guide/migrate)。
 
 ## 设置文件
 
-设置以 TOML 格式保存：全局值在配置目录的 `settings.toml` 中，项目值在 `<项目>/.openidea/settings.toml` 中，都可以手动编辑。文件格式和配置键参见[设置项](/zh/reference/settings)，全局文件的位置参见[数据目录与日志](/zh/reference/data-directories)。
+设置以 TOML 格式保存：全局值在配置目录的 `settings.toml` 中，项目值在 `<项目>/.prefabric/settings.toml` 中，都可以手动编辑。文件格式和配置键参见[设置项](/zh/reference/settings)，全局文件的位置参见[数据目录与日志](/zh/reference/data-directories)。
 
 ## 相关页面
 

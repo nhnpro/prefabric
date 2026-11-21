@@ -3,7 +3,7 @@ title: "Code intelligence"
 description: "Where completion, navigation and other language features come from: language servers, the IDE's own index, tree-sitter syntax and plugins, and how their results are combined."
 ---
 
-OpenIDEA's language features come from four sources, layered so that something useful is always available and the most precise source wins when it can answer.
+Prefabric's language features come from four sources, layered so that something useful is always available and the most precise source wins when it can answer.
 
 | Source                     | Crates / code                                             | Gives                                                                                                                                                           |
 | -------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -80,7 +80,7 @@ The structure service is a **fallback**: features use it only when the language 
 
 ## LSP instead of a PSI-like model
 
-OpenIDEA does not have a unified, IDE-owned semantic model of the code (what IntelliJ calls PSI). Semantic knowledge — types, resolution, references — comes from each language's server. The IDE's own layers (index, tree-sitter structure) are syntactic.
+Prefabric does not have a unified, IDE-owned semantic model of the code (what IntelliJ calls PSI). Semantic knowledge — types, resolution, references — comes from each language's server. The IDE's own layers (index, tree-sitter structure) are syntactic.
 
 What that means in practice:
 

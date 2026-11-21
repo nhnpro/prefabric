@@ -223,7 +223,7 @@ export function SkillsPicker({
           </span>
           {provider !== normalizeProviderId(provider) && (
             <span>
-              <T>This agent keeps its own / menu: off only stops OpenIDEA offering the skill.</T>
+              <T>This agent keeps its own / menu: off only stops Prefabric offering the skill.</T>
             </span>
           )}
         </div>

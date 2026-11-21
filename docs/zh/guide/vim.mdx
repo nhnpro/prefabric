@@ -3,7 +3,7 @@ title: "Vim 模式"
 description: "开启 Vim 模拟，用 ~/.ideavimrc 配置，把按键映射到 IDE 命令，并处理快捷键冲突。"
 ---
 
-OpenIDEA 内置了 Vim 模拟，参照的是 IntelliJ IDEA 的 IdeaVim 插件。编辑引擎是 [`@replit/codemirror-vim`](https://github.com/replit/codemirror-vim)，OpenIDEA 在它之上加了与 IDE 的集成：保存和关闭标签页的 Ex 命令、运行 IDE 命令的 `:action`、IdeaVim 风格的 rc 文件，以及快捷键冲突表。
+Prefabric 内置了 Vim 模拟，参照的是 IntelliJ IDEA 的 IdeaVim 插件。编辑引擎是 [`@replit/codemirror-vim`](https://github.com/replit/codemirror-vim)，Prefabric 在它之上加了与 IDE 的集成：保存和关闭标签页的 Ex 命令、运行 IDE 命令的 `:action`、IdeaVim 风格的 rc 文件，以及快捷键冲突表。
 
 ## 开启
 
@@ -19,7 +19,7 @@ OpenIDEA 内置了 Vim 模拟，参照的是 IntelliJ IDEA 的 IdeaVim 插件。
 
 通过 codemirror-vim 可以使用常规的 Vim 编辑方式：Normal、Insert、Visual（字符、行、块）和 Replace 模式，带计数的移动、操作符和文本对象，寄存器、标记、`.` 重复，用 `/`、`?`、`*`、`#` 搜索，以及它自带的 `:s`、`:g`、`:sort` 等 Ex 命令。
 
-OpenIDEA 额外提供这些 Ex 命令：
+Prefabric 额外提供这些 Ex 命令：
 
 | 命令           | 作用                 |
 | -------------- | -------------------- |
@@ -31,7 +31,7 @@ OpenIDEA 额外提供这些 Ex 命令：
 
 ## rc 文件
 
-Vim 模式开启时（如果上次是开启状态，启动时也会），OpenIDEA 读取 `~/.openideavimrc`；这个文件不存在时读取 `~/.ideavimrc`。只想对 OpenIDEA 生效、不影响 IntelliJ IDEA 的配置，就写在 `~/.openideavimrc` 里。
+Vim 模式开启时（如果上次是开启状态，启动时也会），Prefabric 读取 `~/.openideavimrc`；这个文件不存在时读取 `~/.ideavimrc`。只想对 Prefabric 生效、不影响 IntelliJ IDEA 的配置，就写在 `~/.openideavimrc` 里。
 
 修改文件后，运行 **重新加载 .ideavimrc**（在状态栏微件或查找操作中），或者在 **设置 › 编辑器 › Vim** 中单击 **重新加载**。设置页会显示读取的是哪个文件、包含多少个映射，以及每一行被忽略的内容和原因。
 
@@ -61,7 +61,7 @@ nnoremap <leader>e :action SearchEverywhere<CR>
 nnoremap gi <Action>(GotoImplementation)
 ```
 
-`GotoDeclaration`、`GotoImplementation`、`FindUsages`、`ReformatCode`、`RenameElement`、`ShowIntentionActions`、`SearchEverywhere`、`RecentFiles`、`Run`、`Debug`、`ToggleLineBreakpoint`、`SplitVertically` 等 IdeaVim 命令 ID 会被转换成对应的 OpenIDEA 命令。也可以直接写 OpenIDEA 自己的命令 ID，例如 `:action code.reformat`。命令 ID 可以在 [快捷键参考](/zh/reference/shortcuts) 或 **设置 › 按键映射** 中查到。
+`GotoDeclaration`、`GotoImplementation`、`FindUsages`、`ReformatCode`、`RenameElement`、`ShowIntentionActions`、`SearchEverywhere`、`RecentFiles`、`Run`、`Debug`、`ToggleLineBreakpoint`、`SplitVertically` 等 IdeaVim 命令 ID 会被转换成对应的 Prefabric 命令。也可以直接写 Prefabric 自己的命令 ID，例如 `:action code.reformat`。命令 ID 可以在 [快捷键参考](/zh/reference/shortcuts) 或 **设置 › 按键映射** 中查到。
 
 当 leader 映射以 `Space`、`,`、`;`、`Backspace` 或 `Delete` 开头时，这个键上原本的 Vim 命令会被停用，以便映射能完整输入。
 

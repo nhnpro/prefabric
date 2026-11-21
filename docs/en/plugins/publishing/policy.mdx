@@ -3,11 +3,11 @@ title: "Policy and security"
 description: "The plugin trust model: sandbox and consent, publisher signatures, revocation, key rotation, the official key, and what review plugins get."
 ---
 
-OpenIDEA's plugin security rests on three layers. Each is described here together with its limits.
+Prefabric's plugin security rests on three layers. Each is described here together with its limits.
 
 1. **The sandbox and capabilities.** Plugin code runs in a WebAssembly sandbox and can only reach files, the network, processes and secrets through capabilities the user approved. This is the main protection, and it applies to every plugin wherever it came from.
 2. **Signatures.** A publisher signs its packages. The marketplace index says which key belongs to which publisher, so the IDE can tell who published a package and whether it changed.
-3. **Review.** Official plugins are reviewed as part of the OpenIDEA repository. New community publishers and plugins are reviewed by a registry maintainer before they are listed.
+3. **Review.** Official plugins are reviewed as part of the Prefabric repository. New community publishers and plugins are reviewed by a registry maintainer before they are listed.
 
 <Warning>
   A high-risk capability (`process:`, `fs.read:`, `fs.write:`, `ipc:`, `ide.commands`) is equivalent to running
@@ -19,7 +19,7 @@ OpenIDEA's plugin security rests on three layers. Each is described here togethe
 - Code has no file system, environment, network or process access of its own. See [Architecture and sandbox](/en/plugins/architecture#the-sandbox).
 - Each capability has a risk level, and the user approves capabilities when installing. A new version that asks for more stays off until the user allows it. Optional capabilities can be revoked later. See [Permissions and capabilities](/en/plugins/capabilities).
 - An approved program is pinned by path and content hash and checked before every start.
-- Project plugins (`.openidea/plugins`) run only in trusted projects and only after approval. In Restricted Mode, plugin code that runs can't be changed.
+- Project plugins (`.prefabric/plugins`) run only in trusted projects and only after approval. In Restricted Mode, plugin code that runs can't be changed.
 
 ## Signatures and publishers
 
@@ -47,7 +47,7 @@ The index can revoke plugin versions (or all versions of a plugin) and publisher
 
 ## The official key
 
-Release builds of OpenIDEA carry the official publisher's public key, built in from the release's signing key. Plugins named `openidea.*` must be signed with it, or with a key it endorsed, whatever keys an index lists for `openidea`. Development builds from source have no built-in key and trust what the index says.
+Release builds of Prefabric carry the official publisher's public key, built in from the release's signing key. Plugins named `openidea.*` must be signed with it, or with a key it endorsed, whatever keys an index lists for `openidea`. Development builds from source have no built-in key and trust what the index says.
 
 ## What review exists
 
@@ -63,7 +63,7 @@ Community plugins are listed through [l0ng-ai/openidea-plugins](https://github.c
 - **Version updates** by an owner need passing checks and a maintainer's merge. Owners are checked against the publisher file as it was before the pull request.
 - A plugin must have a public source repository under an open-source licence, and the package must be built from it. Its README must say what it does and why it needs each network, process or other high-risk capability. It must contain no obfuscated or minified code that isn't built from that source.
 - On every change, CI checks each package's SHA-256, runs `openidea-plugin check` against the latest release, and verifies the signature against the publisher's keys. A scheduled run repeats this daily.
-- A plugin that fails the checks against a new OpenIDEA release is reported in an issue and delisted if no fixed version is listed within 30 days.
+- A plugin that fails the checks against a new Prefabric release is reported in an issue and delisted if no fixed version is listed within 30 days.
 - Maintainers revoke versions or keys for malware, a security problem the owner doesn't fix, or a lost key. Owners ask for a revocation in an issue.
 
 ### Limits of the review
@@ -71,7 +71,7 @@ Community plugins are listed through [l0ng-ai/openidea-plugins](https://github.c
 - Review is a human reading of the source and the requested capabilities. It is not a security audit.
 - CI does not rebuild community packages from source. The rule that a package is built from its public source is checked in review, not by a reproducible build.
 - The registry's rules require a maintainer review of the source for new publishers and new plugins. For a version update they require passing checks and a maintainer's merge; they don't promise a fresh source review.
-- Plugins installed from disk, linked folders, project plugins and self-hosted marketplaces get no review from OpenIDEA. The sandbox, the permission dialog and signatures still apply.
+- Plugins installed from disk, linked folders, project plugins and self-hosted marketplaces get no review from Prefabric. The sandbox, the permission dialog and signatures still apply.
 
 ## Reporting a problem
 

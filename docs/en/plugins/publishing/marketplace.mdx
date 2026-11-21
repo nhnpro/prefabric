@@ -3,23 +3,23 @@ title: "Publish to the marketplace"
 description: "How the default marketplace is built, official versus community plugins, and how to list your plugin through the community registry."
 ---
 
-The IDE's default marketplace is the `plugins-index.json` attached to the latest OpenIDEA release. Users browse it in **Settings › Plugins › Marketplace**, filter by category, and install with one click. It lists two kinds of plugins.
+The IDE's default marketplace is the `plugins-index.json` attached to the latest Prefabric release. Users browse it in **Settings › Plugins › Marketplace**, filter by category, and install with one click. It lists two kinds of plugins.
 
-|                     | Official                                                                                                         | Community                                                                             |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Ids                 | `openidea.*`                                                                                                     | The author's publisher prefix, for example `alice.*`                                  |
-| Source              | [`plugins/official/`](https://github.com/l0ng-ai/openidea/tree/main/plugins/official) in the OpenIDEA repository | The author's own repository                                                           |
-| Built and signed by | The OpenIDEA release workflow, with the official key                                                             | The author, with their own key                                                        |
-| Listed through      | Each release                                                                                                     | The registry, [l0ng-ai/openidea-plugins](https://github.com/l0ng-ai/openidea-plugins) |
-| Purpose             | Examples of the plugin API, kept working as it changes                                                           | Plugins for real use                                                                  |
+|                     | Official                                                                                                          | Community                                                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Ids                 | `openidea.*`                                                                                                      | The author's publisher prefix, for example `alice.*`                                  |
+| Source              | [`plugins/official/`](https://github.com/l0ng-ai/openidea/tree/main/plugins/official) in the Prefabric repository | The author's own repository                                                           |
+| Built and signed by | The Prefabric release workflow, with the official key                                                             | The author, with their own key                                                        |
+| Listed through      | Each release                                                                                                      | The registry, [l0ng-ai/openidea-plugins](https://github.com/l0ng-ai/openidea-plugins) |
+| Purpose             | Examples of the plugin API, kept working as it changes                                                            | Plugins for real use                                                                  |
 
-New official plugins are proposed in an issue first; they cover general needs or show how to use part of the API. A plugin that needs a new extension point brings the extension point to the OpenIDEA repository as its own pull request, and the plugin itself to the registry.
+New official plugins are proposed in an issue first; they cover general needs or show how to use part of the API. A plugin that needs a new extension point brings the extension point to the Prefabric repository as its own pull request, and the plugin itself to the registry.
 
 ## How the community index reaches users
 
 1. You open a pull request in the registry that adds or updates your plugin.
-2. The registry's CI downloads the package, checks its SHA-256, runs `openidea-plugin check` against the latest OpenIDEA release, verifies the signature against your publisher keys, and publishes its own `index.json`.
-3. OpenIDEA's `plugins-index.yml` workflow merges that index into the release's `plugins-index.json` within the hour.
+2. The registry's CI downloads the package, checks its SHA-256, runs `openidea-plugin check` against the latest Prefabric release, verifies the signature against your publisher keys, and publishes its own `index.json`.
+3. Prefabric's `plugins-index.yml` workflow merges that index into the release's `plugins-index.json` within the hour.
 4. IDEs read the index daily (or right away with **Rescan Plugins** in the gear menu of **Settings › Plugins**), and offer the newest version of each plugin they can load.
 
 ## List a plugin

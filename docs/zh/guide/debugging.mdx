@@ -3,7 +3,7 @@ title: "调试"
 description: "通过内置的 Debug Adapter Protocol 客户端设置断点、单步执行、查看变量和计算表达式。"
 ---
 
-OpenIDEA 通过 [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/)（DAP）调试程序。每种语言在自己的语言定义（`languages/<id>.toml` 的 `[debugger]` 表）里指定调试适配器，调试运行配置时 IDE 会启动对应的适配器。命令和快捷键沿用 IntelliJ IDEA 的习惯，在 IDEA 里熟悉的操作大多可以直接用。
+Prefabric 通过 [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/)（DAP）调试程序。每种语言在自己的语言定义（`languages/<id>.toml` 的 `[debugger]` 表）里指定调试适配器，调试运行配置时 IDE 会启动对应的适配器。命令和快捷键沿用 IntelliJ IDEA 的习惯，在 IDEA 里熟悉的操作大多可以直接用。
 
 ## 启动调试会话
 
@@ -15,7 +15,7 @@ OpenIDEA 通过 [Debug Adapter Protocol](https://microsoft.github.io/debug-adapt
 
 配置用哪个调试器，由 **运行 › 编辑配置…** 中的 **调试适配器** 字段决定。设为 **无** 即可关闭该配置的调试。
 
-会话启动前，OpenIDEA 会先保存所有打开的文件。如果适配器没有安装，IDE 会给出提示；对于能自动安装的调试器，还会提供 **安装并调试**。
+会话启动前，Prefabric 会先保存所有打开的文件。如果适配器没有安装，IDE 会给出提示；对于能自动安装的调试器，还会提供 **安装并调试**。
 
 调试工具窗口（`⌘5` / `Alt+5`）每个会话一个标签页，包含两个视图：
 

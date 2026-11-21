@@ -3,7 +3,7 @@ title: "Run configurations"
 description: "Create, edit and launch run configurations, run code from the gutter, and read the output in the Run tool window."
 ---
 
-A run configuration describes how to start something: a command line, a main class, a test suite, an npm script, a Docker container. OpenIDEA keeps three kinds:
+A run configuration describes how to start something: a command line, a main class, a test suite, an npm script, a Docker container. Prefabric keeps three kinds:
 
 - **Detected** configurations, read from the project's build files every time they change.
 - **User** configurations you create or save in **Run/Debug Configurations**.
@@ -13,7 +13,7 @@ The selected configuration is shown in the run widget in the title bar, with Run
 
 ## Detected configurations
 
-When a project opens, OpenIDEA scans its build files (also in nested projects of a folder that holds several) and lists what it can run:
+When a project opens, Prefabric scans its build files (also in nested projects of a folder that holds several) and lists what it can run:
 
 | Build file                                                                                        | Configurations                                                                                                                                                      |
 | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -177,10 +177,10 @@ A notification says how many were imported and why others were left out.
 
 ## Where configurations are stored
 
-| File                       | Contains                                                                                                    |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `.openidea/run.toml`       | Configurations with **Store as project file** on, and templates. Commit it to share them.                   |
-| `.openidea/run.local.toml` | Your other configurations and the detected ones you removed. Added to `.openidea/.gitignore` automatically. |
+| File                        | Contains                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `.prefabric/run.toml`       | Configurations with **Store as project file** on, and templates. Commit it to share them.                    |
+| `.prefabric/run.local.toml` | Your other configurations and the detected ones you removed. Added to `.prefabric/.gitignore` automatically. |
 
 Both files are plain TOML and can be edited by hand:
 

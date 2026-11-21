@@ -105,7 +105,7 @@ function McpServerEndpoint() {
         label="Endpoint"
         hint={
           status.project
-            ? "For this window's project. Agents name the project with the X-OpenIDEA-Project header or the ?project= query."
+            ? "For this window's project. Agents name the project with the X-Prefabric-Project header or the ?project= query."
             : "Open a project to get its endpoint."
         }
       >
@@ -121,7 +121,7 @@ function McpServerEndpoint() {
       <Row
         label="Client configuration"
         stacked
-        hint="The HTTP configuration holds the token: it keeps working after OpenIDEA restarts only with a fixed port and a kept token. The stdio one starts OpenIDEA's executable, which relays to the running IDE."
+        hint="The HTTP configuration holds the token: it keeps working after Prefabric restarts only with a fixed port and a kept token. The stdio one starts Prefabric's executable, which relays to the running IDE."
       >
         <div className={styles.buttons}>
           <Button size="small" disabled={!http} onClick={() => copy("http", http)}>
@@ -318,7 +318,7 @@ export const MCP_SERVER_PAGE: PageSpec = {
           kind: "toggle",
           key: "mcpServer.enabled",
           label: "Enable MCP server",
-          hint: "Agents can read, edit, and run projects open in OpenIDEA through its built-in tools. Run tools ask for confirmation. The server listens on 127.0.0.1 unless Listen address says otherwise, and requires a token.",
+          hint: "Agents can read, edit, and run projects open in Prefabric through its built-in tools. Run tools ask for confirmation. The server listens on 127.0.0.1 unless Listen address says otherwise, and requires a token.",
         },
         {
           kind: "toggle",
@@ -337,7 +337,7 @@ export const MCP_SERVER_PAGE: PageSpec = {
           kind: "toggle",
           key: "mcpServer.fixedPort",
           label: "Use a fixed port",
-          hint: "Listen on the same port in every run, so HTTP clients and port forwards keep working after OpenIDEA restarts. When the port is in use, this run takes a free one and Status says so. Off: a free port in every run.",
+          hint: "Listen on the same port in every run, so HTTP clients and port forwards keep working after Prefabric restarts. When the port is in use, this run takes a free one and Status says so. Off: a free port in every run.",
           children: [
             {
               kind: "number",
@@ -353,7 +353,7 @@ export const MCP_SERVER_PAGE: PageSpec = {
           kind: "toggle",
           key: "mcpServer.fixedToken",
           label: "Keep the token",
-          hint: "Keep the same bearer token in every run, stored for your account only. Off: a new token in every run. Anyone with the token can use the tools while OpenIDEA runs, so regenerate it if it leaks.",
+          hint: "Keep the same bearer token in every run, stored for your account only. Off: a new token in every run. Anyone with the token can use the tools while Prefabric runs, so regenerate it if it leaks.",
         },
         {
           kind: "number",

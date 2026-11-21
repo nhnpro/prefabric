@@ -428,7 +428,7 @@ function later(run: () => void) {
   setTimeout(run, 0);
 }
 
-/** `:action <id>`: an IdeaVim action id or an Prefabric one. Returns the action run, or null. */
+/** `:action <id>`: an IdeaVim action id or a Prefabric one. Returns the action run, or null. */
 export function runIdeAction(id: string | undefined): string | null {
   if (!id) {
     showStatusInfo("Usage: :action <action id>");

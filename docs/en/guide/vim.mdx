@@ -3,7 +3,7 @@ title: "Vim mode"
 description: "Turn on Vim emulation, configure it with ~/.ideavimrc, map keys to IDE actions and resolve shortcut conflicts."
 ---
 
-OpenIDEA has a built-in Vim emulation modelled on IntelliJ IDEA's IdeaVim plugin. The editing engine is [`@replit/codemirror-vim`](https://github.com/replit/codemirror-vim); OpenIDEA adds IDE integration on top: Ex commands that save and close tabs, `:action` to run IDE commands, IdeaVim-style rc files and a shortcut conflict table.
+Prefabric has a built-in Vim emulation modelled on IntelliJ IDEA's IdeaVim plugin. The editing engine is [`@replit/codemirror-vim`](https://github.com/replit/codemirror-vim); Prefabric adds IDE integration on top: Ex commands that save and close tabs, `:action` to run IDE commands, IdeaVim-style rc files and a shortcut conflict table.
 
 ## Turn it on
 
@@ -19,7 +19,7 @@ The setting applies to every editor in every window right away and is remembered
 
 The usual Vim editing model is available through codemirror-vim: Normal, Insert, Visual (characterwise, linewise and blockwise) and Replace modes, motions, operators and text objects with counts, registers, marks, `.` repeat, search with `/`, `?`, `*` and `#`, and its Ex commands such as `:s`, `:g` and `:sort`.
 
-OpenIDEA adds these Ex commands:
+Prefabric adds these Ex commands:
 
 | Command        | Does                     |
 | -------------- | ------------------------ |
@@ -31,7 +31,7 @@ OpenIDEA adds these Ex commands:
 
 ## The rc file
 
-When Vim mode turns on (including at startup, if it was on), OpenIDEA reads `~/.openideavimrc`, or `~/.ideavimrc` when the first does not exist. Use `~/.openideavimrc` for settings that should apply only to OpenIDEA and not to IntelliJ IDEA.
+When Vim mode turns on (including at startup, if it was on), Prefabric reads `~/.openideavimrc`, or `~/.ideavimrc` when the first does not exist. Use `~/.openideavimrc` for settings that should apply only to Prefabric and not to IntelliJ IDEA.
 
 After editing the file, run **Reload .ideavimrc** (from the status bar widget or Find Action), or click **Reload** in **Settings › Editor › Vim**. The settings page shows which file was read, how many mappings it has, and every line that was ignored with the reason.
 
@@ -61,7 +61,7 @@ nnoremap <leader>e :action SearchEverywhere<CR>
 nnoremap gi <Action>(GotoImplementation)
 ```
 
-IdeaVim action ids such as `GotoDeclaration`, `GotoImplementation`, `FindUsages`, `ReformatCode`, `RenameElement`, `ShowIntentionActions`, `SearchEverywhere`, `RecentFiles`, `Run`, `Debug`, `ToggleLineBreakpoint`, `SplitVertically` and many others are translated to the matching OpenIDEA action. OpenIDEA's own action ids work too, for example `:action code.reformat`. To find an action's id, see the [shortcuts reference](/en/reference/shortcuts) or **Settings › Keymap**.
+IdeaVim action ids such as `GotoDeclaration`, `GotoImplementation`, `FindUsages`, `ReformatCode`, `RenameElement`, `ShowIntentionActions`, `SearchEverywhere`, `RecentFiles`, `Run`, `Debug`, `ToggleLineBreakpoint`, `SplitVertically` and many others are translated to the matching Prefabric action. Prefabric's own action ids work too, for example `:action code.reformat`. To find an action's id, see the [shortcuts reference](/en/reference/shortcuts) or **Settings › Keymap**.
 
 When a leader mapping starts with `Space`, `,`, `;`, `Backspace` or `Delete`, the built-in Vim command on that key is disabled so the mapping can complete.
 

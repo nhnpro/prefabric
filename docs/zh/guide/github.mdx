@@ -3,13 +3,13 @@ title: "GitHub"
 description: "通过 GitHub CLI 审查、创建、签出和合并 GitHub 拉取请求，并克隆自己的仓库。"
 ---
 
-OpenIDEA 通过 [GitHub CLI](https://cli.github.com)（`gh`）对接 GitHub：登录沿用 gh 的登录状态，API 调用都走 `gh api`。OpenIDEA 自己没有账户管理和令牌输入框，也不保存任何凭据。
+Prefabric 通过 [GitHub CLI](https://cli.github.com)（`gh`）对接 GitHub：登录沿用 gh 的登录状态，API 调用都走 `gh api`。Prefabric 自己没有账户管理和令牌输入框，也不保存任何凭据。
 
 ## 准备工作
 
 <Steps>
   <Step title="安装 gh">
-    安装 GitHub CLI。OpenIDEA 依次在 `OPENIDEA_GH`（完整路径）、`PATH`，以及
+    安装 GitHub CLI。Prefabric 依次在 `OPENIDEA_GH`（完整路径）、`PATH`，以及
     `/opt/homebrew/bin`、`/usr/local/bin`、`/usr/bin`、`/snap/bin`（macOS/Linux）或 `C:\Program Files\GitHub
     CLI\gh.exe`（Windows）中查找。
   </Step>
@@ -77,10 +77,10 @@ OpenIDEA 通过 [GitHub CLI](https://cli.github.com)（`gh`）对接 GitHub：�
 
 ### 在差异视图中评论
 
-拉取请求的差异是合并基础与头提交之间的比较。如果本地缺少拉取请求的引用或基础分支，OpenIDEA 会先获取。
+拉取请求的差异是合并基础与头提交之间的比较。如果本地缺少拉取请求的引用或基础分支，Prefabric 会先获取。
 
 - 鼠标悬停在某行上，点击边栏的 **+** 添加评论；拖动可以选中多行。
-- 选择 **开始审查**（评论先挂起，提交审查时一起发出）或 **添加单条评论**。OpenIDEA 会记住你上次的选择。
+- 选择 **开始审查**（评论先挂起，提交审查时一起发出）或 **添加单条评论**。Prefabric 会记住你上次的选择。
 - 已有的讨论直接显示在对应行下方。在差异设置的 **显示审查讨论** 中选择 **全部**、**仅未解决**（默认）或 **不显示**。
 - 差异工具栏有 **刷新审查数据**、**提交审查…**、**上一条评论**、**下一条评论**。过了最后一处变更后，按 `F7` 会跳到拉取请求的下一个文件。
 
@@ -121,7 +121,7 @@ OpenIDEA 通过 [GitHub CLI](https://cli.github.com)（`gh`）对接 GitHub：�
 4. 可选：设置 **审阅者:**、**受理人:**、**标签:**。
 5. 点击 **创建拉取请求**，或通过旁边的箭头选择 **创建草稿拉取请求**。
 
-如果头分支只存在于本地，OpenIDEA 会询问远程分支名并先推送。如果这两个分支之间已有拉取请求，会提示你直接打开它。
+如果头分支只存在于本地，Prefabric 会询问远程分支名并先推送。如果这两个分支之间已有拉取请求，会提示你直接打开它。
 
 ## 签出拉取请求
 

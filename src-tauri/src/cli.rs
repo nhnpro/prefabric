@@ -1,4 +1,4 @@
-//! The `openidea` command: this executable in CLI mode (started by the bundle's
+//! The `prefabric` command: this executable in CLI mode (started by the bundle's
 //! launcher script with [`CLI_FLAG`]), the socket the app answers it on, and
 //! installing the command on `PATH`.
 
@@ -10,12 +10,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
-/// First argument from `Contents/Resources/bin/openidea`.
+/// First argument from `Contents/Resources/bin/prefabric`.
 const CLI_FLAG: &str = "--cli";
 /// How long a starting app has to open its socket.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Runs as the `openidea` command when started with [`CLI_FLAG`]; returns the exit code.
+/// Runs as the `prefabric` command when started with [`CLI_FLAG`]; returns the exit code.
 pub fn run(identifier: &str) -> Option<i32> {
     let mut args = std::env::args().skip(1);
     if args.next().as_deref() != Some(CLI_FLAG) {
@@ -27,7 +27,7 @@ pub fn run(identifier: &str) -> Option<i32> {
     Some(match client(identifier, &args) {
         Ok(()) => 0,
         Err(message) => {
-            eprintln!("openidea: {message}");
+            eprintln!("prefabric: {message}");
             1
         }
     })
@@ -43,19 +43,19 @@ fn client(identifier: &str, args: &[String]) -> Result<(), String> {
             return Ok(());
         }
         Command::Version => {
-            println!("OpenIDEA {}", env!("CARGO_PKG_VERSION"));
+            println!("Prefabric {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         Command::Open(targets) | Command::Diff(targets) => targets,
     };
-    let socket = socket::socket_path(identifier).ok_or("no cache directory for the OpenIDEA socket")?;
+    let socket = socket::socket_path(identifier).ok_or("no cache directory for the Prefabric socket")?;
     let request = Request { diff, ..Request::open(targets) };
     let response = match socket::send(&socket, &request) {
         Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
             start_app()?;
             send_when_started(&socket, &request)?
         }
-        sent => sent.map_err(|e| format!("cannot reach OpenIDEA: {e}"))?,
+        sent => sent.map_err(|e| format!("cannot reach Prefabric: {e}"))?,
     };
     match response {
         Response::Ok => Ok(()),
@@ -83,7 +83,7 @@ fn start_app() -> Result<(), String> {
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0000_0008 | 0x0000_0200);
-    command.spawn().map(drop).map_err(|e| format!("cannot start OpenIDEA: {e}"))
+    command.spawn().map(drop).map_err(|e| format!("cannot start Prefabric: {e}"))
 }
 
 fn send_when_started(socket: &Path, request: &Request) -> Result<Response, String> {
@@ -92,22 +92,22 @@ fn send_when_started(socket: &Path, request: &Request) -> Result<Response, Strin
         match socket::send(socket, request) {
             Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
                 if start.elapsed() > START_TIMEOUT {
-                    return Err("OpenIDEA did not start in time".into());
+                    return Err("Prefabric did not start in time".into());
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
-            sent => return sent.map_err(|e| format!("cannot reach OpenIDEA: {e}")),
+            sent => return sent.map_err(|e| format!("cannot reach Prefabric: {e}")),
         }
     }
 }
 
-/// `….app` of the bundle executable `exe` (`….app/Contents/MacOS/openidea`).
+/// `….app` of the bundle executable `exe` (`….app/Contents/MacOS/prefabric`).
 fn app_bundle(exe: &Path) -> Option<PathBuf> {
     let bundle = exe.parent()?.parent()?.parent()?;
     (cfg!(target_os = "macos") && bundle.extension().is_some_and(|e| e == "app")).then(|| bundle.to_path_buf())
 }
 
-/// Answers the `openidea` command for this app: its targets open like paths from Finder.
+/// Answers the `prefabric` command for this app: its targets open like paths from Finder.
 pub fn serve(app: &AppHandle, identifier: &str) {
     let Some(socket) = socket::socket_path(identifier) else { return };
     let app = app.clone();
@@ -127,11 +127,11 @@ pub fn serve(app: &AppHandle, identifier: &str) {
             }
         }) {
             Ok(()) => Response::Ok,
-            Err(e) => Response::Error { message: format!("OpenIDEA cannot open windows: {e}") },
+            Err(e) => Response::Error { message: format!("Prefabric cannot open windows: {e}") },
         }
     });
     if let Err(e) = served {
-        tracing::warn!("cannot listen for the openidea command on {}: {e}", socket.display());
+        tracing::warn!("cannot listen for the prefabric command on {}: {e}", socket.display());
     }
 }
 
@@ -139,7 +139,7 @@ fn install_error(e: std::io::Error) -> IdeError {
     if e.kind() == ErrorKind::Interrupted { IdeError::cancelled() } else { IdeError::internal(e.to_string()) }
 }
 
-/// Links the `openidea` command onto `PATH`; returns the link. Blocks while the
+/// Links the `prefabric` command onto `PATH`; returns the link. Blocks while the
 /// administrator password prompt is up.
 pub fn install() -> IdeResult<crate::commands::window::CliInstallation> {
     let result = ide_cli::install::install_current().map_err(install_error)?;
@@ -149,7 +149,7 @@ pub fn install() -> IdeResult<crate::commands::window::CliInstallation> {
     })
 }
 
-/// Removes every installed `openidea` command link; returns them.
+/// Removes every installed `prefabric` command link (and `openidea` ones of earlier builds); returns them.
 pub fn uninstall() -> IdeResult<Vec<IpcPath>> {
     let links = ide_cli::install::uninstall_current().map_err(install_error)?;
     Ok(links.into_iter().map(Into::into).collect())
@@ -161,9 +161,9 @@ mod tests {
 
     #[test]
     fn bundle_of_the_app_executable() {
-        let exe = Path::new("/Applications/OpenIDEA.app/Contents/MacOS/openidea");
-        let expected = cfg!(target_os = "macos").then(|| PathBuf::from("/Applications/OpenIDEA.app"));
+        let exe = Path::new("/Applications/Prefabric.app/Contents/MacOS/prefabric");
+        let expected = cfg!(target_os = "macos").then(|| PathBuf::from("/Applications/Prefabric.app"));
         assert_eq!(app_bundle(exe), expected);
-        assert_eq!(app_bundle(Path::new("/repo/target/debug/openidea")), None);
+        assert_eq!(app_bundle(Path::new("/repo/target/debug/prefabric")), None);
     }
 }

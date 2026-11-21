@@ -3,9 +3,9 @@ title: "Version control"
 description: "Commit, branch, merge, rebase, stash and review history with the built-in Git integration."
 ---
 
-OpenIDEA has built-in Git support. Git is the only version control system it supports.
+Prefabric has built-in Git support. Git is the only version control system it supports.
 
-It reads repository state (status, diffs, blame, log) in-process, and runs the `git` executable for everything that changes the repository, so hooks, credentials, signing and your Git config behave as on the command line. You need Git installed. OpenIDEA finds it through `OPENIDEA_GIT`, then `PATH`, then the usual install locations; set an explicit path in **Settings › Version Control › Git › Path to Git executable** and click **Test** to check it.
+It reads repository state (status, diffs, blame, log) in-process, and runs the `git` executable for everything that changes the repository, so hooks, credentials, signing and your Git config behave as on the command line. You need Git installed. Prefabric finds it through `OPENIDEA_GIT`, then `PATH`, then the usual install locations; set an explicit path in **Settings › Version Control › Git › Path to Git executable** and click **Test** to check it.
 
 ## Where to find things
 
@@ -43,7 +43,7 @@ It reads repository state (status, diffs, blame, log) in-process, and runs the `
 - When creating a project, check **Create Git repository** in the New Project dialog.
 - **Git › Create Git Repository…** runs `git init` in a folder you pick (the project root by default) and registers the new repository right away; a repository created in the terminal is picked up the same way.
 
-OpenIDEA finds the repository that contains the project and nested repositories up to four levels deep (skipping folders such as `node_modules`, `target` and `build`). Status, commit, fetch and update cover all of them; branch operations from the branches popup cover all of them too (see [Branches](#branches)); log actions work on the selected repository. Submodules show as nested repositories, without submodule commands.
+Prefabric finds the repository that contains the project and nested repositories up to four levels deep (skipping folders such as `node_modules`, `target` and `build`). Status, commit, fetch and update cover all of them; branch operations from the branches popup cover all of them too (see [Branches](#branches)); log actions work on the selected repository. Submodules show as nested repositories, without submodule commands.
 
 ## Commit changes
 
@@ -72,13 +72,13 @@ Double-click a file (or press `Enter`) to see its diff; **Preview Diff** shows i
 
 ### Partial commits
 
-To commit only part of a file, open its diff from the Commit tool window. Each changed block has an **Include in commit** checkbox in the gutter; uncheck the blocks to leave out. The file's checkbox in the tree becomes partly checked. OpenIDEA commits the selected blocks through a temporary index, so your working tree and staging area stay as they are. Selection works per block, not per line.
+To commit only part of a file, open its diff from the Commit tool window. Each changed block has an **Include in commit** checkbox in the gutter; uncheck the blocks to leave out. The file's checkbox in the tree becomes partly checked. Prefabric commits the selected blocks through a temporary index, so your working tree and staging area stay as they are. Selection works per block, not per line.
 
 The diff toolbar also has **Stage Change (git add hunk)** if you prefer the staging area.
 
 ### Changelists
 
-Changelists group local changes without touching Git. The default list is called **Changes**; new changes go to the active list. Changelists are saved per project in `.openidea/changelists.json`.
+Changelists group local changes without touching Git. The default list is called **Changes**; new changes go to the active list. Changelists are saved per project in `.prefabric/changelists.json`.
 
 - **New Changelist…**, **Edit Changelist…** (`F2` or `⇧F6` / `Shift+F6`), **Delete Changelist**, **Set Active Changelist**.
 - **Move to Another Changelist…** (`⇧⌘M` / `Alt+Shift+M`), or drag files between lists.
@@ -92,7 +92,7 @@ The gear button (**Commit Options**) next to **Commit** has:
 - **Commit Checks**: **Reformat code**, **Optimize imports**, **Cleanup** (applies fix-all code actions) and **Run Git hooks** (off adds `--no-verify`).
 - **Advanced Commit Checks**: **Analyze code** (errors and warnings from the language servers) and **Check TODO** (TODO and FIXME in added lines).
 
-Before committing, OpenIDEA also warns about committing in detached HEAD or during a rebase, file names that cause problems on other systems, files larger than 50 MB, and CRLF line endings. A warning stops the commit once; click **Commit Anyway** to go ahead. There is no "run tests" check.
+Before committing, Prefabric also warns about committing in detached HEAD or during a rebase, file names that cause problems on other systems, files larger than 50 MB, and CRLF line endings. A warning stops the commit once; click **Commit Anyway** to go ahead. There is no "run tests" check.
 
 ### Modal commit
 
@@ -105,7 +105,7 @@ The editor gutter marks added, modified and deleted lines compared with HEAD. Cl
 ## Roll back, add and ignore
 
 - **Rollback…** opens **Rollback Changes**: pick the files, optionally **Delete local copies of added files**.
-- **Add to VCS** adds untracked files. When you create or delete files, OpenIDEA asks whether to add or remove them in Git; change this under **Settings › Version Control › Confirmation**.
+- **Add to VCS** adds untracked files. When you create or delete files, Prefabric asks whether to add or remove them in Git; change this under **Settings › Version Control › Confirmation**.
 - **Add to .gitignore** writes a rule to the nearest `.gitignore` or to `.git/info/exclude`.
 
 ## Diff viewer
@@ -143,14 +143,14 @@ Select a branch (`→` or `Enter`) for its actions:
 
 If local changes block a checkout, you can choose **Smart Checkout** (stash, check out, unstash), **Force Checkout** or **Don't Checkout**. A deleted branch can be brought back with **Restore** in the notification.
 
-With several repositories, the popup shows branches common to all of them, plus a submenu per repository; an operation on a common branch (Checkout, Checkout and Rebase, Rebase, Merge, Update, Rename, Delete…) runs in every repository, and if it fails in one of them, OpenIDEA offers to roll back the others. When the repositories are on different branches, the popup says **Branches have diverged** and still lists the common branches, so checking one out brings them back in step. Turn off **Execute branch operations on all repositories** in the Git settings to list and act on the selected repository only.
+With several repositories, the popup shows branches common to all of them, plus a submenu per repository; an operation on a common branch (Checkout, Checkout and Rebase, Rebase, Merge, Update, Rename, Delete…) runs in every repository, and if it fails in one of them, Prefabric offers to roll back the others. When the repositories are on different branches, the popup says **Branches have diverged** and still lists the common branches, so checking one out brings them back in step. Turn off **Execute branch operations on all repositories** in the Git settings to list and act on the selected repository only.
 
 ## Sync with remotes
 
-- **Fetch** fetches all repositories. OpenIDEA also checks for incoming commits in the background, fetching every repository whose branch has an upstream one after another (after 20 seconds, then every 15 minutes by default); see **Explicitly check for incoming commits on remotes** and **Check for incoming commits every** in the Git settings.
+- **Fetch** fetches all repositories. Prefabric also checks for incoming commits in the background, fetching every repository whose branch has an upstream one after another (after 20 seconds, then every 15 minutes by default); see **Explicitly check for incoming commits on remotes** and **Check for incoming commits every** in the Git settings.
 - **Update Project…** (`⌘T` / `Ctrl+T`) pulls all repositories, by merge or by rebase. Uncommitted changes are stashed and restored. The **Update Project** dialog only shows when **Show options before Update** is on.
 - **Pull…** pulls a chosen remote branch into the current branch, with `--rebase`, `--ff-only`, `--no-ff`, `--squash` and other options.
-- **Push…** (`⇧⌘K` / `Ctrl+Shift+K`) lists outgoing commits and their files. Edit the target branch, pick a remote, and choose **Force (with lease)**, **Set upstream** or push tags. Force push is not allowed to protected branches (`master; main` by default). If the push is rejected, OpenIDEA offers to merge or rebase and push again.
+- **Push…** (`⇧⌘K` / `Ctrl+Shift+K`) lists outgoing commits and their files. Edit the target branch, pick a remote, and choose **Force (with lease)**, **Set upstream** or push tags. Force push is not allowed to protected branches (`master; main` by default). If the push is rejected, Prefabric offers to merge or rebase and push again.
 - **Manage Remotes…** adds, edits and removes remotes.
 
 HTTPS passwords and SSH passphrases are asked for in a dialog and can be remembered; saved HTTPS credentials are listed under **Settings › Version Control › Git › Passwords**.
@@ -203,7 +203,7 @@ Limits: interactive rebase doesn't support ranges with merge commits, and **Undo
 - **Unstash Changes…**: apply or pop a stash, reinstate the index, or create a branch from it.
 - The **Stash** tab of the Commit tool window lists stashes with apply, pop and drop.
 
-**Shelf** is managed by the IDE and stored as patches in `.openidea/shelf`:
+**Shelf** is managed by the IDE and stored as patches in `.prefabric/shelf`:
 
 - **Shelve Changes…** lets you pick files and a name; the changes are then reverted.
 - **Unshelve…** applies a shelf (or one file of it) with a three-way merge, into a changelist you choose.

@@ -200,8 +200,8 @@ pub fn spec(os: Os) -> Vec<Entry> {
                 act("app.about", "About Prefabric"),
                 act("app.checkForUpdates", "Check for Updates…"),
                 SEP,
-                act("app.installCli", "Install 'openidea' Command"),
-                act("app.uninstallCli", "Uninstall 'openidea' Command"),
+                act("app.installCli", "Install 'prefabric' Command"),
+                act("app.uninstallCli", "Uninstall 'prefabric' Command"),
                 SEP,
                 act("file.settings", "Settings…"),
                 SEP,
@@ -790,8 +790,8 @@ pub fn spec(os: Os) -> Vec<Entry> {
     if !mac {
         tools.extend([
             SEP,
-            act("app.installCli", "Install 'openidea' Command"),
-            act("app.uninstallCli", "Uninstall 'openidea' Command"),
+            act("app.installCli", "Install 'prefabric' Command"),
+            act("app.uninstallCli", "Uninstall 'prefabric' Command"),
         ]);
     }
     menus.push(sub("tools", "Tools", tools));

@@ -3,11 +3,11 @@ title: "SSH"
 description: "Open a project that lives on an SSH host or in a WSL distribution, with the IDE backend running next to the code."
 ---
 
-Remote development opens a project folder on another machine in a normal OpenIDEA window. The UI stays on your
+Remote development opens a project folder on another machine in a normal Prefabric window. The UI stays on your
 desktop; the IDE backend, [`openidea-server`](/en/guide/remote/server), runs on the remote host. Indexing, language
 servers, terminals, run configurations, debuggers, build tools and Git all run there, next to the code.
 
-OpenIDEA connects over SSH, or on Windows directly into a WSL distribution. For dev containers, see
+Prefabric connects over SSH, or on Windows directly into a WSL distribution. For dev containers, see
 [Containers](/en/guide/remote/containers).
 
 ## Requirements
@@ -32,7 +32,7 @@ through the app-wide SSH configurations.
   </Step>
   <Step title="Pick the authentication type">Choose one of the options under **Authentication type** (see below).</Step>
   <Step title="Test the connection">
-    Click **Test Connection**. If the host key is not in `~/.ssh/known_hosts` yet, OpenIDEA shows the key and offers
+    Click **Test Connection**. If the host key is not in `~/.ssh/known_hosts` yet, Prefabric shows the key and offers
     **Trust Host and Retry**, which adds it there.
   </Step>
 </Steps>
@@ -48,13 +48,13 @@ never to a settings file. The **+**, **−** and copy buttons above the list add
 
 ### `~/.ssh/config` support
 
-OpenIDEA has its own SSH client and reads `~/.ssh/config` itself. It understands `Host`, `Match`, `Include`,
+Prefabric has its own SSH client and reads `~/.ssh/config` itself. It understands `Host`, `Match`, `Include`,
 `HostName`, `User`, `Port`, `IdentityFile`, `IdentityAgent`, `ProxyJump`, `ProxyCommand`, `StrictHostKeyChecking` and
 `UserKnownHostsFile`. Jump hosts authenticate with the agent and identity files; the password or passphrase of the
 configuration is only used for the target host.
 
 The SSH agent is the one `IdentityAgent` names, otherwise `SSH_AUTH_SOCK` as your login shell sets it, so an agent
-socket exported in `~/.zshrc` (for example a password manager's agent) works even when OpenIDEA is started from the Dock.
+socket exported in `~/.zshrc` (for example a password manager's agent) works even when Prefabric is started from the Dock.
 
 Host keys are checked against `known_hosts`. An unknown key has to be trusted once; a changed key is refused unless
 host key checking is turned off for that host.
@@ -91,8 +91,8 @@ After the project opens you are asked whether to trust it, as for a local folder
 - The window title ends with the host, and the status bar shows **SSH: `<host>`**. Clicking it opens the
   **Remote Development** dialog.
 - Remote projects appear in the recent projects list on the Welcome screen, so you can reopen them from there.
-- Language servers, debuggers and other tools that OpenIDEA installs go to the remote host, under
-  `~/.openidea/data`.
+- Language servers, debuggers and other tools that Prefabric installs go to the remote host, under
+  `~/.prefabric/data`.
 - Your keymap, appearance, editor font and colour scheme stay on the desktop. Project and tool settings live on the
   host.
 - Your code plugins are synced to the server and run next to the project.
@@ -128,7 +128,7 @@ unknown host key. No OpenSSH client is needed. It does not open a remote project
 
 On Windows, when at least one WSL distribution is installed, the connect dialog shows **Connect through:** with
 **SSH** and **WSL**. Choose **WSL**, pick the **WSL distribution:** and enter the **Project directory:** inside the
-distribution. OpenIDEA installs and starts `openidea-server` inside the distribution with `wsl.exe`; no SSH server is
+distribution. Prefabric installs and starts `openidea-server` inside the distribution with `wsl.exe`; no SSH server is
 needed. The status bar then shows **WSL: `<distribution>`**.
 
 Opening a folder under `\\wsl.localhost\<distribution>\` also opens it through the distribution.

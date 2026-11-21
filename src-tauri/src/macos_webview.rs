@@ -71,7 +71,7 @@ fn relaunch() {
         .exec();
     // `exec` returns only on failure. Continue on the system engine so the
     // startup failure page can tell the user to install the Safari update.
-    eprintln!("OpenIDEA: could not relaunch with Safari's WebKit: {error}");
+    eprintln!("Prefabric: could not relaunch with Safari's WebKit: {error}");
 }
 
 fn system_webkit_bundle_version() -> Option<u32> {

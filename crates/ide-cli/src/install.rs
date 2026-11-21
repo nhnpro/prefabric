@@ -1,12 +1,16 @@
-//! Installing the `openidea` command: a symlink on `PATH` to the launcher
-//! script in a macOS bundle, or a wrapper in a user's bin directory.
+//! Installing the `prefabric` command: a symlink on `PATH` to the launcher
+//! script in a macOS bundle, or a wrapper in a user's bin directory. Earlier
+//! builds installed it as `openidea`; uninstalling removes those too when they are ours.
 
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub const COMMAND: &str = "openidea";
-const LAUNCHER: &str = "Contents/Resources/bin/openidea";
+pub const COMMAND: &str = "prefabric";
+const LAUNCHER: &str = "Contents/Resources/bin/prefabric";
+/// The command name and launcher earlier builds installed.
+const LEGACY_COMMAND: &str = "openidea";
+const LEGACY_LAUNCHER: &str = "Contents/Resources/bin/openidea";
 const SYSTEM_DIR: &str = "/usr/local/bin";
 
 /// The launcher script of the bundle whose executable is `exe`; `None` outside a bundle.
@@ -36,23 +40,24 @@ pub fn link_dirs(home: Option<&Path>) -> Vec<PathBuf> {
     home.map(|h| h.join(".local/bin")).into_iter().chain([PathBuf::from(SYSTEM_DIR)]).collect()
 }
 
-/// The installed links among `dirs` (any OpenIDEA bundle's launcher).
+/// The installed links among `dirs` (any Prefabric bundle's launcher), including
+/// `openidea` links of earlier builds.
 pub fn installed(dirs: &[PathBuf]) -> Vec<PathBuf> {
-    dirs.iter().map(|d| d.join(COMMAND)).filter(|l| is_launcher_link(l)).collect()
+    dirs.iter().flat_map(|d| [d.join(COMMAND), d.join(LEGACY_COMMAND)]).filter(|l| is_launcher_link(l)).collect()
 }
 
 fn is_launcher_link(link: &Path) -> bool {
-    std::fs::read_link(link).is_ok_and(|target| target.ends_with(LAUNCHER))
+    std::fs::read_link(link).is_ok_and(|target| target.ends_with(LAUNCHER) || target.ends_with(LEGACY_LAUNCHER))
 }
 
-/// Links `dir/openidea` to `launcher`, asking for administrator rights when `dir`
-/// is not writable. Refuses to replace an `openidea` that is not ours.
+/// Links `dir/prefabric` to `launcher`, asking for administrator rights when `dir`
+/// is not writable. Refuses to replace a `prefabric` that is not ours.
 pub fn install(launcher: &Path, dir: &Path) -> io::Result<PathBuf> {
     let link = dir.join(COMMAND);
     if link.symlink_metadata().is_ok() && !is_launcher_link(&link) {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("{} already exists and is not an OpenIDEA command", link.display()),
+            format!("{} already exists and is not a Prefabric command", link.display()),
         ));
     }
     let direct = std::fs::create_dir_all(dir).and_then(|()| {
@@ -116,19 +121,27 @@ fn applescript_escape(s: &str) -> String {
     s.replace('\\', r"\\").replace('"', "\\\"")
 }
 
-const WRAPPER_MARKER: &str = "OpenIDEA command launcher v1";
+const WRAPPER_MARKER: &str = "Prefabric command launcher v1";
+const LEGACY_WRAPPER_MARKER: &str = "OpenIDEA command launcher v1";
 
 /// AppImages remount their executable on every launch. Keep the original image path.
 pub fn stable_executable(exe: &Path, appimage: Option<&Path>) -> io::Result<PathBuf> {
     let path = appimage.unwrap_or(exe);
     if !path.is_absolute() || !path.is_file() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "the OpenIDEA executable must be in a permanent location"));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "the Prefabric executable must be in a permanent location",
+        ));
     }
     Ok(path.to_path_buf())
 }
 
 pub fn wrapper_path(dir: &Path, windows: bool) -> PathBuf {
-    dir.join(if windows { "openidea.cmd" } else { COMMAND })
+    dir.join(if windows { "prefabric.cmd" } else { COMMAND })
+}
+
+fn legacy_wrapper_path(dir: &Path, windows: bool) -> PathBuf {
+    dir.join(if windows { "openidea.cmd" } else { LEGACY_COMMAND })
 }
 
 fn wrapper(exe: &Path, windows: bool) -> io::Result<String> {
@@ -150,7 +163,10 @@ fn wrapper(exe: &Path, windows: bool) -> io::Result<String> {
 pub fn is_wrapper(path: &Path, windows: bool) -> bool {
     path.symlink_metadata().is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
         && std::fs::read_to_string(path).is_ok_and(|text| {
-            text.lines().nth(1) == Some(&format!("{} {WRAPPER_MARKER}", if windows { "rem" } else { "#" }))
+            let comment = if windows { "rem" } else { "#" };
+            text.lines().nth(1).is_some_and(|line| {
+                [WRAPPER_MARKER, LEGACY_WRAPPER_MARKER].iter().any(|marker| line == format!("{comment} {marker}"))
+            })
         })
 }
 
@@ -163,7 +179,7 @@ pub fn install_wrapper(exe: &Path, dir: &Path, windows: bool) -> io::Result<Path
         if !is_wrapper(&path, windows) {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!("{} already exists and is not an OpenIDEA command", path.display()),
+                format!("{} already exists and is not a Prefabric command", path.display()),
             ));
         }
         std::fs::remove_file(&path)?;
@@ -179,13 +195,16 @@ pub fn install_wrapper(exe: &Path, dir: &Path, windows: bool) -> io::Result<Path
     Ok(path)
 }
 
+/// Removes the wrapper in `dir`, and an `openidea` one of an earlier build, when they are ours.
 pub fn uninstall_wrapper(dir: &Path, windows: bool) -> io::Result<Vec<PathBuf>> {
-    let path = wrapper_path(dir, windows);
-    if !is_wrapper(&path, windows) {
-        return Ok(vec![]);
+    let mut removed = vec![];
+    for path in [wrapper_path(dir, windows), legacy_wrapper_path(dir, windows)] {
+        if is_wrapper(&path, windows) {
+            std::fs::remove_file(&path)?;
+            removed.push(path);
+        }
     }
-    std::fs::remove_file(&path)?;
-    Ok(vec![path])
+    Ok(removed)
 }
 
 /// Preserve every unrelated PATH entry, including expandable environment variables.
@@ -254,23 +273,28 @@ fn resolves_to(path_var: Option<&OsStr>, command: &Path) -> bool {
 
 fn user_bin() -> io::Result<PathBuf> {
     if cfg!(windows) {
-        dirs::data_local_dir().map(|dir| dir.join("OpenIDEA/bin"))
+        dirs::data_local_dir().map(|dir| dir.join("Prefabric/bin"))
     } else {
         dirs::home_dir().map(|dir| dir.join(".local/bin"))
     }
-    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no user directory for the openidea command"))
+    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no user directory for the prefabric command"))
+}
+
+/// Where earlier builds put the Windows wrapper.
+fn legacy_user_bin() -> Option<PathBuf> {
+    if cfg!(windows) { dirs::data_local_dir().map(|dir| dir.join("OpenIDEA/bin")) } else { None }
 }
 
 pub fn install_current() -> io::Result<Installation> {
     let exe = std::env::current_exe()?;
     if cfg!(target_os = "macos") {
         let launcher = bundled_launcher(&exe).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "install the command from the packaged OpenIDEA app")
+            io::Error::new(io::ErrorKind::NotFound, "install the command from the packaged Prefabric app")
         })?;
         if translocated(&launcher) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "move OpenIDEA to the Applications folder first",
+                "move Prefabric to the Applications folder first",
             ));
         }
         let dir = link_dir(std::env::var_os("PATH").as_deref(), dirs::home_dir().as_deref());
@@ -292,14 +316,19 @@ pub fn uninstall_current() -> io::Result<Vec<PathBuf>> {
         uninstall(&links)?;
         return Ok(links);
     }
-    let dir = user_bin()?;
-    let path = wrapper_path(&dir, cfg!(windows));
-    if is_wrapper(&path, cfg!(windows)) {
-        #[cfg(windows)]
-        update_user_path(&dir, false)?;
-        return uninstall_wrapper(&dir, cfg!(windows));
+    let windows = cfg!(windows);
+    let mut removed = vec![];
+    for dir in std::iter::once(user_bin()?).chain(legacy_user_bin()) {
+        let ours = [wrapper_path(&dir, windows), legacy_wrapper_path(&dir, windows)]
+            .iter()
+            .any(|path| is_wrapper(path, windows));
+        if ours {
+            #[cfg(windows)]
+            update_user_path(&dir, false)?;
+            removed.extend(uninstall_wrapper(&dir, windows)?);
+        }
     }
-    Ok(vec![])
+    Ok(removed)
 }
 
 #[cfg(test)]
@@ -324,8 +353,23 @@ mod wrapper_tests {
     }
 
     #[test]
+    fn uninstall_removes_an_earlier_openidea_wrapper_but_not_a_foreign_one() {
+        for windows in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let legacy = legacy_wrapper_path(dir.path(), windows);
+            let comment = if windows { "rem" } else { "#" };
+            std::fs::write(&legacy, format!("first line\n{comment} {LEGACY_WRAPPER_MARKER}\nexec app\n")).unwrap();
+            let current = install_wrapper(Path::new("/opt/app"), dir.path(), windows).unwrap();
+            assert_eq!(uninstall_wrapper(dir.path(), windows).unwrap(), vec![current, legacy.clone()]);
+            std::fs::write(&legacy, "someone else's openidea").unwrap();
+            assert!(uninstall_wrapper(dir.path(), windows).unwrap().is_empty());
+            assert!(legacy.exists());
+        }
+    }
+
+    #[test]
     fn path_changes_keep_other_entries_and_do_not_duplicate_the_command_dir() {
-        let dir = r"C:\Users\用户\OpenIDEA\bin";
+        let dir = r"C:\Users\用户\Prefabric\bin";
         let initial = r"%USERPROFILE%\tools;C:\other";
         let updated = windows_path(initial, dir, true).unwrap();
         assert_eq!(updated, format!("{dir};{initial}"));
@@ -341,9 +385,9 @@ mod wrapper_tests {
     #[test]
     fn appimage_uses_the_persistent_image_not_the_mounted_binary() {
         let dir = tempfile::tempdir().unwrap();
-        let image = dir.path().join("OpenIDEA.AppImage");
+        let image = dir.path().join("Prefabric.AppImage");
         std::fs::write(&image, "image").unwrap();
-        assert_eq!(stable_executable(Path::new("/tmp/.mount_App/usr/bin/openidea"), Some(&image)).unwrap(), image);
+        assert_eq!(stable_executable(Path::new("/tmp/.mount_App/usr/bin/prefabric"), Some(&image)).unwrap(), image);
         assert_eq!(stable_executable(&image, None).unwrap(), image);
         assert!(stable_executable(Path::new("missing"), None).is_err());
     }
@@ -408,7 +452,7 @@ mod wrapper_tests {
         assert_eq!(output.status.code(), Some(7));
         assert_eq!(String::from_utf8(output.stdout).unwrap().replace("\r\n", "\n"), "--cli\na b\n中文\nx&y\n");
         let check = dir.path().join("check.cmd");
-        std::fs::write(&check, "@echo off\r\nfor /f \"tokens=2 delims=:\" %%c in ('\"%SystemRoot%\\System32\\chcp.com\"') do set \"before=%%c\"\r\ncall \"%~dp0bin\\openidea.cmd\" example\r\nset \"code=%errorlevel%\"\r\nfor /f \"tokens=2 delims=:\" %%c in ('\"%SystemRoot%\\System32\\chcp.com\"') do set \"after=%%c\"\r\nif not \"%before%\"==\"%after%\" exit /b 99\r\nexit /b %code%\r\n").unwrap();
+        std::fs::write(&check, "@echo off\r\nfor /f \"tokens=2 delims=:\" %%c in ('\"%SystemRoot%\\System32\\chcp.com\"') do set \"before=%%c\"\r\ncall \"%~dp0bin\\prefabric.cmd\" example\r\nset \"code=%errorlevel%\"\r\nfor /f \"tokens=2 delims=:\" %%c in ('\"%SystemRoot%\\System32\\chcp.com\"') do set \"after=%%c\"\r\nif not \"%before%\"==\"%after%\" exit /b 99\r\nexit /b %code%\r\n").unwrap();
         let output = std::process::Command::new("cmd.exe")
             .current_dir(dir.path())
             .args(["/d", "/s", "/c"])
@@ -425,8 +469,8 @@ mod tests {
     use super::*;
 
     fn bundle(root: &Path) -> (PathBuf, PathBuf) {
-        let app = root.join("OpenIDEA.app");
-        let exe = app.join("Contents/MacOS/openidea");
+        let app = root.join("Prefabric.app");
+        let exe = app.join("Contents/MacOS/prefabric");
         let launcher = app.join(LAUNCHER);
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::create_dir_all(launcher.parent().unwrap()).unwrap();
@@ -440,8 +484,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (exe, launcher) = bundle(dir.path());
         assert_eq!(bundled_launcher(&exe), Some(launcher));
-        assert_eq!(bundled_launcher(&dir.path().join("target/debug/openidea")), None);
-        assert!(translocated(Path::new("/private/var/folders/x/AppTranslocation/ABC/d/OpenIDEA.app")));
+        assert_eq!(bundled_launcher(&dir.path().join("target/debug/prefabric")), None);
+        assert!(translocated(Path::new("/private/var/folders/x/AppTranslocation/ABC/d/Prefabric.app")));
     }
 
     #[test]
@@ -466,6 +510,26 @@ mod tests {
         assert!(installed(std::slice::from_ref(&bin)).is_empty());
         std::fs::write(&link, "someone else's").unwrap();
         assert_eq!(install(&launcher, &bin).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+    }
+
+    #[test]
+    fn uninstall_also_removes_our_earlier_openidea_link_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, launcher) = bundle(dir.path());
+        let legacy_launcher = dir.path().join("Old.app").join(LEGACY_LAUNCHER);
+        std::fs::create_dir_all(legacy_launcher.parent().unwrap()).unwrap();
+        std::fs::write(&legacy_launcher, "").unwrap();
+        let bin = dir.path().join("bin");
+        let link = install(&launcher, &bin).unwrap();
+        assert_eq!(link, bin.join("prefabric"));
+        let legacy = bin.join(LEGACY_COMMAND);
+        std::os::unix::fs::symlink(&legacy_launcher, &legacy).unwrap();
+        assert_eq!(installed(std::slice::from_ref(&bin)), vec![link.clone(), legacy.clone()]);
+        uninstall(&installed(std::slice::from_ref(&bin))).unwrap();
+        assert!(!link.exists() && legacy.symlink_metadata().is_err());
+
+        std::os::unix::fs::symlink(dir.path().join("elsewhere/openidea"), &legacy).unwrap();
+        assert!(installed(std::slice::from_ref(&bin)).is_empty(), "a foreign openidea stays");
     }
 
     #[test]

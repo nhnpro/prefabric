@@ -27,7 +27,7 @@ When a session's process exits, the terminal prints the exit code; press `Enter`
 
 ### Across restarts
 
-OpenIDEA remembers each project's terminal tabs: their directory, custom names, the shell used and the split layout (up to 32 tabs). After a restart each tab starts a **new** session in its directory. Scrollback and running commands are not restored.
+Prefabric remembers each project's terminal tabs: their directory, custom names, the shell used and the split layout (up to 32 tabs). After a restart each tab starts a **new** session in its directory. Scrollback and running commands are not restored.
 
 ## Keys in the terminal
 
@@ -70,7 +70,7 @@ The default shell is:
 
 **New Predefined Session** also offers the other shells it finds: zsh, bash, fish, nu and pwsh on macOS/Linux; PowerShell, cmd, WSL and Git Bash on Windows.
 
-Every session gets `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=OpenIDEA` and `TERM_PROGRAM_VERSION`, plus `LANG=en_US.UTF-8` if `LANG` is unset. Your own variables from the settings are added on top.
+Every session gets `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=Prefabric` and `TERM_PROGRAM_VERSION`, plus `LANG=en_US.UTF-8` if `LANG` is unset. Your own variables from the settings are added on top.
 
 With **Shell integration** on, zsh, bash and fish report the current directory and command start/end to the IDE. That keeps links and new splits in the right folder and lets the tab title follow the running program.
 

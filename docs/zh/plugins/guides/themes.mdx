@@ -3,7 +3,7 @@ title: "主题"
 description: "编写配色主题插件：主题文件与编辑器配色方案文件、主题如何生效、导入 IntelliJ 主题、移植 VS Code 主题，以及完整的 token 参考。"
 ---
 
-OpenIDEA 内置五个主题：Islands 浅色、Islands 深色、高对比度、Solarized 浅色和 Solarized 深色。
+Prefabric 内置五个主题：Islands 浅色、Islands 深色、高对比度、Solarized 浅色和 Solarized 深色。
 其他主题都来自 **主题插件**。
 
 主题插件是纯数据插件。和 IntelliJ 主题（一个 `.theme.json` 加一个可选的 `.icls` 编辑器配色方案）一样，它没有代码：
@@ -117,7 +117,7 @@ editor-scheme = "themes/harbor-night.scheme.json"   # 可选
 </Steps>
 
 想不重新安装就反复修改，可以用 `openidea-plugin link` 链接文件夹（直接从原处读取），或者把它放进（或软链接到）受信任项目的
-`<project>/.openidea/plugins/<name>/`。之后在插件上点 **重新加载**，或执行 **重新加载插件** 动作，即可加载修改。
+`<project>/.prefabric/plugins/<name>/`。之后在插件上点 **重新加载**，或执行 **重新加载插件** 动作，即可加载修改。
 文件或取值无效时，**设置 › 插件** 会显示加载错误以及所在文件和行号。
 
 分享主题的方式与其他插件相同，见 [打包](/zh/plugins/publishing/packaging)。
@@ -132,7 +132,7 @@ editor-scheme = "themes/harbor-night.scheme.json"   # 可选
 - **从文件导入 IntelliJ 主题…** 接受从 JetBrains Marketplace 下载的主题插件（`.jar`，或包含插件 `lib/*.jar` 的 `.zip`），
   或者一个 `.theme.json`（其 `editorScheme` 文件从同一目录读取）。
 
-整个插件会转换成一个 OpenIDEA 主题插件 `intellij.<plugin id>`，包含其中的每个主题及其编辑器配色方案。它通过常规的安装页面安装，
+整个插件会转换成一个 Prefabric 主题插件 `intellij.<plugin id>`，包含其中的每个主题及其编辑器配色方案。它通过常规的安装页面安装，
 当前使用的主题不会改变：请在 **设置 › 外观与行为 › 外观** 的 **主题** 中选择。再次导入同一插件会替换它。
 这两个命令也是动作（`plugins.importInstalledIntellijTheme`、`plugins.importIntellijTheme`）。
 
@@ -154,7 +154,7 @@ pnpm theme:import-intellij path/to/MyTheme.theme.json path/to/MyTheme.icls --out
 
 #### `.theme.json` 到 UI 主题
 
-| OpenIDEA token                                     | IntelliJ `ui` key（取第一个存在的）                                        |
+| Prefabric token                                    | IntelliJ `ui` key（取第一个存在的）                                        |
 | -------------------------------------------------- | -------------------------------------------------------------------------- |
 | `--bg-app`                                         | `Panel.background`                                                         |
 | `--bg-frame`                                       | `MainWindow.background`, `MainToolbar.background`                          |
@@ -191,7 +191,7 @@ pnpm theme:import-intellij path/to/MyTheme.theme.json path/to/MyTheme.icls --out
 
 #### `.icls` 到编辑器配色方案
 
-| OpenIDEA token                                                                        | `.icls` 选项                                                                                         |
+| Prefabric token                                                                       | `.icls` 选项                                                                                         |
 | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `--fg-editor`, `--bg-editor`                                                          | 属性 `TEXT`（前景、背景）                                                                            |
 | `--caret`, `--bg-current-line`                                                        | 颜色 `CARET_COLOR`, `CARET_ROW_COLOR`                                                                |
@@ -225,7 +225,7 @@ pnpm theme:import-intellij path/to/MyTheme.theme.json path/to/MyTheme.icls --out
 VS Code 主题（扩展中的 `themes/*.json`）包含 `type`（`dark` / `light` / `hc`）、`colors`（工作台）和 `tokenColors`（TextMate scope）。
 根据 `type` 设置 `kind`，然后手动映射：
 
-| OpenIDEA token                                                                                         | VS Code `colors` key                                                                                                                                                                                 |
+| Prefabric token                                                                                        | VS Code `colors` key                                                                                                                                                                                 |
 | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--bg-frame`                                                                                           | `titleBar.activeBackground`, `activityBar.background`                                                                                                                                                |
 | `--bg-island`, `--bg-app`                                                                              | `editor.background`, `sideBar.background`                                                                                                                                                            |
@@ -264,7 +264,7 @@ VS Code 主题（扩展中的 `themes/*.json`）包含 `type`（`dark` / `light`
 
 `tokenColors` 按 TextMate scope 映射到语法 token：
 
-| OpenIDEA token                                            | Scope                                                          |
+| Prefabric token                                           | Scope                                                          |
 | --------------------------------------------------------- | -------------------------------------------------------------- |
 | `--syn-keyword`                                           | `keyword`, `storage.type`, `storage.modifier`                  |
 | `--syn-string`                                            | `string`                                                       |

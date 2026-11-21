@@ -63,9 +63,13 @@ fn trusted_here(decisions: &TrustDecisions, root: &Path) -> bool {
 }
 
 /// The first ancestor of `path`, itself included, that looks like a project: it holds an
-/// `.openidea` folder, or a `.git` or `.jj` entry (a linked worktree's `.git` is a file).
+/// `.prefabric` (or `.openidea`) folder, or a `.git` or `.jj` entry (a linked worktree's `.git` is a file).
 fn marker_root(path: &Path) -> Option<PathBuf> {
-    let marked = |dir: &&Path| dir.join(".openidea").is_dir() || dir.join(".git").exists() || dir.join(".jj").exists();
+    let marked = |dir: &&Path| {
+        ide_core::project_dir::NAMES.iter().any(|name| dir.join(name).is_dir())
+            || dir.join(".git").exists()
+            || dir.join(".jj").exists()
+    };
     path.ancestors().find(marked).map(Path::to_path_buf)
 }
 

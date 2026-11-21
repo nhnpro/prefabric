@@ -42,13 +42,13 @@ openidea-server --stdio | --mcp-stdio [--project <path>] | --connect <host> <por
 ```
 
 - `--stdio` serves one desktop client over stdin/stdout. stdout carries the protocol, so logs go to stderr (filter with `OPENIDEA_LOG`).
-- Its state lives under `OPENIDEA_SERVER_HOME` (default `~/.openidea`), in `config/` and `data/`. Language definitions can be added in `config/languages/`.
+- Its state lives under `OPENIDEA_SERVER_HOME` (default `~/.prefabric`), in `config/` and `data/`. Language definitions can be added in `config/languages/`.
 - An SSH exec channel gets a minimal environment, so on every start the server takes the login shell's environment and adds the IDE-managed tools directory to `PATH`.
 - `--version` prints the app version and the protocol version.
 
 ### Installing it on the remote machine
 
-The desktop picks the server binary for the remote OS and architecture (from `uname -sm`): `OPENIDEA_SERVER_BINARY` if set, then the one next to the app when the platforms match; otherwise the release build of this version for that platform, downloaded once into `<data dir>/server/<version>/<os>-<arch>/`. Offline, it falls back to a build of this version already on the host, then to the unversioned `<data dir>/server/<os>-<arch>/openidea-server`. The server reports its version in `initialize`; a command missing on a server of another version fails with both versions named. It uploads the binary into `~/.openidea/server/` on the remote host, one folder per version, keyed by a content hash, and removes other builds of that version. CI keeps a static Linux (musl) build working.
+The desktop picks the server binary for the remote OS and architecture (from `uname -sm`): `OPENIDEA_SERVER_BINARY` if set, then the one next to the app when the platforms match; otherwise the release build of this version for that platform, downloaded once into `<data dir>/server/<version>/<os>-<arch>/`. Offline, it falls back to a build of this version already on the host, then to the unversioned `<data dir>/server/<os>-<arch>/openidea-server`. The server reports its version in `initialize`; a command missing on a server of another version fails with both versions named. It uploads the binary into `~/.prefabric/server/` on the remote host, one folder per version, keyed by a content hash, and removes other builds of that version. CI keeps a static Linux (musl) build working.
 
 ## The protocol
 

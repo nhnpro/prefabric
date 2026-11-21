@@ -4,7 +4,7 @@
   const zh = navigator.language.toLowerCase().startsWith("zh");
   const text = zh
     ? {
-        title: "OpenIDEA 无法启动",
+        title: "Prefabric 无法启动",
         report: "请复制下方详情，并附在 GitHub 问题中。",
         link: "报告问题",
         copy: "复制详情",
@@ -13,12 +13,12 @@
         details: "启动错误详情",
         timeout: "启动未在 60 秒内完成。",
         outdatedMac:
-          "这台 Mac 的系统网页引擎过旧：OpenIDEA 的界面运行在 macOS 自带的 WebKit 引擎上，需要 macOS 12 Monterey 或更高版本（引擎为 Safari 15.4 或更新）。macOS 11 Big Sur 上请先通过「软件更新」安装最新的 Safari 更新，OpenIDEA 会加载 Apple 随该更新暂存的新版 WebKit；若系统引擎仍低于 Safari 15.4，则无法启动。",
+          "这台 Mac 的系统网页引擎过旧：Prefabric 的界面运行在 macOS 自带的 WebKit 引擎上，需要 macOS 12 Monterey 或更高版本（引擎为 Safari 15.4 或更新）。macOS 11 Big Sur 上请先通过「软件更新」安装最新的 Safari 更新，Prefabric 会加载 Apple 随该更新暂存的新版 WebKit；若系统引擎仍低于 Safari 15.4，则无法启动。",
         outdated:
-          "系统的 WebKitGTK 版本过旧：OpenIDEA 需要较新的 WebKitGTK（webkit2gtk-4.1）。请通过系统的包管理器更新后重新打开 OpenIDEA。",
+          "系统的 WebKitGTK 版本过旧：Prefabric 需要较新的 WebKitGTK（webkit2gtk-4.1）。请通过系统的包管理器更新后重新打开 Prefabric。",
       }
     : {
-        title: "OpenIDEA could not start",
+        title: "Prefabric could not start",
         report: "Copy the details below and include them in a GitHub issue.",
         link: "Report an issue",
         copy: "Copy details",
@@ -27,9 +27,9 @@
         details: "Startup error details",
         timeout: "Startup did not finish within 60 seconds.",
         outdatedMac:
-          "The system web engine on this Mac is too old: OpenIDEA's interface runs on macOS's built-in WebKit and needs macOS 12 Monterey or later (Safari 15.4 or newer). On macOS 11 Big Sur, install the latest Safari update in Software Update; OpenIDEA then loads the newer WebKit Apple stages alongside it. Without that update the system engine is too old to start.",
+          "The system web engine on this Mac is too old: Prefabric's interface runs on macOS's built-in WebKit and needs macOS 12 Monterey or later (Safari 15.4 or newer). On macOS 11 Big Sur, install the latest Safari update in Software Update; Prefabric then loads the newer WebKit Apple stages alongside it. Without that update the system engine is too old to start.",
         outdated:
-          "The system's WebKitGTK is too old: OpenIDEA needs a recent WebKitGTK (webkit2gtk-4.1). Update it with your package manager, then open OpenIDEA again.",
+          "The system's WebKitGTK is too old: Prefabric needs a recent WebKitGTK (webkit2gtk-4.1). Update it with your package manager, then open Prefabric again.",
       };
   // The bundle targets Safari 15.4 (vite.config.ts), so an older system web engine can't
   // even parse it. structuredClone came with Safari 15.4, and WebKit's user agent doesn't
@@ -73,7 +73,7 @@
       const details = document.createElement("textarea");
       details.readOnly = true;
       details.setAttribute("aria-label", text.details);
-      details.value = `OpenIDEA startup failure\n${navigator.userAgent}\n\n${describe(reason)}`;
+      details.value = `Prefabric startup failure\n${navigator.userAgent}\n\n${describe(reason)}`;
       const actions = document.createElement("div");
       actions.className = "boot-error-actions";
       const copy = document.createElement("button");

@@ -109,7 +109,7 @@ export function LocalCliUpdate({ agent, backend }: { agent: AgentProvider; backe
         )}
         {result?.status === "unmanaged" && (
           <p className={styles.text}>
-            <T>This is not a global npm install OpenIDEA can update. Use its original installer.</T>
+            <T>This is not a global npm install Prefabric can update. Use its original installer.</T>
           </p>
         )}
         {(error || result?.status === "error") && (

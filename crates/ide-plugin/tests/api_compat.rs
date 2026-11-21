@@ -113,8 +113,8 @@ fn the_version_check_runs_compatible_components_and_explains_the_rest() {
         assert_eq!(check_api(&v(ok), &host), Ok(()), "{ok}");
     }
     let newer = check_api(&v("1.15.0"), &host).unwrap_err();
-    assert!(newer.contains("1.15") && newer.contains("update OpenIDEA"), "{newer}");
-    assert!(check_api(&v("2.0.0"), &host).unwrap_err().contains("update OpenIDEA"));
+    assert!(newer.contains("1.15") && newer.contains("update Prefabric"), "{newer}");
+    assert!(check_api(&v("2.0.0"), &host).unwrap_err().contains("update Prefabric"));
     let older = check_api(&v("0.2.0"), &host).unwrap_err();
     assert!(older.contains("rebuild it with the 1.14 SDK"), "{older}");
     // 0.x: every minor is its own API.

@@ -21,7 +21,7 @@ export const UPDATES_PAGE: PageSpec = {
           kind: "toggle",
           key: "general.autoCheckUpdates",
           label: "Check for updates automatically",
-          hint: "At startup and every 4 hours while OpenIDEA runs. Each new version is announced once per session.",
+          hint: "At startup and every 4 hours while Prefabric runs. Each new version is announced once per session.",
         },
         {
           kind: "select",

@@ -421,9 +421,9 @@ impl SettingsStore {
     pub fn import_bundle(&self, path: &Path) -> IdeResult<(Settings, BTreeMap<String, String>)> {
         let bytes = std::fs::read(path)?;
         let bundle: SettingsBundle = serde_json::from_slice(&bytes)
-            .map_err(|e| IdeError::invalid(format!("not an OpenIDEA settings file: {e}")))?;
+            .map_err(|e| IdeError::invalid(format!("not a Prefabric settings file: {e}")))?;
         if bundle.format != BUNDLE_FORMAT || bundle.version > BUNDLE_VERSION {
-            return Err(IdeError::invalid("not an OpenIDEA settings file, or one from a newer version"));
+            return Err(IdeError::invalid("not a Prefabric settings file, or one from a newer version"));
         }
         let layer = parse_layer(&bundle.settings).map_err(|e| IdeError::invalid(format!("invalid settings: {e}")))?;
         try_merge(&mut defaults_json(), layer).map_err(|e| IdeError::invalid(format!("invalid settings: {e}")))?;
@@ -808,7 +808,10 @@ mod tests {
         // Project layer is created on demand and wins.
         let s = store.set(SettingsScope::Project, "editor.fontSize", json!(12)).unwrap();
         assert_eq!(s.editor.font_size, 12.0);
-        assert_eq!(std::fs::read_to_string(proj.join(".openidea/settings.toml")).unwrap(), "[editor]\nfontSize = 12\n");
+        assert_eq!(
+            std::fs::read_to_string(proj.join(".prefabric/settings.toml")).unwrap(),
+            "[editor]\nfontSize = 12\n"
+        );
         let s = store.set(SettingsScope::Project, "editor.fontSize", json!(null)).unwrap();
         assert_eq!(s.editor.font_size, 16.0);
 

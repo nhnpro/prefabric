@@ -185,9 +185,9 @@ export const commands = {
 	/**  A window vetoed the quit (user cancelled its unsaved-changes prompt). */
 	appCancelQuit: () => __TAURI_INVOKE<void>("app_cancel_quit"),
 	appCheckUpdate: (source: UpdateSource) => typedError<UpdateCheck, IdeError>(__TAURI_INVOKE("app_check_update", { source })),
-	/**  Installs the `openidea` command for this user. */
+	/**  Installs the `prefabric` command for this user. */
 	appCliInstall: () => typedError<CliInstallation, IdeError>(__TAURI_INVOKE("app_cli_install")),
-	/**  Removes the installed `openidea` command; returns the links removed. */
+	/**  Removes the installed `prefabric` command (and an `openidea` one of an earlier build); returns the links removed. */
 	appCliUninstall: () => typedError<IpcPath[], IdeError>(__TAURI_INVOKE("app_cli_uninstall")),
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
 	/**

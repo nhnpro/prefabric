@@ -119,7 +119,7 @@ describe("the page", () => {
 
   it("shows the version and the notes, with its checkbox on by default", () => {
     render(<WhatsNewPage input={input("- Fixed a crash")} />);
-    expect(screen.getByText("OpenIDEA 0.1.41")).toBeInTheDocument();
+    expect(screen.getByText("Prefabric 0.1.41")).toBeInTheDocument();
     expect(document.body.textContent).toContain("Fixed a crash");
     expect(screen.getByRole("checkbox")).toBeChecked();
   });

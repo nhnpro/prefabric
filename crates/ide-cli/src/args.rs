@@ -1,14 +1,14 @@
-//! Command-line arguments of `openidea`.
+//! Command-line arguments of `prefabric`.
 
 use crate::Target;
 use std::path::Path;
 
 pub const USAGE: &str = "\
-Usage: openidea [options] [[--line <n>] [--column <n>] path[:line[:column]] ...]
-       openidea diff <left> <right>
+Usage: prefabric [options] [[--line <n>] [--column <n>] path[:line[:column]] ...]
+       prefabric diff <left> <right>
 
-Opens folders as projects and files in the editor of the running OpenIDEA,
-starting it if needed. Without paths, brings OpenIDEA to the front.
+Opens folders as projects and files in the editor of the running Prefabric,
+starting it if needed. Without paths, brings Prefabric to the front.
 Lines and columns start at 1; --line and --column apply to the next path.
 
 Options:

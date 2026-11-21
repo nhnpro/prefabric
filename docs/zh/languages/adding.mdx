@@ -3,7 +3,7 @@ title: "添加新语言"
 description: "语言定义文件的格式：文件识别、注释、高亮、语言服务器、调试器和格式化工具。"
 ---
 
-OpenIDEA 认识的每种语言都是一个 TOML 文件，格式如本页所述。有三种用法：
+Prefabric 认识的每种语言都是一个 TOML 文件，格式如本页所述。有三种用法：
 
 - **为自己修改内置语言**：在配置目录的 `languages` 文件夹里放一个 `id` 相同的文件。它会整体替换内置定义（字段不会合并），所以最好从内置文件复制一份再改。
 - **为自己添加语言**：在同一个文件夹里放一个使用新 `id` 的文件。
@@ -11,11 +11,11 @@ OpenIDEA 认识的每种语言都是一个 TOML 文件，格式如本页所述�
 
 配置目录位置：
 
-| 系统    | 文件夹                                                      |
-| ------- | ----------------------------------------------------------- |
-| macOS   | `~/Library/Application Support/ai.l0ng.openidea/languages/` |
-| Windows | `%APPDATA%\ai.l0ng.openidea\languages\`                     |
-| Linux   | `~/.config/ai.l0ng.openidea/languages/`                     |
+| 系统    | 文件夹                                                       |
+| ------- | ------------------------------------------------------------ |
+| macOS   | `~/Library/Application Support/dev.prefabric.ide/languages/` |
+| Windows | `%APPDATA%\dev.prefabric.ide\languages\`                     |
+| Linux   | `~/.config/dev.prefabric.ide/languages/`                     |
 
 这个文件夹只在启动时读取一次，修改后需要重启 IDE。无法解析的文件会被跳过，原因写在日志里。
 
@@ -180,4 +180,4 @@ path = "languages/solidity.toml"
 
 ## 添加内置语言
 
-要把语言加入 OpenIDEA 本身，新增 `languages/<id>.toml`，并在 [`crates/ide-language/src/registry.rs`](https://github.com/l0ng-ai/openidea/blob/main/crates/ide-language/src/registry.rs) 的 `BUILTIN` 表中注册（这些文件在构建时嵌入）。要让它的服务器支持一键安装，还需要在 [`crates/ide-tools/src/registry.rs`](https://github.com/l0ng-ai/openidea/blob/main/crates/ide-tools/src/registry.rs) 中添加同名条目。
+要把语言加入 Prefabric 本身，新增 `languages/<id>.toml`，并在 [`crates/ide-language/src/registry.rs`](https://github.com/l0ng-ai/openidea/blob/main/crates/ide-language/src/registry.rs) 的 `BUILTIN` 表中注册（这些文件在构建时嵌入）。要让它的服务器支持一键安装，还需要在 [`crates/ide-tools/src/registry.rs`](https://github.com/l0ng-ai/openidea/blob/main/crates/ide-tools/src/registry.rs) 中添加同名条目。

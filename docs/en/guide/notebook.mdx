@@ -3,11 +3,11 @@ title: "Notebooks"
 description: "Open, edit and run Jupyter notebooks (.ipynb) with a local Python kernel."
 ---
 
-OpenIDEA opens `.ipynb` files in a notebook editor. You can edit code and Markdown cells, run them on a Python kernel that the IDE starts for you, and save the result back to the same file.
+Prefabric opens `.ipynb` files in a notebook editor. You can edit code and Markdown cells, run them on a Python kernel that the IDE starts for you, and save the result back to the same file.
 
 ## Requirements
 
-- A Python interpreter with **ipykernel** installed (`pip install ipykernel`). OpenIDEA never installs packages for you. If ipykernel is missing, the editor shows an error with the hint _Install ipykernel in the selected Python environment, then restart the kernel_.
+- A Python interpreter with **ipykernel** installed (`pip install ipykernel`). Prefabric never installs packages for you. If ipykernel is missing, the editor shows an error with the hint _Install ipykernel in the selected Python environment, then restart the kernel_.
 - A trusted project. Running cells is blocked while the project is in Restricted Mode.
 - Notebooks in nbformat 4. Other versions are refused and the file is left untouched.
 
@@ -31,12 +31,12 @@ The toolbar at the top of the editor has:
 
 ## Choose the Python interpreter
 
-The interpreter list shows the Python environments OpenIDEA detects, plus the project interpreter. If you don't pick one, the notebook uses the project's Python interpreter, or the first detected environment.
+The interpreter list shows the Python environments Prefabric detects, plus the project interpreter. If you don't pick one, the notebook uses the project's Python interpreter, or the first detected environment.
 
 Your choice is remembered per notebook. Change it while no cell is running.
 
 <Tip>
-  For a virtual environment, select its own `python` (for example `.venv/bin/python`). OpenIDEA does not resolve the
+  For a virtual environment, select its own `python` (for example `.venv/bin/python`). Prefabric does not resolve the
   symlink to the base interpreter, so the kernel runs inside the environment.
 </Tip>
 
@@ -52,7 +52,7 @@ Every cell has a small toolbar:
 
 Use **Add Code Cell** and **Add Markdown Cell** at the end of the notebook to append cells.
 
-Code cells show the execution count (`[3]`) next to the cell toolbar. Raw cells and cell types OpenIDEA doesn't know are shown read-only; their content is kept as it is.
+Code cells show the execution count (`[3]`) next to the cell toolbar. Raw cells and cell types Prefabric doesn't know are shown read-only; their content is kept as it is.
 
 ## Code intelligence
 

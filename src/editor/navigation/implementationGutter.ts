@@ -93,7 +93,7 @@ let watching = false;
 
 /** Build output and tool folders: their changes add no implementations. */
 const OUTPUT_PATH =
-  /(?:^|[\\/])(?:\.git|\.gradle|\.idea|\.openidea|node_modules|target|build|out|bin)(?:[\\/]|$)|\.class$/;
+  /(?:^|[\\/])(?:\.git|\.gradle|\.idea|\.prefabric|\.openidea|node_modules|target|build|out|bin)(?:[\\/]|$)|\.class$/;
 
 /** Whether changes to `paths` can invalidate cached markers. */
 export function affectsMarkers(paths: readonly string[]): boolean {

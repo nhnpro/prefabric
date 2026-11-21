@@ -1,9 +1,9 @@
 ---
 title: "概览"
-description: "OpenIDEA 插件能做什么、插件的两种类型，以及插件 API 的当前状态。"
+description: "Prefabric 插件能做什么、插件的两种类型，以及插件 API 的当前状态。"
 ---
 
-OpenIDEA 插件可以为 IDE 增加命令、编辑器功能、工具窗口、主题、图标和语言。插件就是一个带 `plugin.toml` 清单（manifest）的文件夹；如果包含代码，代码是一个运行在沙箱里的 WebAssembly 组件，只能做用户允许的事。
+Prefabric 插件可以为 IDE 增加命令、编辑器功能、工具窗口、主题、图标和语言。插件就是一个带 `plugin.toml` 清单（manifest）的文件夹；如果包含代码，代码是一个运行在沙箱里的 WebAssembly 组件，只能做用户允许的事。
 
 <Warning>
   插件系统目前是**预览版**。**设置 › 插件** 页面上的 **预览** 标记会提示：“插件系统目前是预览版：API
@@ -36,7 +36,7 @@ OpenIDEA 插件可以为 IDE 增加命令、编辑器功能、工具窗口、主
 
 |                |                                                 |
 | -------------- | ----------------------------------------------- |
-| 最新已发布 API | **1.6.0**，随 OpenIDEA 0.1.43 发布              |
+| 最新已发布 API | **1.6.0**，随 Prefabric 0.1.43 发布             |
 | 开发中         | `main` 分支上的 **1.7.0**，计划随下一个版本发布 |
 | WIT 包名       | `openidea:plugin@<version>`                     |
 
@@ -47,7 +47,7 @@ OpenIDEA 插件可以为 IDE 增加命令、编辑器功能、工具窗口、主
 - **插件市场：** **设置 › 插件** 先列出已安装的插件，再列出官方插件和[社区登记仓库](https://github.com/l0ng-ai/openidea-plugins)中的社区插件。见 [发布到市场](/zh/plugins/publishing/marketplace)。
 - **磁盘：** 在 **设置 › 插件** 的齿轮菜单中选择 **从磁盘安装插件…**（文件夹）或 **从插件包文件安装…**（`.oiplugin` 或 `.zip`）。
 - **链接的文件夹：** `openidea-plugin link` 让 IDE 直接加载你正在开发的文件夹，无需安装。
-- **项目插件：** 放在 `<project>/.openidea/plugins/<name>/` 下的插件包，只在受信任的项目中、且你批准其权限后才会加载。
+- **项目插件：** 放在 `<project>/.prefabric/plugins/<name>/` 下的插件包，只在受信任的项目中、且你批准其权限后才会加载。
 
 ## 下一步
 

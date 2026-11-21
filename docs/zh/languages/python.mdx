@@ -3,7 +3,7 @@ title: "Python"
 description: "基于 basedpyright 和 Ruff 的 Python 代码智能、解释器与虚拟环境识别、pytest 和 Django 运行，以及基于 debugpy 的调试。"
 ---
 
-OpenIDEA 通过类型检查语言服务器（默认 basedpyright）提供 Python 代码智能；如果项目配置了 Ruff，还会同时启动 Ruff 服务器。IDE 会自动找到本机的解释器和虚拟环境，用项目解释器运行脚本、pytest 和 Django 测试，并用 debugpy 调试。其他语言的情况见[支持矩阵](/zh/languages/index)。
+Prefabric 通过类型检查语言服务器（默认 basedpyright）提供 Python 代码智能；如果项目配置了 Ruff，还会同时启动 Ruff 服务器。IDE 会自动找到本机的解释器和虚拟环境，用项目解释器运行脚本、pytest 和 Django 测试，并用 debugpy 调试。其他语言的情况见[支持矩阵](/zh/languages/index)。
 
 ## 语言服务器
 
@@ -27,7 +27,7 @@ Ruff 只为位于 Ruff 配置之下的文件启动：`ruff.toml`、`.ruff.toml`�
 
 ### 安装语言服务器
 
-打开 Python 文件时如果缺少服务器，OpenIDEA 会弹出类似 **basedpyright 未安装** 的通知，点 **安装** 即可。也可以在 **设置 › 语言和框架 › 语言服务器** 中安装、重新安装，或者指定你自己的可执行文件。
+打开 Python 文件时如果缺少服务器，Prefabric 会弹出类似 **basedpyright 未安装** 的通知，点 **安装** 即可。也可以在 **设置 › 语言和框架 › 语言服务器** 中安装、重新安装，或者指定你自己的可执行文件。
 
 - basedpyright、ty、Pyrefly 和 Ruff 会装进 IDE 工具文件夹里的独立虚拟环境。`PATH` 上有 uv 时用 uv，否则用 `python3 -m venv`。前提是本机装有 Python 3 或 uv。
 - Pyright 通过 npm 安装，需要 Node.js。
@@ -86,7 +86,7 @@ Ruff 只为位于 Ruff 配置之下的文件启动：`ruff.toml`、`.ruff.toml`�
 
 ## 运行与测试
 
-在包含 `pyproject.toml`、`setup.py`、`setup.cfg`、`requirements.txt`、`pytest.ini`、`tox.ini`、`manage.py` 或项目虚拟环境的目录里，OpenIDEA 会自动识别这些运行配置：
+在包含 `pyproject.toml`、`setup.py`、`setup.cfg`、`requirements.txt`、`pytest.ini`、`tox.ini`、`manage.py` 或项目虚拟环境的目录里，Prefabric 会自动识别这些运行配置：
 
 | 配置                  | 条件                                                                                                                                                                  |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -118,7 +118,7 @@ Jupyter Notebook（`.ipynb`）在 Python 解释器上运行，见 [Notebook](/zh
 
 ## 调试
 
-Python 调试使用 debugpy。开始调试时如果缺少 debugpy，OpenIDEA 会提示安装。IDE 在自己的工具文件夹里保存一份 debugpy，并把它加载到运行程序的解释器中，所以项目环境里不需要安装 debugpy。
+Python 调试使用 debugpy。开始调试时如果缺少 debugpy，Prefabric 会提示安装。IDE 在自己的工具文件夹里保存一份 debugpy，并把它加载到运行程序的解释器中，所以项目环境里不需要安装 debugpy。
 
 - 可以调试脚本、`python -m` 模块，以及 `pytest`、`uvicorn` 这类命令行入口。通过 `uv run`、`poetry run`、`pdm run`、`pipenv run`、`hatch run` 或 `rye run` 启动的程序会在对应管理器的环境中运行。
 - 调试 `manage.py` 时会开启 debugpy 的 Django 支持。

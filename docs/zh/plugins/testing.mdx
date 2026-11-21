@@ -64,19 +64,19 @@ openidea-plugin check acme.tools-1.0.0.oiplugin
 
 ## 常见问题
 
-| 现象                                                                                     | 原因与解决                                                                                                                                                    |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `engines.openidea "…" does not match this IDE's plugin API`                              | 清单要求的 API 是 IDE 没有的。降低要求，或更新 IDE。                                                                                                          |
-| `… is new in plugin API 1.x: set engines.openidea to "^1.x"`                             | 清单用了旧 IDE 会拒绝的功能，却仍声明兼容这些旧 IDE。提高 `engines.openidea`。                                                                                |
-| `the component was built for plugin API 1.x, newer than this IDE's 1.y: update OpenIDEA` | 组件是用比 IDE 更新的 SDK 构建的（例如从 `main` 构建）。针对要支持的最旧版本的 SDK tag 构建，或更新 IDE。见 [API 版本与兼容](/zh/plugins/versioning)。        |
-| 调用返回 `Error::Denied("…")`                                                            | 没有声明该能力，或用户拒绝、撤销了它。在 `[capabilities]` 中声明，并处理被拒绝的情况。                                                                        |
-| 调用返回 `Error::Stale`                                                                  | 读取之后文档已经变化。重新读取再试；`TextEditor::transform_selections` 会自动重试一次。                                                                       |
-| 命令 5 秒后失败                                                                          | 命令只有 5 秒。把耗时工作放进 `host::begin_task`，并持续报告进度。                                                                                            |
-| 编辑器里看不到结果                                                                       | provider 的结果超过 50 ms 会被丢弃，500 ms 时被中断。让它更快，或缓存计算结果。                                                                               |
-| 插件显示 **失败**                                                                        | 它连续崩溃了三次，原因在详情里。修复并重新构建后，点 **重启** 或 **从磁盘重新加载**。                                                                         |
-| 链接的插件没有出现                                                                       | 打开或刷新 **设置 › 插件**（齿轮菜单中有 **重新扫描插件**）。用 `openidea-plugin links` 检查，并确认 `OPENIDEA_PLUGINS_DIR` 指向你正在运行的 IDE 的插件目录。 |
-| 显示 **需要授权**                                                                        | 点击 **查看权限…** 并允许。项目插件还要求项目受信任。                                                                                                         |
-| `process:` 程序被拒绝                                                                    | 程序在批准后被替换过，或者不在项目所在机器的 `PATH` 上。重新批准，或在 **设置 › 插件** 中选择可执行文件。                                                     |
+| 现象                                                                                      | 原因与解决                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `engines.openidea "…" does not match this IDE's plugin API`                               | 清单要求的 API 是 IDE 没有的。降低要求，或更新 IDE。                                                                                                          |
+| `… is new in plugin API 1.x: set engines.openidea to "^1.x"`                              | 清单用了旧 IDE 会拒绝的功能，却仍声明兼容这些旧 IDE。提高 `engines.openidea`。                                                                                |
+| `the component was built for plugin API 1.x, newer than this IDE's 1.y: update Prefabric` | 组件是用比 IDE 更新的 SDK 构建的（例如从 `main` 构建）。针对要支持的最旧版本的 SDK tag 构建，或更新 IDE。见 [API 版本与兼容](/zh/plugins/versioning)。        |
+| 调用返回 `Error::Denied("…")`                                                             | 没有声明该能力，或用户拒绝、撤销了它。在 `[capabilities]` 中声明，并处理被拒绝的情况。                                                                        |
+| 调用返回 `Error::Stale`                                                                   | 读取之后文档已经变化。重新读取再试；`TextEditor::transform_selections` 会自动重试一次。                                                                       |
+| 命令 5 秒后失败                                                                           | 命令只有 5 秒。把耗时工作放进 `host::begin_task`，并持续报告进度。                                                                                            |
+| 编辑器里看不到结果                                                                        | provider 的结果超过 50 ms 会被丢弃，500 ms 时被中断。让它更快，或缓存计算结果。                                                                               |
+| 插件显示 **失败**                                                                         | 它连续崩溃了三次，原因在详情里。修复并重新构建后，点 **重启** 或 **从磁盘重新加载**。                                                                         |
+| 链接的插件没有出现                                                                        | 打开或刷新 **设置 › 插件**（齿轮菜单中有 **重新扫描插件**）。用 `openidea-plugin links` 检查，并确认 `OPENIDEA_PLUGINS_DIR` 指向你正在运行的 IDE 的插件目录。 |
+| 显示 **需要授权**                                                                         | 点击 **查看权限…** 并允许。项目插件还要求项目受信任。                                                                                                         |
+| `process:` 程序被拒绝                                                                     | 程序在批准后被替换过，或者不在项目所在机器的 `PATH` 上。重新批准，或在 **设置 › 插件** 中选择可执行文件。                                                     |
 
 ## 测试宿主（贡献者）
 

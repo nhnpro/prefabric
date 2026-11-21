@@ -25,7 +25,7 @@ API 用 WIT 定义，位于 `wit/`（包名 `openidea:plugin@1.7.0`）。插件�
 
 ## 插件包的生命周期
 
-插件包的来源：已安装插件（`<plugins_dir>/<id>/`）、项目插件（`<project>/.openidea/plugins/*/`，只对受信任项目加载）、用 `openidea-plugin link` 链接的目录（`links.json`）。
+插件包的来源：已安装插件（`<plugins_dir>/<id>/`）、项目插件（`<project>/.prefabric/plugins/*/`，只对受信任项目加载）、用 `openidea-plugin link` 链接的目录（`links.json`）。
 
 <Steps>
   <Step title="准备">解析清单，每条声明由负责它的扩展点校验（`ExtensionRegistry::prepare`），没有副作用。</Step>

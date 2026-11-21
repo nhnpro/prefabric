@@ -1,6 +1,6 @@
 # Theme plugins
 
-OpenIDEA ships seven built-in themes: Islands Light, Islands Dark,
+Prefabric ships seven built-in themes: Islands Light, Islands Dark,
 High Contrast, Solarized Light, Solarized Dark, One Light and One Dark. Additional
 themes come from **theme plugins**, the same model as
 IntelliJ IDEA, where most themes are plugins rather than part of the IDE.
@@ -123,7 +123,7 @@ There is no build step. The package *is* the folder.
    to the theme. *Use Default Theme* switches back.
 
 To iterate without reinstalling, put (or symlink) the package in
-`<project>/.openidea/plugins/<name>/` of an open project. It loads as a *dev*
+`<project>/.prefabric/plugins/<name>/` of an open project. It loads as a *dev*
 plugin, and *Reload* (or the *Reload Plugins* action) picks up your edits.
 
 To share a theme, publish the folder (a Git repository or a zip). Users
@@ -149,7 +149,7 @@ menu:
   JetBrains Marketplace (`.jar`, or a `.zip` with the plugin's `lib/*.jar`) or a
   `.theme.json` (its `editorScheme` file is read from the same folder).
 
-The whole plugin becomes one OpenIDEA theme plugin, `intellij.<plugin id>`, with
+The whole plugin becomes one Prefabric theme plugin, `intellij.<plugin id>`, with
 each of its themes and their editor schemes; it is installed through the usual
 install page, and the theme in use stays as it is: choose one of its themes in
 **Settings › Appearance › Theme**. Importing the plugin again replaces it. Both are actions too (`plugins.importIntellijTheme`,
@@ -176,7 +176,7 @@ ship no `.icls` at all keep the built-in syntax colours.
 
 #### `.theme.json` → UI theme
 
-| OpenIDEA token | IntelliJ `ui` key (first present wins) |
+| Prefabric token | IntelliJ `ui` key (first present wins) |
 |---|---|
 | `--bg-app` | `Panel.background` |
 | `--bg-frame` | `MainWindow.background`, `MainToolbar.background` |
@@ -212,7 +212,7 @@ The full table is `UI_KEYS` in [`src/features/plugins/intellijTheme.ts`](../src/
 
 #### `.icls` → editor scheme
 
-| OpenIDEA token | `.icls` option |
+| Prefabric token | `.icls` option |
 |---|---|
 | `--fg-editor`, `--bg-editor` | attribute `TEXT` (foreground, background) |
 | `--caret`, `--bg-current-line` | colour `CARET_COLOR`, `CARET_ROW_COLOR` |
@@ -248,7 +248,7 @@ A VS Code theme (`themes/*.json` in the extension) has `type` (`dark` / `light`
 / `hc`), `colors` (workbench) and `tokenColors` (TextMate scopes). Set `kind`
 from `type`, then map:
 
-| OpenIDEA token | VS Code `colors` key |
+| Prefabric token | VS Code `colors` key |
 |---|---|
 | `--bg-frame` | `titleBar.activeBackground`, `activityBar.background` |
 | `--bg-island`, `--bg-app` | `editor.background`, `sideBar.background` |
@@ -287,7 +287,7 @@ from `type`, then map:
 
 `tokenColors` → syntax tokens, by TextMate scope:
 
-| OpenIDEA token | Scope |
+| Prefabric token | Scope |
 |---|---|
 | `--syn-keyword` | `keyword`, `storage.type`, `storage.modifier` |
 | `--syn-string` | `string` |

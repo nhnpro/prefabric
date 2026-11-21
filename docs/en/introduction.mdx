@@ -1,9 +1,9 @@
 ---
 title: "Introduction"
-description: "OpenIDEA is an open-source IDE with the IntelliJ IDEA way of working, built as a native app with a Rust core."
+description: "Prefabric is an open-source IDE with the IntelliJ IDEA way of working, built as a native app with a Rust core."
 ---
 
-OpenIDEA brings the IntelliJ IDEA way of working (its keymap, its tool windows, its search-everything habits) to a native desktop app with a Rust core. It runs on macOS, Windows and Linux and is licensed under Apache 2.0.
+Prefabric brings the IntelliJ IDEA way of working (its keymap, its tool windows, its search-everything habits) to a native desktop app with a Rust core. It runs on macOS, Windows and Linux and is licensed under Apache 2.0. Prefabric is a fork of [OpenIDEA](https://github.com/l0ng-ai/openidea).
 
 If you have used IntelliJ IDEA, PyCharm or another JetBrains IDE, most of what you know carries over: pressing <kbd>Shift</kbd> twice opens Search Everywhere, `⌥↵` / `Alt+Enter` shows context actions, and the default keymap matches IDEA's. Coming from VS Code or Eclipse? Their keymaps are built in too.
 
@@ -21,7 +21,7 @@ If you have used IntelliJ IDEA, PyCharm or another JetBrains IDE, most of what y
 
 Opening [freqtrade](https://github.com/freqtrade/freqtrade) (Python, about 770 files) with warm caches, median of 5 runs:
 
-|                             | OpenIDEA          | IntelliJ IDEA 2026.2.3 |
+|                             | Prefabric         | IntelliJ IDEA 2026.2.3 |
 | --------------------------- | ----------------- | ---------------------- |
 | Window with the project     | **0.9 s**         | 3.1 s                  |
 | Ready (CPU settled)         | **1.1 s**         | 13.2 s                 |
@@ -30,13 +30,13 @@ Opening [freqtrade](https://github.com/freqtrade/freqtrade) (Python, about 770 f
 | Idle CPU                    | **4 %** of a core | 7 % of a core          |
 | Quit                        | **0.3 s**         | 5.9 s                  |
 
-Measured with a release build of OpenIDEA from `main` and IDEA with default settings and plugins, on Windows 11, 32-core AMD, 62 GB RAM. IDEA analyses Python more deeply, so "ready" doesn't mean the same work on both sides. Both are measured from the outside, the same way: see [`perf/compare`](https://github.com/l0ng-ai/openidea/blob/main/perf/compare) to run the comparison on your own machine and projects.
+Measured with a release build of Prefabric from `main` and IDEA with default settings and plugins, on Windows 11, 32-core AMD, 62 GB RAM. IDEA analyses Python more deeply, so "ready" doesn't mean the same work on both sides. Both are measured from the outside, the same way: see [`perf/compare`](https://github.com/l0ng-ai/openidea/blob/main/perf/compare) to run the comparison on your own machine and projects.
 
 ## Where to go next
 
 <CardGroup cols={2}>
   <Card title="Install" icon="download" href="/en/guide/install">
-    Download OpenIDEA for macOS, Windows or Linux.
+    Download Prefabric for macOS, Windows or Linux.
   </Card>
   <Card title="Quickstart" icon="rocket" href="/en/guide/quickstart">
     Open a project, find your way around, run and debug.
@@ -51,8 +51,8 @@ Measured with a release build of OpenIDEA from `main` and IDEA with default sett
     Write themes, languages and WebAssembly plugins.
   </Card>
   <Card title="Contribute" icon="code-branch" href="/en/contribute/setup">
-    Build OpenIDEA from source and send a pull request.
+    Build Prefabric from source and send a pull request.
   </Card>
 </CardGroup>
 
-<Note>OpenIDEA is not affiliated with JetBrains. IntelliJ IDEA is a trademark of JetBrains s.r.o.</Note>
+<Note>Prefabric is not affiliated with JetBrains. IntelliJ IDEA is a trademark of JetBrains s.r.o.</Note>

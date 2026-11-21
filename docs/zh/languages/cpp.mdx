@@ -3,7 +3,7 @@ title: "C 与 C++"
 description: "基于 clangd 的代码智能，CMake 与 Makefile 运行配置，单文件运行，以及通过 lldb-dap、CodeLLDB 或 GDB 进行原生调试。"
 ---
 
-OpenIDEA 通过 [clangd](https://clangd.llvm.org) 支持 C、C++、Objective-C 和 Objective-C++。语法高亮、折叠和结构视图无需任何配置即可使用；补全、导航、诊断和重构由 clangd 提供，效果取决于 clangd 能否拿到正确的编译参数。其他语言见[语言支持总览](/zh/languages/index)。
+Prefabric 通过 [clangd](https://clangd.llvm.org) 支持 C、C++、Objective-C 和 Objective-C++。语法高亮、折叠和结构视图无需任何配置即可使用；补全、导航、诊断和重构由 clangd 提供，效果取决于 clangd 能否拿到正确的编译参数。其他语言见[语言支持总览](/zh/languages/index)。
 
 | 语言          | 扩展名                                                                                                | 语言服务器 | 默认调试器 |
 | ------------- | ----------------------------------------------------------------------------------------------------- | ---------- | ---------- |
@@ -24,7 +24,7 @@ clangd 从当前文件向上查找以下文件来确定工作区根目录：`com
 
 clangd 需要知道每个文件的编译参数，否则只能猜测，常见的表现是误报找不到头文件或宏未定义。可以提供以下任一文件：
 
-- **`compile_commands.json`**：编译数据库。打开 `CMAKE_EXPORT_COMPILE_COMMANDS` 后 CMake 会把它写到构建目录中，OpenIDEA 生成的 CMake 配置总是带上 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`（见下文“CMake”一节）。基于 Make 的项目可以用 Bear 等工具生成。
+- **`compile_commands.json`**：编译数据库。打开 `CMAKE_EXPORT_COMPILE_COMMANDS` 后 CMake 会把它写到构建目录中，Prefabric 生成的 CMake 配置总是带上 `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`（见下文“CMake”一节）。基于 Make 的项目可以用 Bear 等工具生成。
 - **`compile_flags.txt`**：每行一个参数，对所有文件生效，适合小项目。
 - **`.clangd`**：clangd 自己的配置文件，例如用 `CompilationDatabase` 指向某个构建目录。
 
@@ -55,7 +55,7 @@ Xcode 和 Command Line Tools 自带的 `clangd` 不运行 clang-tidy。如果项
 
 ### CMake
 
-对每个包含 `CMakeLists.txt` 的项目，OpenIDEA 会生成以下运行配置：
+对每个包含 `CMakeLists.txt` 的项目，Prefabric 会生成以下运行配置：
 
 - **CMake Configure**：`cmake -S . -B <构建目录> -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`（新构建目录还会加上 `-DCMAKE_BUILD_TYPE=Debug`）。
 - **CMake Build**：`cmake --build <构建目录>`，构建目录尚未配置时会先执行配置步骤。
@@ -106,7 +106,7 @@ Xcode 和 Command Line Tools 自带的 `clangd` 不运行 clang-tidy。如果项
 
 ## Arduino
 
-`.ino` 草图使用 Arduino Language Server，它为 clangd 提供 Arduino 生成的编译上下文。IDE 不负责安装：请安装 Arduino IDE 2（其中包含 Arduino Language Server、Arduino CLI 和 clangd）以及对应开发板的核心。OpenIDEA 会在 `PATH` 或 Arduino IDE 2 的安装目录中查找这些工具。
+`.ino` 草图使用 Arduino Language Server，它为 clangd 提供 Arduino 生成的编译上下文。IDE 不负责安装：请安装 Arduino IDE 2（其中包含 Arduino Language Server、Arduino CLI 和 clangd）以及对应开发板的核心。Prefabric 会在 `PATH` 或 Arduino IDE 2 的安装目录中查找这些工具。
 
 如需覆盖路径，可以在 **设置 › 语言和框架 › 语言服务器** 中设置，或在 `settings.toml` 中设置 `languages.arduino.cli`、`languages.arduino.clangd`、`languages.arduino.languageServer` 和 `languages.arduino.cliConfig`。开发板 FQBN 写在 `sketch.yaml` 或 `languages.arduino.fqbn` 中。草图旁边的普通 `.cpp` 文件仍由 clangd 处理。
 

@@ -270,7 +270,9 @@ export function KeymapPage() {
           <div>
             {tx`Imported '${name}' (based on ${PRESET_TITLES[parsed.parent] ?? parsed.parent}): ${parsed.applied} actions.`}
           </div>
-          {unknown.length > 0 && <div>{tx`Not available in OpenIDEA (${unknown.length}): ${unknown.join(", ")}.`}</div>}
+          {unknown.length > 0 && (
+            <div>{tx`Not available in Prefabric (${unknown.length}): ${unknown.join(", ")}.`}</div>
+          )}
           {parsed.skippedShortcuts > 0 && <div>{tx`Skipped ${parsed.skippedShortcuts} unsupported shortcuts.`}</div>}
         </>
       ),
@@ -284,7 +286,7 @@ export function KeymapPage() {
     const path = await save({
       title: tx("Export Keymap"),
       defaultPath: `${name.replace(/[/\\:*?"<>|]/g, "_")}.json`,
-      filters: [{ name: tx("OpenIDEA Keymap"), extensions: ["json"] }],
+      filters: [{ name: tx("Prefabric Keymap"), extensions: ["json"] }],
     });
     if (!path) return;
     const json = keymapJson(

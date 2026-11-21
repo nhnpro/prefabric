@@ -25,7 +25,7 @@ def main():
             import debugpy
         except ImportError:
             sys.exit(
-                "debugpy is not installed in the image. Install OpenIDEA's copy (Settings > Tools) "
+                "debugpy is not installed in the image. Install Prefabric's copy (Settings > Tools) "
                 "or add debugpy to the image."
             )
     debugpy.listen(("0.0.0.0", port))

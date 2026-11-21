@@ -3,13 +3,13 @@ title: "Go"
 description: "Go code intelligence with gopls, GOROOT and build tag settings, go run and go test configurations, and debugging with Delve."
 ---
 
-OpenIDEA uses gopls for Go code intelligence, runs and tests modules with the `go` command, and debugs with Delve. `go.mod` and `go.work` files are highlighted and served by gopls too. For other languages, see the [support matrix](/en/languages/index).
+Prefabric uses gopls for Go code intelligence, runs and tests modules with the `go` command, and debugs with Delve. `go.mod` and `go.work` files are highlighted and served by gopls too. For other languages, see the [support matrix](/en/languages/index).
 
 ## Language server
 
 gopls serves `.go`, `go.mod` and `go.work` files. A workspace starts at the nearest `go.work`, else the nearest `go.mod`. Semantic highlighting from gopls is turned on.
 
-If gopls is missing, OpenIDEA shows a **gopls is not installed** notification with an **Install** button. You can also install it in **Settings › Languages & Frameworks › Language Servers**, or select your own `gopls` there. The IDE installs it with `go install golang.org/x/tools/gopls@latest` into its own tools folder, so Go must be on `PATH`. A `gopls` already on `PATH` is used as is.
+If gopls is missing, Prefabric shows a **gopls is not installed** notification with an **Install** button. You can also install it in **Settings › Languages & Frameworks › Language Servers**, or select your own `gopls` there. The IDE installs it with `go install golang.org/x/tools/gopls@latest` into its own tools folder, so Go must be on `PATH`. A `gopls` already on `PATH` is used as is.
 
 ## Setup
 
@@ -37,7 +37,7 @@ GOROOT and the module cache appear under **External Libraries** in the Project v
 
 ## Run and test
 
-OpenIDEA detects run configurations for each module (every `go.mod` in the project, or the modules listed in `go.work`):
+Prefabric detects run configurations for each module (every `go.mod` in the project, or the modules listed in `go.work`):
 
 | Configuration         | When                                |
 | --------------------- | ----------------------------------- |
@@ -59,7 +59,7 @@ The **Go Build** and **Go Test** configuration types in **Run › Edit Configura
 
 ## Debugging
 
-Go debugging uses Delve (`dlv dap`). If it is missing when you start a debug session, OpenIDEA offers to install it with `go install github.com/go-delve/delve/cmd/dlv@latest` into its tools folder. The detected `go run` and `go test` configurations and the gutter icons can all be debugged.
+Go debugging uses Delve (`dlv dap`). If it is missing when you start a debug session, Prefabric offers to install it with `go install github.com/go-delve/delve/cmd/dlv@latest` into its tools folder. The detected `go run` and `go test` configurations and the gutter icons can all be debugged.
 
 - **Attach to Process…** (`⌥⇧F5` / `Ctrl+Alt+F5`) lists local Go processes under **Go (Delve)**.
 - The **Go Remote** configuration attaches to a Delve server (`dlv --headless`, Delve 1.7.3 or later) on this or another machine, with local and remote root mapping. The form shows the command to start the remote side.

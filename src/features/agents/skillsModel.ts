@@ -21,7 +21,7 @@ export const defaultSkillsBackend: SkillsBackend = {
 
 /** Which folder family a skill came from, with the paths it is discovered in. */
 export const SKILL_SOURCE_GROUPS: Record<AgentSkillSource, { label: string; paths: string; agent: string | null }> = {
-  workspace: { label: "Workspace", paths: ".agents/skills · .openidea/skills", agent: null },
+  workspace: { label: "Workspace", paths: ".agents/skills · .prefabric/skills", agent: null },
   user: { label: "User", paths: "~/.agents/skills", agent: null },
   claudeWorkspace: { label: "Claude Code", paths: ".claude/skills", agent: "claude" },
   claudeUser: { label: "Claude Code", paths: "~/.claude/skills", agent: "claude" },

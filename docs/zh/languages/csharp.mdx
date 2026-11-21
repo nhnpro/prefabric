@@ -3,7 +3,7 @@ title: "C# 与 .NET"
 description: "使用 csharp-ls 的 C#、使用 FsAutoComplete 的 F#，用于构建、NuGet 包和测试的 .NET 工具窗口，以及基于 netcoredbg 的调试。"
 ---
 
-OpenIDEA 通过 [csharp-ls](https://github.com/razzmatazz/csharp-language-server) 支持 C#（`.cs`、`.csx`），通过 [FsAutoComplete](https://github.com/ionide/FsAutoComplete) 支持 F#（`.fs`、`.fsi`、`.fsx`）。两者都以 .NET 工具的形式安装，调试都使用 [netcoredbg](https://github.com/Samsung/netcoredbg)。构建、NuGet 包和测试统一走 `dotnet` 命令行。其他语言见[语言支持总览](/zh/languages/index)。
+Prefabric 通过 [csharp-ls](https://github.com/razzmatazz/csharp-language-server) 支持 C#（`.cs`、`.csx`），通过 [FsAutoComplete](https://github.com/ionide/FsAutoComplete) 支持 F#（`.fs`、`.fsi`、`.fsx`）。两者都以 .NET 工具的形式安装，调试都使用 [netcoredbg](https://github.com/Samsung/netcoredbg)。构建、NuGet 包和测试统一走 `dotnet` 命令行。其他语言见[语言支持总览](/zh/languages/index)。
 
 ## 语言服务器
 
@@ -16,7 +16,7 @@ OpenIDEA 通过 [csharp-ls](https://github.com/razzmatazz/csharp-language-server
 
 跳转到类库类型的定义时，csharp-ls 返回反编译后的源码，以只读文档打开；源生成器生成的代码同样以只读方式打开。
 
-`ProjectSettings/ProjectVersion.txt` 这个标记是为 Unity 项目准备的。把 OpenIDEA 设为 Unity 外部编辑器的方法见 [Unity](/zh/languages/unity)。
+`ProjectSettings/ProjectVersion.txt` 这个标记是为 Unity 项目准备的。把 Prefabric 设为 Unity 外部编辑器的方法见 [Unity](/zh/languages/unity)。
 
 ## 环境配置
 
@@ -48,7 +48,7 @@ OpenIDEA 通过 [csharp-ls](https://github.com/razzmatazz/csharp-language-server
 
 ## 运行
 
-对找到的每个 `.csproj`（包括通过 `.sln` / `.slnx` 找到的），如果输出类型是 `Exe` 或 `WinExe`，或者使用了 `Microsoft.NET.Sdk.Web`，OpenIDEA 会生成运行配置：
+对找到的每个 `.csproj`（包括通过 `.sln` / `.slnx` 找到的），如果输出类型是 `Exe` 或 `WinExe`，或者使用了 `Microsoft.NET.Sdk.Web`，Prefabric 会生成运行配置：
 
 - **&lt;项目&gt; (.NET Project)**：`dotnet run --project <路径> --no-launch-profile`。
 - **&lt;项目&gt;: &lt;启动配置&gt;**：`Properties/launchSettings.json` 中每个启动配置各一个，以 `--launch-profile` 运行，并应用该配置中的环境变量、工作目录、命令行参数以及 `applicationUrl`（作为 `ASPNETCORE_URLS`）。

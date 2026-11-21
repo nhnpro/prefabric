@@ -59,7 +59,7 @@ interface SectionSpec {
 
 const SECTIONS: readonly SectionSpec[] = [
   { scope: "user", title: "User", hint: "Shared across projects · secrets stored in Keychain" },
-  { scope: "workspace", title: "Workspace", hint: ".openidea/settings.toml · overrides Global by name" },
+  { scope: "workspace", title: "Workspace", hint: ".prefabric/settings.toml · overrides Global by name" },
 ];
 
 const KNOWN_AGENTS: ReadonlyArray<{ id: string; name: string }> = [
@@ -668,7 +668,7 @@ export function McpServersPage({ backend = defaultMcpBackend }: { backend?: McpB
             </div>
             <span className={styles.hint}>
               <T>
-                Exposes OpenIDEA's code intelligence, diagnostics, refactorings, and run configurations to coding
+                Exposes Prefabric's code intelligence, diagnostics, refactorings, and run configurations to coding
                 agents. Can also be toggled per session from the composer MCP menu.
               </T>
             </span>
@@ -718,7 +718,7 @@ export function McpServersPage({ backend = defaultMcpBackend }: { backend?: McpB
                 {!isCollapsed && scope === "workspace" && (
                   <p className={styles.sectionNote}>
                     <T>
-                      Servers added to the project's settings file outside OpenIDEA stay off until you turn them on
+                      Servers added to the project's settings file outside Prefabric stay off until you turn them on
                       here.
                     </T>
                   </p>
@@ -1090,7 +1090,7 @@ function DiscoveredSourcesView({
             options={[
               { value: "user", label: tx("Import into Global (settings.toml)") },
               ...(hasProject
-                ? [{ value: "workspace", label: tx("Import into Project (.openidea/settings.toml)") }]
+                ? [{ value: "workspace", label: tx("Import into Project (.prefabric/settings.toml)") }]
                 : []),
             ]}
             onChange={(v) => onImportScopeChange(v as McpScope)}
@@ -1385,7 +1385,7 @@ function McpServerModal({
             value={scope}
             options={[
               { value: "user", label: tx("User (Global settings)") },
-              { value: "workspace", label: tx("Workspace (.openidea/settings.toml)") },
+              { value: "workspace", label: tx("Workspace (.prefabric/settings.toml)") },
             ]}
             onChange={(v) => setScope(v as McpScope)}
           />

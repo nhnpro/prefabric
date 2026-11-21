@@ -482,7 +482,7 @@ pub struct CliInstallation {
     pub path_directory: Option<ide_core::IpcPath>,
 }
 
-/// Installs the `openidea` command for this user.
+/// Installs the `prefabric` command for this user.
 #[desktop_command(trust = always)]
 #[tauri::command]
 #[specta::specta]
@@ -490,7 +490,7 @@ pub async fn app_cli_install() -> IdeResult<CliInstallation> {
     tauri::async_runtime::spawn_blocking(crate::cli::install).await.map_err(|e| IdeError::internal(e.to_string()))?
 }
 
-/// Removes the installed `openidea` command; returns the links removed.
+/// Removes the installed `prefabric` command (and an `openidea` one of an earlier build); returns the links removed.
 #[desktop_command(trust = always)]
 #[tauri::command]
 #[specta::specta]

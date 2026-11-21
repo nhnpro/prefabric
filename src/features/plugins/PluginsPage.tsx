@@ -1473,7 +1473,7 @@ export function PluginsPage({ initialTab = "marketplace" }: { initialTab?: Tab }
             <ul className={styles.list} aria-label={tx("Installed plugins")}>
               {installedGroup("installed", "Installed", downloaded)}
               {installedGroup("linked", "Linked for development", linked)}
-              {installedGroup("dev", "Project (.openidea/plugins)", dev)}
+              {installedGroup("dev", "Project (.prefabric/plugins)", dev)}
               {loaded && shown.length === 0 && (
                 <li className={styles.listEmpty}>
                   {plugins.length === 0 ? tx("No plugins installed.") : tx("No plugins match.")}
@@ -1558,7 +1558,7 @@ export function PluginsPage({ initialTab = "marketplace" }: { initialTab?: Tab }
               <EmptyState className={styles.detailsEmpty} title={loaded ? "No plugin selected" : "Loading…"}>
                 <T>Plugins are folders with a</T> <code>plugin.toml</code>
                 <T>. Use the gear menu to install one from disk, or put dev plugins in</T>{" "}
-                <code>.openidea/plugins/</code> <T>inside your project.</T>
+                <code>.prefabric/plugins/</code> <T>inside your project.</T>
               </EmptyState>
             )
           ) : selectedMarket ? (

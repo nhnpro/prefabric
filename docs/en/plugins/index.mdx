@@ -1,9 +1,9 @@
 ---
 title: "Overview"
-description: "What OpenIDEA plugins can do, the two kinds of plugin, and the current state of the plugin API."
+description: "What Prefabric plugins can do, the two kinds of plugin, and the current state of the plugin API."
 ---
 
-OpenIDEA plugins extend the IDE with commands, editor features, tool windows, themes, icons and languages. A plugin is a folder with a `plugin.toml` manifest. If it has code, the code is a sandboxed WebAssembly component that can only do what the user allowed.
+Prefabric plugins extend the IDE with commands, editor features, tool windows, themes, icons and languages. A plugin is a folder with a `plugin.toml` manifest. If it has code, the code is a sandboxed WebAssembly component that can only do what the user allowed.
 
 <Warning>
   The plugin system is a **preview**. **Settings › Plugins** shows a **Preview** badge: the API and the plugins may
@@ -36,7 +36,7 @@ Code plugins are WebAssembly components targeting the `plugin` world in [`wit/`]
 
 |                           |                                                              |
 | ------------------------- | ------------------------------------------------------------ |
-| Latest released API       | **1.6.0**, shipped with OpenIDEA 0.1.43                      |
+| Latest released API       | **1.6.0**, shipped with Prefabric 0.1.43                     |
 | In development            | **1.7.0** on the `main` branch, planned for the next release |
 | Format of the WIT package | `openidea:plugin@<version>`                                  |
 
@@ -47,7 +47,7 @@ Declare the API your plugin needs with `engines.openidea` in the manifest, for e
 - **Marketplace:** **Settings › Plugins** lists the installed plugins first, then the official plugins and the community plugins of the [registry](https://github.com/l0ng-ai/openidea-plugins). See [Publish to the marketplace](/en/plugins/publishing/marketplace).
 - **Disk:** **Install Plugin from Disk…** (a folder) or **Install Plugin from Package File…** (an `.oiplugin` or `.zip`) in the gear menu of **Settings › Plugins**.
 - **Linked folders:** `openidea-plugin link` loads a folder you are developing, without installing it.
-- **Project plugins:** packages in `<project>/.openidea/plugins/<name>/` load in trusted projects only, after you approve their permissions.
+- **Project plugins:** packages in `<project>/.prefabric/plugins/<name>/` load in trusted projects only, after you approve their permissions.
 
 ## Next steps
 

@@ -88,12 +88,12 @@ fn show_recovery(app: AppHandle) {
     let mut dialog = app
         .dialog()
         .message(
-            "The Windows web engine stopped unexpectedly. Restart OpenIDEA to recover the interface. \
-             This restarts all OpenIDEA windows. Unsaved edits may be lost.",
+            "The Windows web engine stopped unexpectedly. Restart Prefabric to recover the interface. \
+             This restarts all Prefabric windows. Unsaved edits may be lost.",
         )
-        .title("OpenIDEA")
+        .title("Prefabric")
         .kind(MessageDialogKind::Error)
-        .buttons(MessageDialogButtons::OkCancelCustom("Restart OpenIDEA".into(), "Cancel".into()));
+        .buttons(MessageDialogButtons::OkCancelCustom("Restart Prefabric".into(), "Cancel".into()));
     if let Some(window) = crate::windows::target_window(&app).filter(|w| w.is_visible().unwrap_or(false)) {
         dialog = dialog.parent(&window);
     }

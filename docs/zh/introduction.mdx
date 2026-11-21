@@ -1,9 +1,9 @@
 ---
 title: "介绍"
-description: "OpenIDEA 是一款开源 IDE，沿用 IntelliJ IDEA 的使用方式，以 Rust 为核心构建成原生应用。"
+description: "Prefabric 是一款开源 IDE，沿用 IntelliJ IDEA 的使用方式，以 Rust 为核心构建成原生应用。"
 ---
 
-OpenIDEA 把 IntelliJ IDEA 的使用方式（快捷键、工具窗口、随处搜索的习惯）带到一个以 Rust 为核心的原生桌面应用里。支持 macOS、Windows 和 Linux，采用 Apache 2.0 许可证。
+Prefabric 把 IntelliJ IDEA 的使用方式（快捷键、工具窗口、随处搜索的习惯）带到一个以 Rust 为核心的原生桌面应用里。支持 macOS、Windows 和 Linux，采用 Apache 2.0 许可证。Prefabric 是 [OpenIDEA](https://github.com/l0ng-ai/openidea) 的分支（fork）。
 
 用过 IntelliJ IDEA、PyCharm 或其他 JetBrains IDE 的话，大部分经验可以直接沿用：连按两下 <kbd>Shift</kbd> 打开随处搜索，`⌥↵` / `Alt+Enter` 显示上下文操作，默认快捷键方案与 IDEA 一致。从 VS Code 或 Eclipse 过来，也有对应的内置快捷键方案。
 
@@ -21,7 +21,7 @@ OpenIDEA 把 IntelliJ IDEA 的使用方式（快捷键、工具窗口、随处�
 
 在缓存已预热的情况下打开 [freqtrade](https://github.com/freqtrade/freqtrade)（Python，约 770 个文件），取 5 次运行的中位数：
 
-|                       | OpenIDEA       | IntelliJ IDEA 2026.2.3 |
+|                       | Prefabric      | IntelliJ IDEA 2026.2.3 |
 | --------------------- | -------------- | ---------------------- |
 | 显示项目窗口          | **0.9 s**      | 3.1 s                  |
 | 就绪（CPU 平稳）      | **1.1 s**      | 13.2 s                 |
@@ -30,13 +30,13 @@ OpenIDEA 把 IntelliJ IDEA 的使用方式（快捷键、工具窗口、随处�
 | 空闲 CPU              | 单核的 **4 %** | 单核的 7 %             |
 | 退出                  | **0.3 s**      | 5.9 s                  |
 
-测试使用 `main` 分支的 OpenIDEA release 构建，以及默认设置和插件的 IDEA，环境为 Windows 11、32 核 AMD、62 GB 内存。IDEA 对 Python 的分析更深入，所以两边的“就绪”并不代表完成了同样多的工作。两者都以相同方式从外部测量：可以用 [`perf/compare`](https://github.com/l0ng-ai/openidea/blob/main/perf/compare) 在自己的机器和项目上复现。
+测试使用 `main` 分支的 Prefabric release 构建，以及默认设置和插件的 IDEA，环境为 Windows 11、32 核 AMD、62 GB 内存。IDEA 对 Python 的分析更深入，所以两边的“就绪”并不代表完成了同样多的工作。两者都以相同方式从外部测量：可以用 [`perf/compare`](https://github.com/l0ng-ai/openidea/blob/main/perf/compare) 在自己的机器和项目上复现。
 
 ## 下一步
 
 <CardGroup cols={2}>
   <Card title="安装" icon="download" href="/zh/guide/install">
-    下载 macOS、Windows 或 Linux 版 OpenIDEA。
+    下载 macOS、Windows 或 Linux 版 Prefabric。
   </Card>
   <Card title="快速上手" icon="rocket" href="/zh/guide/quickstart">
     打开项目、熟悉界面、运行和调试。
@@ -51,8 +51,8 @@ OpenIDEA 把 IntelliJ IDEA 的使用方式（快捷键、工具窗口、随处�
     编写主题、语言和 WebAssembly 插件。
   </Card>
   <Card title="参与贡献" icon="code-branch" href="/zh/contribute/setup">
-    从源码构建 OpenIDEA 并提交 Pull Request。
+    从源码构建 Prefabric 并提交 Pull Request。
   </Card>
 </CardGroup>
 
-<Note>OpenIDEA 与 JetBrains 无关联。IntelliJ IDEA 是 JetBrains s.r.o. 的商标。</Note>
+<Note>Prefabric 与 JetBrains 无关联。IntelliJ IDEA 是 JetBrains s.r.o. 的商标。</Note>

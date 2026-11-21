@@ -216,10 +216,11 @@ fn valid_name(name: &str) -> bool {
 /// A `SKILL.md`'s description is at most this many characters.
 const MAX_SKILL_DESCRIPTION: usize = 1024;
 
-/// The workspace folders skills are discovered in, by the source they report.
+/// The workspace folders skills are discovered in, by the source they report; the project
+/// config folder's `skills` (`.prefabric/skills`, or `.openidea/skills` in older projects)
+/// comes right after the first.
 const WORKSPACE_ROOTS: &[(&str, AgentSkillSource)] = &[
     (".agents/skills", AgentSkillSource::Workspace),
-    (".openidea/skills", AgentSkillSource::Workspace),
     (".claude/skills", AgentSkillSource::ClaudeWorkspace),
     (".github/skills", AgentSkillSource::GithubWorkspace),
     (".codex/skills", AgentSkillSource::CodexWorkspace),
@@ -245,6 +246,7 @@ pub fn discover_skills(workspace: &Path, home: Option<&Path>) -> Vec<AgentSkill>
     let mut seen_names: HashSet<String> = HashSet::new();
     let mut roots: Vec<(PathBuf, AgentSkillSource)> = Vec::new();
     roots.extend(WORKSPACE_ROOTS.iter().map(|(rel, source)| (workspace.join(rel), *source)));
+    roots.insert(1, (ide_core::project_dir::path(workspace, "skills"), AgentSkillSource::Workspace));
     let mut plugin_roots = Vec::new();
     if let Some(home) = home {
         roots.extend(HOME_ROOTS.iter().map(|(rel, source)| (home.join(rel), *source)));
@@ -726,7 +728,7 @@ mod tests {
         let repo = tmp.path().join("work/app");
         std::fs::create_dir_all(&repo).unwrap();
         write(&repo.join(".agents/skills/dep/SKILL.md"), "---\nname: dep\ndescription: From the standard root\n---\n");
-        write(&repo.join(".openidea/skills/local/SKILL.md"), "---\nname: local\ndescription: OpenIDEA's own\n---\n");
+        write(&repo.join(".openidea/skills/local/SKILL.md"), "---\nname: local\ndescription: Prefabric's own\n---\n");
         write(&repo.join(".claude/skills/claudey/SKILL.md"), "---\nname: claudey\ndescription: Claude's\n---\n");
         write(&repo.join(".github/skills/gh/SKILL.md"), "---\nname: gh\ndescription: Copilot's repo one\n---\n");
         write(

@@ -376,7 +376,7 @@ function Summary({ plan }: { plan: JetBrainsImportPlan }) {
           {tx("Not imported:")} {left.join(", ")}
         </div>
       )}
-      {unknown.length > 0 && <div>{tx`Not available in OpenIDEA (${unknown.length}): ${unknown.join(", ")}.`}</div>}
+      {unknown.length > 0 && <div>{tx`Not available in Prefabric (${unknown.length}): ${unknown.join(", ")}.`}</div>}
     </div>
   );
 }
@@ -388,7 +388,7 @@ export async function importJetBrainsSettings(path: string) {
   if (!plan.writes.length) {
     notifications().notify({
       level: "warning",
-      title: "No settings OpenIDEA can import were found",
+      title: "No settings Prefabric can import were found",
       key: "app.settingsImport",
     });
     return;

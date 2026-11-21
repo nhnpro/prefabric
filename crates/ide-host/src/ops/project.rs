@@ -172,7 +172,7 @@ pub fn save_workspace(host: &Host, window: &str, name: &str, paths: Vec<std::pat
         return Err(ide_core::IdeError::invalid("The primary project cannot be detached"));
     }
     if !previous.is_container(&project.root) && paths == [project.root.clone()] {
-        std::fs::remove_file(project.root.join(ide_workspace::workspace::FILE))?;
+        std::fs::remove_file(ide_workspace::workspace::file(&project.root))?;
     } else {
         let workspace = ide_workspace::workspace::Workspace::save(&project.root, name, paths, false)?;
         keep_attachment_private(&project.root, &workspace)?;
@@ -190,7 +190,7 @@ fn require_attachment_trust(host: &Host, path: &Path) -> IdeResult<()> {
 
 fn keep_attachment_private(root: &Path, workspace: &ide_workspace::workspace::Workspace) -> IdeResult<()> {
     if !workspace.is_container(root) {
-        ide_vcs::changelists::ensure_ignored(&root.join(".openidea"), &["/workspace.json"])?;
+        ide_vcs::changelists::ensure_ignored(&ide_core::project_dir::dir(root), &["/workspace.json"])?;
     }
     Ok(())
 }

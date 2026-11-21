@@ -59,7 +59,7 @@ async function exportSettings() {
   const { save } = await import("@/platform/dialog");
   const path = await save({
     title: "Export Settings",
-    defaultPath: "openidea-settings.json",
+    defaultPath: "prefabric-settings.json",
     filters: [{ name: "Prefabric settings", extensions: ["json"] }],
   });
   if (!path) return;

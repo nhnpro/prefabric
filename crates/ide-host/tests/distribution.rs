@@ -381,7 +381,7 @@ fn the_marketplace_offers_the_newest_version_this_ide_can_load() {
     let listed = f.host.refresh_market().unwrap();
     assert_eq!((listed[0].entry.version.as_str(), listed[0].compatible), ("2.0.0", false));
     let err = f.host.download_market_plugin("acme.hello").unwrap_err();
-    assert!(err.message.contains("update OpenIDEA"), "{}", err.message);
+    assert!(err.message.contains("update Prefabric"), "{}", err.message);
 }
 
 #[test]
@@ -712,7 +712,7 @@ fn an_index_in_a_newer_format_still_revokes() {
     );
     std::fs::write(market.join("index.json"), newer).unwrap();
     let err = f.host.refresh_market().unwrap_err();
-    assert!(err.message.contains("newer OpenIDEA"), "{}", err.message);
+    assert!(err.message.contains("newer Prefabric"), "{}", err.message);
     let info = f.host.info_of("acme.hello").unwrap();
     assert_eq!((info.status, info.error.as_deref()), (PluginStatus::Failed, Some("revoked: steals tokens")));
     assert!(f.host.market_plugins().is_empty());

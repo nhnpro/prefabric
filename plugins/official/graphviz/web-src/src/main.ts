@@ -210,4 +210,4 @@ function start(bridge: OpenideaBridge) {
 
 const bridge = window.openidea;
 if (bridge) start(bridge);
-else document.body.textContent = "This page runs inside OpenIDEA.";
+else document.body.textContent = "This page runs inside Prefabric.";

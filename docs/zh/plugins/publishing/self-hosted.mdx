@@ -37,7 +37,7 @@ openidea-plugin index market/ --publisher acme --name "ACME" --key acme.key
 openidea-plugin merge market/index.json https://github.com/l0ng-ai/openidea/releases/latest/download/plugins-index.json --keep acme
 ```
 
-`merge` 用另一个索引（路径或 URL）中的发布者、插件和吊销记录，替换你的索引中除 `--keep` 之外的所有发布者，并把它们的下载链接改为绝对地址。OpenIDEA 自己的 release 索引就是这样并入社区登记仓库的。想在自己的插件旁边同时提供官方和社区插件，就用这个命令。`--out FILE` 可以写到其他位置。
+`merge` 用另一个索引（路径或 URL）中的发布者、插件和吊销记录，替换你的索引中除 `--keep` 之外的所有发布者，并把它们的下载链接改为绝对地址。Prefabric 自己的 release 索引就是这样并入社区登记仓库的。想在自己的插件旁边同时提供官方和社区插件，就用这个命令。`--out FILE` 可以写到其他位置。
 
 ## 让 IDE 使用它
 
@@ -46,7 +46,7 @@ openidea-plugin merge market/index.json https://github.com/l0ng-ai/openidea/rele
 IDE 只读取一个索引。如果希望用户仍能看到官方插件，请把官方索引合并进你的索引。
 
 <Note>
-  OpenIDEA 的 release 构建内置了官方发布者的公钥。`openidea.*` 的插件必须用它或它背书过的密钥签名，与你的索引为
+  Prefabric 的 release 构建内置了官方发布者的公钥。`openidea.*` 的插件必须用它或它背书过的密钥签名，与你的索引为
   `openidea` 列出什么密钥无关。
 </Note>
 

@@ -40,7 +40,7 @@ async fn linked_projects_share_navigation_but_keep_files_repositories_and_run_di
     assert_eq!(ops::project::attach_workspace(&host, "main", &roots[1]).unwrap().as_ref(), root.as_path());
     ops::project::attach_workspace(&host, "main", &roots[1]).unwrap();
     assert_eq!(project.content_roots(), roots);
-    assert!(!root.join(".openidea/.gitignore").exists());
+    assert!(!root.join(".prefabric/.gitignore").exists());
     assert!(project.index.wait_idle(Duration::from_secs(10)));
     assert!(project.index.find_files("internal-needle", 100).is_empty());
     assert!(project.index.find_files("workspace.json", 100).is_empty());
@@ -97,10 +97,10 @@ async fn linked_projects_share_navigation_but_keep_files_repositories_and_run_di
     assert_eq!(project.content_roots(), vec![roots[0].clone()]);
     assert!(project.documents.text_of(&roots[0].join("same.txt")).unwrap().starts_with("unsaved"));
     assert!(roots[1].join("same.txt").exists());
-    assert!(!roots[1].join(".openidea").exists());
+    assert!(!roots[1].join(".prefabric").exists());
     let invalid = base.join("invalid");
     std::fs::create_dir_all(invalid.join(".openidea")).unwrap();
-    std::fs::write(invalid.join(ide_workspace::workspace::FILE), "broken").unwrap();
+    std::fs::write(ide_workspace::workspace::file(&invalid), "broken").unwrap();
     assert!(host.open_project("main", &invalid).is_err());
     assert!(Arc::ptr_eq(&host.project("main").unwrap(), &project));
     host.close_project("main");
@@ -221,7 +221,7 @@ async fn python_effective_interpreter_falls_back_to_the_primary_project() {
     assert_eq!(python(Some(&member.join("src"))), Some(configured));
     // A workspace file that fails to load (a corrupt one, say) falls back to the
     // primary project's interpreter instead of failing the whole command.
-    let workspace_file = primary.join(ide_workspace::workspace::FILE);
+    let workspace_file = ide_workspace::workspace::file(&primary);
     let valid = std::fs::read(&workspace_file).unwrap();
     std::fs::write(&workspace_file, b"{not json").unwrap();
     assert_eq!(python(Some(&member.join("src"))), Some(venv_python.clone()));
@@ -361,7 +361,7 @@ async fn attach_and_detach_preserve_the_primary_project_session() {
     assert!(ops::project::attach_workspace(&host, "main", &roots[1]).is_err());
     host.trust.decide(&roots[1], false, false).unwrap();
     assert!(ops::project::attach_workspace(&host, "main", &roots[1]).is_err());
-    assert!(!roots[0].join(ide_workspace::workspace::FILE).exists());
+    assert!(!ide_workspace::workspace::file(&roots[0]).exists());
     let existing_index = &project.index as *const _;
     host.trust.decide(&roots[1], true, false).unwrap();
     assert_eq!(ops::project::attach_workspace(&host, "main", &roots[1]).unwrap().as_ref(), roots[0]);
@@ -372,7 +372,10 @@ async fn attach_and_detach_preserve_the_primary_project_session() {
     assert!(!base.join("data/workspaces").exists());
     assert_eq!(Workspace::load(&roots[0]).unwrap().unwrap().projects, roots);
     assert!(
-        std::fs::read_to_string(roots[0].join(".openidea/.gitignore")).unwrap().lines().any(|l| l == "/workspace.json")
+        std::fs::read_to_string(roots[0].join(".prefabric/.gitignore"))
+            .unwrap()
+            .lines()
+            .any(|l| l == "/workspace.json")
     );
     assert_eq!(project.content_roots(), vec![roots[1].clone()]);
     let attached = ops::project::info(&project);
@@ -423,7 +426,7 @@ async fn attach_and_detach_preserve_the_primary_project_session() {
     assert!(updated.workspace.is_none());
     assert_eq!(updated.name, "primary");
     assert_eq!(updated.root.as_ref(), roots[0]);
-    assert!(!roots[0].join(ide_workspace::workspace::FILE).exists());
+    assert!(!ide_workspace::workspace::file(&roots[0]).exists());
     assert!(project.content_roots().is_empty());
     assert_eq!(
         ops::run::configs(&host, "main").unwrap().iter().map(|c| &c.id).collect::<Vec<_>>(),

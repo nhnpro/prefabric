@@ -53,7 +53,10 @@ fn comparison_children(path: &Path) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|entry| entry.file_name() != ".git" && entry.file_name() != ".openidea")
+        .filter(|entry| {
+            let name = entry.file_name();
+            name != ".git" && !name.to_str().is_some_and(ide_core::project_dir::is_name)
+        })
         .map(|entry| entry.path())
         .collect()
 }

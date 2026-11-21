@@ -1,20 +1,20 @@
 ---
 title: "Data directories and logs"
-description: "Where OpenIDEA keeps its settings, user data, caches, downloaded tools and logs, and how to move the rebuildable data to another drive."
+description: "Where Prefabric keeps its settings, user data, caches, downloaded tools and logs, and how to move the rebuildable data to another drive."
 ---
 
-OpenIDEA's application id is `ai.l0ng.openidea`, and every directory below is named after it.
+Prefabric's application id is `dev.prefabric.ide`, and every directory below is named after it.
 
 ## Locations
 
-|                          | macOS                                            | Windows                                | Linux                                  |
-| ------------------------ | ------------------------------------------------ | -------------------------------------- | -------------------------------------- |
-| Configuration            | `~/Library/Application Support/ai.l0ng.openidea` | `%APPDATA%\ai.l0ng.openidea`           | `~/.config/ai.l0ng.openidea`           |
-| User data                | `~/Library/Application Support/ai.l0ng.openidea` | `%APPDATA%\ai.l0ng.openidea`           | `~/.local/share/ai.l0ng.openidea`      |
-| Local data (rebuildable) | `~/Library/Application Support/ai.l0ng.openidea` | `%LOCALAPPDATA%\ai.l0ng.openidea`      | `~/.local/share/ai.l0ng.openidea`      |
-| Logs                     | `~/Library/Logs/ai.l0ng.openidea`                | `%LOCALAPPDATA%\ai.l0ng.openidea\logs` | `~/.local/share/ai.l0ng.openidea/logs` |
+|                          | macOS                                             | Windows                                 | Linux                                   |
+| ------------------------ | ------------------------------------------------- | --------------------------------------- | --------------------------------------- |
+| Configuration            | `~/Library/Application Support/dev.prefabric.ide` | `%APPDATA%\dev.prefabric.ide`           | `~/.config/dev.prefabric.ide`           |
+| User data                | `~/Library/Application Support/dev.prefabric.ide` | `%APPDATA%\dev.prefabric.ide`           | `~/.local/share/dev.prefabric.ide`      |
+| Local data (rebuildable) | `~/Library/Application Support/dev.prefabric.ide` | `%LOCALAPPDATA%\dev.prefabric.ide`      | `~/.local/share/dev.prefabric.ide`      |
+| Logs                     | `~/Library/Logs/dev.prefabric.ide`                | `%LOCALAPPDATA%\dev.prefabric.ide\logs` | `~/.local/share/dev.prefabric.ide/logs` |
 
-On macOS and Linux some of these are the same folder. **About OpenIDEA** shows the configuration directory and has **Open Configuration Folder**.
+On macOS and Linux some of these are the same folder. **About Prefabric** shows the configuration directory and has **Open Configuration Folder**.
 
 ### Configuration
 
@@ -31,9 +31,9 @@ On macOS and Linux some of these are the same folder. **About OpenIDEA** shows t
 
 ### Local data
 
-Everything here can be downloaded or rebuilt, so it is safe to delete while OpenIDEA is closed:
+Everything here can be downloaded or rebuilt, so it is safe to delete while Prefabric is closed:
 
-- `tools/`: language servers, debug adapters, formatters and JDKs that OpenIDEA installed.
+- `tools/`: language servers, debug adapters, formatters and JDKs that Prefabric installed.
 - `language-server-runtimes/`: runtimes the language servers run on.
 - `index/`: the symbol index of each project.
 - `cache/`: build tool sync results (Maven, Gradle) and other caches.
@@ -45,32 +45,34 @@ To clear caches from inside the IDE, use **File › Invalidate Caches…**. The 
 
 ## Project folder
 
-Each project keeps its own files in `.openidea/` at the project root:
+Each project keeps its own files in `.prefabric/` at the project root:
 
 - `settings.toml`: settings saved with **This project** selected.
 - `run.toml`: run configurations stored as project files, meant to be committed.
-- `run.local.toml`: run configurations kept to yourself. OpenIDEA adds it to `.openidea/.gitignore`.
+- `run.local.toml`: run configurations kept to yourself. Prefabric adds it to `.prefabric/.gitignore`.
 - `workspace.json`: the projects of a workspace.
+
+Projects set up with OpenIDEA keep their `.openidea/` folder: Prefabric reads and writes it as long as the project has no `.prefabric/` folder.
 
 ## Move the local data
 
-The local data can grow large (JDKs, language servers, indexes). To keep it on another drive, set `OPENIDEA_LOCAL_DATA_DIR` to an absolute path before starting OpenIDEA. The IDE then uses `<OPENIDEA_LOCAL_DATA_DIR>/ai.l0ng.openidea` and creates it if missing.
+The local data can grow large (JDKs, language servers, indexes). To keep it on another drive, set `OPENIDEA_LOCAL_DATA_DIR` to an absolute path before starting Prefabric. The IDE then uses `<OPENIDEA_LOCAL_DATA_DIR>/dev.prefabric.ide` and creates it if missing.
 
 On Windows, for example:
 
 ```bat
-setx OPENIDEA_LOCAL_DATA_DIR "E:\OpenIDEA"
+setx OPENIDEA_LOCAL_DATA_DIR "E:\Prefabric"
 ```
 
-On macOS and Linux, set it in the environment OpenIDEA starts from.
+On macOS and Linux, set it in the environment Prefabric starts from.
 
-- If the path is relative or can't be written to, OpenIDEA shows an error and exits instead of falling back to the default location.
+- If the path is relative or can't be written to, Prefabric shows an error and exits instead of falling back to the default location.
 - Configuration, user data and logs stay where they are unless you move them too (see below). Logs are still written when the variable is wrong, so you can find out why.
-- Existing data is not moved. Either let OpenIDEA download and rebuild it, or quit OpenIDEA and move only `tools/`, `language-server-runtimes/`, `index/`, `cache/`, `lsp/`, `notebook-runtime/`, `server/`, `logs/`, `agents/tools/`, `agents/registry.json` and the top-level `java-usages-*.jar` / `java-usages-*.tmp` files, keeping their relative paths. Leave everything else in place.
+- Existing data is not moved. Either let Prefabric download and rebuild it, or quit Prefabric and move only `tools/`, `language-server-runtimes/`, `index/`, `cache/`, `lsp/`, `notebook-runtime/`, `server/`, `logs/`, `agents/tools/`, `agents/registry.json` and the top-level `java-usages-*.jar` / `java-usages-*.tmp` files, keeping their relative paths. Leave everything else in place.
 
 ## Move configuration, user data or logs
 
-Each of the other directories has its own variable, set the same way as `OPENIDEA_LOCAL_DATA_DIR`: an absolute path, read when OpenIDEA starts. OpenIDEA then uses `<path>/ai.l0ng.openidea` and creates it if missing.
+Each of the other directories has its own variable, set the same way as `OPENIDEA_LOCAL_DATA_DIR`: an absolute path, read when Prefabric starts. Prefabric then uses `<path>/dev.prefabric.ide` and creates it if missing.
 
 | Variable              | Moves         |
 | --------------------- | ------------- |
@@ -79,14 +81,14 @@ Each of the other directories has its own variable, set the same way as `OPENIDE
 | `OPENIDEA_LOG_DIR`    | Logs          |
 
 - Set only the ones you want to move; the rest keep their default locations. Pointing several variables at the same path is fine.
-- If the configuration or user data path is relative or can't be used, OpenIDEA shows an error and exits instead of falling back to the default location. A wrong log path only turns off the log file.
-- Existing files are not moved. To keep your settings, plugins and history, quit OpenIDEA and copy the old folder's contents to the new location first.
+- If the configuration or user data path is relative or can't be used, Prefabric shows an error and exits instead of falling back to the default location. A wrong log path only turns off the log file.
+- Existing files are not moved. To keep your settings, plugins and history, quit Prefabric and copy the old folder's contents to the new location first.
 
 ## Logs
 
-OpenIDEA writes one log file per day, `openidea.<date>.log`, and keeps the last 7. Panics are written to the current log too.
+Prefabric writes one log file per day, `openidea.<date>.log`, and keeps the last 7. Panics are written to the current log too.
 
-- Open the folder with **Help › Show Log in Finder** (macOS), **Help › Show Log in Explorer** (Windows) or **Help › Show Log in Files** (Linux). The same link is in **About OpenIDEA**.
-- For more detail, start OpenIDEA with the `RUST_LOG` environment variable set, for example `RUST_LOG=debug`. The default is `info`, with debug output from the app itself.
+- Open the folder with **Help › Show Log in Finder** (macOS), **Help › Show Log in Explorer** (Windows) or **Help › Show Log in Files** (Linux). The same link is in **About Prefabric**.
+- For more detail, start Prefabric with the `RUST_LOG` environment variable set, for example `RUST_LOG=debug`. The default is `info`, with debug output from the app itself.
 
 Attach the log when you [report a problem](/en/reference/troubleshooting#report-a-problem).

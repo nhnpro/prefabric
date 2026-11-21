@@ -102,7 +102,7 @@ fn bearer(s: &Setup) -> String {
 }
 
 async fn rpc(s: &Setup, method: &str, params: Value) -> Value {
-    let project = format!("X-OpenIDEA-Project: {}", s.project.display());
+    let project = format!("X-Prefabric-Project: {}", s.project.display());
     let (status, body) = post(
         s,
         "/mcp",
@@ -203,12 +203,13 @@ async fn requests_without_the_token_or_from_web_pages_are_refused() {
 async fn folders_that_are_not_open_are_named_in_the_error() {
     let s = setup();
     let elsewhere = s.project.parent().unwrap().join("elsewhere");
+    // The header name of earlier builds is still read.
     let header = format!("X-OpenIDEA-Project: {}", elsewhere.display());
     let (status, body) =
         post(&s, "/mcp", &[&bearer(&s), &header], &json!({"jsonrpc":"2.0","id":3,"method":"tools/list"})).await;
     assert_eq!(status, 200);
     let reply: Value = serde_json::from_str(&body).unwrap();
-    assert!(reply["error"]["message"].as_str().unwrap().contains("isn't open in OpenIDEA"));
+    assert!(reply["error"]["message"].as_str().unwrap().contains("isn't open in Prefabric"));
     let (_, body) = post(&s, "/mcp", &[&bearer(&s)], &json!({"jsonrpc":"2.0","id":3,"method":"tools/list"})).await;
     assert!(serde_json::from_str::<Value>(&body).unwrap()["result"]["tools"].is_array());
 }
@@ -253,7 +254,7 @@ fn setup_with_background(served: bool) -> (Setup, PathBuf) {
 }
 
 async fn rpc_for(s: &Setup, folder: &Path, method: &str, params: Value) -> Value {
-    let project = format!("X-OpenIDEA-Project: {}", folder.display());
+    let project = format!("X-Prefabric-Project: {}", folder.display());
     let body = json!({ "jsonrpc": "2.0", "id": 7, "method": method, "params": params });
     let (status, body) = post(s, "/mcp", &[&bearer(s), &project], &body).await;
     assert_eq!(status, 200, "{body}");
@@ -286,7 +287,7 @@ async fn a_folder_that_is_neither_open_nor_served_in_the_background_says_where_t
         let reply = rpc_for(&s, &inventory, method, params).await;
         assert_eq!(reply["error"]["code"], -32001, "{method}: {reply}");
         let message = reply["error"]["message"].as_str().unwrap();
-        assert!(message.contains("isn't open in OpenIDEA and isn't served in the background"), "{message}");
+        assert!(message.contains("isn't open in Prefabric and isn't served in the background"), "{message}");
         assert!(message.contains("Settings › Agents › IDE MCP Server"), "{message}");
         assert!(message.contains(inventory.to_str().unwrap()) && message.contains(s.project.to_str().unwrap()));
     }

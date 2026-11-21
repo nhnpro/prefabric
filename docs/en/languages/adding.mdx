@@ -3,7 +3,7 @@ title: "Add a language"
 description: "The language definition format: file detection, comments, highlighting, language servers, debugger and formatter."
 ---
 
-Every language OpenIDEA knows is a TOML file in the format described here. You can use it in three ways:
+Every language Prefabric knows is a TOML file in the format described here. You can use it in three ways:
 
 - **Change a built-in language for yourself**: put a file with the same `id` in the `languages` folder of the configuration directory. It replaces the built-in definition as a whole (fields are not merged), so start from a copy of the built-in file.
 - **Add a language for yourself**: put a new file with a new `id` in the same folder.
@@ -11,11 +11,11 @@ Every language OpenIDEA knows is a TOML file in the format described here. You c
 
 The configuration directory is:
 
-| OS      | Folder                                                      |
-| ------- | ----------------------------------------------------------- |
-| macOS   | `~/Library/Application Support/ai.l0ng.openidea/languages/` |
-| Windows | `%APPDATA%\ai.l0ng.openidea\languages\`                     |
-| Linux   | `~/.config/ai.l0ng.openidea/languages/`                     |
+| OS      | Folder                                                       |
+| ------- | ------------------------------------------------------------ |
+| macOS   | `~/Library/Application Support/dev.prefabric.ide/languages/` |
+| Windows | `%APPDATA%\dev.prefabric.ide\languages\`                     |
+| Linux   | `~/.config/dev.prefabric.ide/languages/`                     |
 
 The folder is read once at startup, so restart the IDE after changing a file. A file that does not parse is skipped and the reason is written to the log.
 
@@ -180,4 +180,4 @@ Every program the definition starts (`language-servers.command`, `debugger.comma
 
 ## Adding a built-in language
 
-To add a language to OpenIDEA itself, add `languages/<id>.toml` and register it in the `BUILTIN` table in [`crates/ide-language/src/registry.rs`](https://github.com/l0ng-ai/openidea/blob/main/crates/ide-language/src/registry.rs), where the files are embedded at build time. One-click installation of its server needs an entry in [`crates/ide-tools/src/registry.rs`](https://github.com/l0ng-ai/openidea/blob/main/crates/ide-tools/src/registry.rs) under the same `name`.
+To add a language to Prefabric itself, add `languages/<id>.toml` and register it in the `BUILTIN` table in [`crates/ide-language/src/registry.rs`](https://github.com/l0ng-ai/openidea/blob/main/crates/ide-language/src/registry.rs), where the files are embedded at build time. One-click installation of its server needs an entry in [`crates/ide-tools/src/registry.rs`](https://github.com/l0ng-ai/openidea/blob/main/crates/ide-tools/src/registry.rs) under the same `name`.

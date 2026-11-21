@@ -27,7 +27,7 @@ description: "使用内置终端：标签页、拆分、Shell、链接、查找�
 
 ### 重启 IDE 之后
 
-OpenIDEA 会按项目记住终端标签页：各自的目录、自定义名称、使用的 Shell 以及拆分布局（最多 32 个标签页）。重启后每个标签页都会在原目录**重新**启动一个会话，不会恢复滚动缓冲区和正在运行的命令。
+Prefabric 会按项目记住终端标签页：各自的目录、自定义名称、使用的 Shell 以及拆分布局（最多 32 个标签页）。重启后每个标签页都会在原目录**重新**启动一个会话，不会恢复滚动缓冲区和正在运行的命令。
 
 ## 终端中的按键
 
@@ -70,7 +70,7 @@ OpenIDEA 会按项目记住终端标签页：各自的目录、自定义名称�
 
 **新建预定义会话** 还会列出找到的其他 Shell：macOS/Linux 上的 zsh、bash、fish、nu、pwsh；Windows 上的 PowerShell、cmd、WSL 和 Git Bash。
 
-每个会话都会设置 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=OpenIDEA` 和 `TERM_PROGRAM_VERSION`；没有 `LANG` 时还会设置 `LANG=en_US.UTF-8`。设置中配置的环境变量会叠加在这些之上。
+每个会话都会设置 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=Prefabric` 和 `TERM_PROGRAM_VERSION`；没有 `LANG` 时还会设置 `LANG=en_US.UTF-8`。设置中配置的环境变量会叠加在这些之上。
 
 **Shell 集成** 开启时，zsh、bash 和 fish 会把当前目录以及命令的开始/结束告诉 IDE。这样链接和新拆分的窗格能用正确的目录，标签页标题也能跟随正在运行的程序。
 

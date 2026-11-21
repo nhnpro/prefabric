@@ -1,7 +1,7 @@
 /**
  * Converts an IntelliJ theme (`.theme.json`, optionally with its editor scheme
- * `.icls`) into an Prefabric theme + editor scheme, and an IntelliJ theme
- * plugin into an Prefabric theme plugin package. The mapping covers the main
+ * `.icls`) into a Prefabric theme + editor scheme, and an IntelliJ theme
+ * plugin into a Prefabric theme plugin package. The mapping covers the main
  * keys only; anything unmapped keeps the built-in value of the base (`kind`).
  *
  * Pure functions, importing only data: Settings › Plugins › Import IntelliJ Theme
@@ -481,7 +481,7 @@ function semver(version: string | null): string {
   return m ? `${Number(m[1])}.${Number(m[2] ?? 0)}.${Number(m[3] ?? 0)}` : "1.0.0";
 }
 
-/** An Prefabric theme plugin (`intellij.<plugin>`) with every theme of an IntelliJ theme plugin. */
+/** A Prefabric theme plugin (`intellij.<plugin>`) with every theme of an IntelliJ theme plugin. */
 export function intellijThemePackage(source: IntellijThemeSource): ThemePackage {
   const ids = new Set<string>();
   const themes = source.themes.map((t) => {

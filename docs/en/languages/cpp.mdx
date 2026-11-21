@@ -3,7 +3,7 @@ title: "C and C++"
 description: "Code intelligence with clangd, CMake and Makefile run configurations, single-file runs and native debugging with lldb-dap, CodeLLDB or GDB."
 ---
 
-OpenIDEA supports C, C++, Objective-C and Objective-C++ through [clangd](https://clangd.llvm.org). Highlighting, folding and the outline work without any setup. Completion, navigation, diagnostics and refactorings come from clangd, and how good they are depends on clangd knowing your compile flags. For the other languages, see the [support matrix](/en/languages/index).
+Prefabric supports C, C++, Objective-C and Objective-C++ through [clangd](https://clangd.llvm.org). Highlighting, folding and the outline work without any setup. Completion, navigation, diagnostics and refactorings come from clangd, and how good they are depends on clangd knowing your compile flags. For the other languages, see the [support matrix](/en/languages/index).
 
 | Language      | Extensions                                                                                            | Language server | Debugger (default) |
 | ------------- | ----------------------------------------------------------------------------------------------------- | --------------- | ------------------ |
@@ -24,7 +24,7 @@ clangd finds the workspace root by looking up from the file for one of these fil
 
 clangd needs the flags each file is compiled with. Without them it guesses, and you see false errors about missing headers or unknown macros. Provide one of:
 
-- **`compile_commands.json`**: a compilation database. CMake writes it into the build directory when `CMAKE_EXPORT_COMPILE_COMMANDS` is on, and the CMake configurations OpenIDEA creates always pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (see [CMake](#cmake)). For Make-based projects, tools such as Bear can generate one.
+- **`compile_commands.json`**: a compilation database. CMake writes it into the build directory when `CMAKE_EXPORT_COMPILE_COMMANDS` is on, and the CMake configurations Prefabric creates always pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (see [CMake](#cmake)). For Make-based projects, tools such as Bear can generate one.
 - **`compile_flags.txt`**: one flag per line, applied to every file. Good for small projects.
 - **`.clangd`**: clangd's own configuration file, for example to point `CompilationDatabase` at a build directory.
 
@@ -55,7 +55,7 @@ The compiler is not managed by the IDE. Single-file runs look for `clang`, `gcc`
 
 ### CMake
 
-For every `CMakeLists.txt` project, OpenIDEA creates run configurations:
+For every `CMakeLists.txt` project, Prefabric creates run configurations:
 
 - **CMake Configure**: `cmake -S . -B <build dir> -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (plus `-DCMAKE_BUILD_TYPE=Debug` for a new build directory).
 - **CMake Build**: `cmake --build <build dir>`. It runs the configure step first when the build directory is not configured yet.
@@ -106,7 +106,7 @@ See [Debugging](/en/guide/debugging) for breakpoints, stepping and the variables
 
 ## Arduino
 
-`.ino` sketches use the Arduino Language Server, which drives clangd with Arduino's generated compile context. The IDE does not install it: install Arduino IDE 2 (it includes the Arduino Language Server, Arduino CLI and clangd) and the board's core. OpenIDEA finds those tools on `PATH` or inside Arduino IDE 2.
+`.ino` sketches use the Arduino Language Server, which drives clangd with Arduino's generated compile context. The IDE does not install it: install Arduino IDE 2 (it includes the Arduino Language Server, Arduino CLI and clangd) and the board's core. Prefabric finds those tools on `PATH` or inside Arduino IDE 2.
 
 To override the paths, set them in **Settings › Languages & Frameworks › Language Servers**, or set `languages.arduino.cli`, `languages.arduino.clangd`, `languages.arduino.languageServer` and `languages.arduino.cliConfig` in `settings.toml`. Set the board FQBN in `sketch.yaml` or `languages.arduino.fqbn`. Plain `.cpp` files next to a sketch are still served by clangd.
 

@@ -3,7 +3,7 @@ title: "Python"
 description: "Python code intelligence with basedpyright and Ruff, interpreter and virtualenv detection, pytest and Django runs, and debugging with debugpy."
 ---
 
-OpenIDEA edits Python through a type-checking language server (basedpyright by default) and, in projects configured for Ruff, the Ruff server next to it. The IDE finds your interpreters and virtualenvs, runs scripts, pytest and Django tests with the project interpreter, and debugs them with debugpy. For other languages, see the [support matrix](/en/languages/index).
+Prefabric edits Python through a type-checking language server (basedpyright by default) and, in projects configured for Ruff, the Ruff server next to it. The IDE finds your interpreters and virtualenvs, runs scripts, pytest and Django tests with the project interpreter, and debugs them with debugpy. For other languages, see the [support matrix](/en/languages/index).
 
 ## Language server
 
@@ -27,7 +27,7 @@ To pick the type checker yourself, open **Settings › Languages & Frameworks �
 
 ### Installing the servers
 
-When you open a Python file and the server is missing, OpenIDEA shows a notification such as **basedpyright is not installed** with an **Install** button. You can also install, reinstall or point to your own executable in **Settings › Languages & Frameworks › Language Servers**.
+When you open a Python file and the server is missing, Prefabric shows a notification such as **basedpyright is not installed** with an **Install** button. You can also install, reinstall or point to your own executable in **Settings › Languages & Frameworks › Language Servers**.
 
 - basedpyright, ty, Pyrefly and Ruff go into a private virtualenv inside the IDE's tools folder. The IDE uses uv when it is on `PATH`, else `python3 -m venv`. Python 3 or uv must be installed.
 - Pyright is installed with npm, so it needs Node.js.
@@ -86,7 +86,7 @@ Other options on the page:
 
 ## Run and test
 
-OpenIDEA detects run configurations in folders that contain `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `pytest.ini`, `tox.ini` or `manage.py`, or a project virtualenv:
+Prefabric detects run configurations in folders that contain `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `pytest.ini`, `tox.ini` or `manage.py`, or a project virtualenv:
 
 | Configuration         | When                                                                                                                                                                             |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -118,7 +118,7 @@ Jupyter notebooks (`.ipynb`) run on a Python interpreter; see [Notebooks](/en/gu
 
 ## Debugging
 
-Python debugging uses debugpy. If it is missing when you start a debug session, OpenIDEA offers to install it. The IDE keeps a private copy of debugpy in its tools folder and loads it into whichever interpreter runs your program, so you do not need debugpy in the project environment.
+Python debugging uses debugpy. If it is missing when you start a debug session, Prefabric offers to install it. The IDE keeps a private copy of debugpy in its tools folder and loads it into whichever interpreter runs your program, so you do not need debugpy in the project environment.
 
 - Scripts, `python -m` modules and console scripts such as `pytest` or `uvicorn` can be debugged. Programs started through `uv run`, `poetry run`, `pdm run`, `pipenv run`, `hatch run` or `rye run` run in that manager's environment.
 - Debugging `manage.py` enables Django support in debugpy.

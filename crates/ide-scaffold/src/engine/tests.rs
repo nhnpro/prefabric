@@ -51,14 +51,14 @@ fn java_maven_and_gradle_trees() {
     assert_eq!(dir.file_name().unwrap(), "My App");
     assert_eq!(
         tree(&dir),
-        [".gitignore", ".openidea/settings.toml", "pom.xml", "src/main/java/com/example/myapp/Main.java"]
+        [".gitignore", ".prefabric/settings.toml", "pom.xml", "src/main/java/com/example/myapp/Main.java"]
     );
     let pom = std::fs::read_to_string(dir.join("pom.xml")).unwrap();
     assert!(pom.contains("<artifactId>my-app</artifactId>"), "{pom}");
     assert!(pom.starts_with("<?xml"));
     let main = std::fs::read_to_string(dir.join("src/main/java/com/example/myapp/Main.java")).unwrap();
     assert!(main.starts_with("package com.example.myapp;"));
-    let settings = std::fs::read_to_string(dir.join(".openidea/settings.toml")).unwrap();
+    let settings = std::fs::read_to_string(dir.join(".prefabric/settings.toml")).unwrap();
     assert_eq!(settings.trim(), "[java]\njdk = \"/opt/jdk-21\"");
     // The staging directory is gone.
     assert_eq!(std::fs::read_dir(dir.parent().unwrap()).unwrap().count(), 1);

@@ -3,11 +3,11 @@ title: "Notebook"
 description: "打开、编辑并用本地 Python 内核运行 Jupyter 笔记本（.ipynb）。"
 ---
 
-OpenIDEA 用笔记本编辑器打开 `.ipynb` 文件。你可以编辑代码单元格和 Markdown 单元格，在 IDE 自动启动的 Python 内核上运行，并把结果保存回原文件。
+Prefabric 用笔记本编辑器打开 `.ipynb` 文件。你可以编辑代码单元格和 Markdown 单元格，在 IDE 自动启动的 Python 内核上运行，并把结果保存回原文件。
 
 ## 前提条件
 
-- 一个装好 **ipykernel** 的 Python 解释器（`pip install ipykernel`）。OpenIDEA 不会替你安装任何包；缺少 ipykernel 时，编辑器会提示“请在所选 Python 环境中安装 ipykernel，然后重启内核”。
+- 一个装好 **ipykernel** 的 Python 解释器（`pip install ipykernel`）。Prefabric 不会替你安装任何包；缺少 ipykernel 时，编辑器会提示“请在所选 Python 环境中安装 ipykernel，然后重启内核”。
 - 项目已受信任。项目处于受限模式时无法运行单元格。
 - 笔记本格式为 nbformat 4。其他版本会被拒绝打开，文件不会被改动。
 
@@ -31,12 +31,12 @@ OpenIDEA 用笔记本编辑器打开 `.ipynb` 文件。你可以编辑代码单�
 
 ## 选择 Python 解释器
 
-下拉框里列出 OpenIDEA 检测到的 Python 环境，以及项目解释器。如果不手动选择，笔记本会使用项目的 Python 解释器；没有配置时使用检测到的第一个环境。
+下拉框里列出 Prefabric 检测到的 Python 环境，以及项目解释器。如果不手动选择，笔记本会使用项目的 Python 解释器；没有配置时使用检测到的第一个环境。
 
 选择结果按笔记本分别记住。只能在没有单元格运行时切换。
 
 <Tip>
-  使用虚拟环境时，请选择环境自己的 `python`（例如 `.venv/bin/python`）。OpenIDEA
+  使用虚拟环境时，请选择环境自己的 `python`（例如 `.venv/bin/python`）。Prefabric
   不会把符号链接解析成基础解释器，所以内核就运行在这个环境里。
 </Tip>
 
@@ -52,7 +52,7 @@ OpenIDEA 用笔记本编辑器打开 `.ipynb` 文件。你可以编辑代码单�
 
 笔记本末尾的 **添加代码单元格** 和 **添加 Markdown 单元格** 用于在最后追加单元格。
 
-代码单元格的工具栏旁显示执行序号（如 `[3]`）。原始单元格和 OpenIDEA 不认识的单元格类型以只读方式显示，内容原样保留。
+代码单元格的工具栏旁显示执行序号（如 `[3]`）。原始单元格和 Prefabric 不认识的单元格类型以只读方式显示，内容原样保留。
 
 ## 代码智能
 

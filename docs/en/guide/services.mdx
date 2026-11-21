@@ -27,7 +27,7 @@ A configuration that ran shows its console in the detail pane; one debugged from
 
 ## Docker
 
-OpenIDEA drives Docker through the `docker` CLI, so anything that provides a working `docker` command works: Docker Desktop, OrbStack, Colima, Rancher Desktop or a plain Docker Engine. It looks for `docker` in `OPENIDEA_DOCKER`, on `PATH`, and in the usual install folders of those tools.
+Prefabric drives Docker through the `docker` CLI, so anything that provides a working `docker` command works: Docker Desktop, OrbStack, Colima, Rancher Desktop or a plain Docker Engine. It looks for `docker` in `OPENIDEA_DOCKER`, on `PATH`, and in the usual install folders of those tools.
 
 ### Connections
 
@@ -42,7 +42,7 @@ Right-click a connection for **Edit Connection…** and **Remove Connection**. C
 
 ### Registries
 
-**Add Service › Docker Registry…** saves credentials for a registry (**Address:** such as `docker.io`, `ghcr.io` or `registry.example.com:5000`, **Username:**, **Password:**). Use **Test Connection** in the dialog or **Test Login** on the registry node. When you pull an image from that registry, OpenIDEA logs in with these credentials in a temporary Docker config, so your own `~/.docker/config.json` is not changed.
+**Add Service › Docker Registry…** saves credentials for a registry (**Address:** such as `docker.io`, `ghcr.io` or `registry.example.com:5000`, **Username:**, **Password:**). Use **Test Connection** in the dialog or **Test Login** on the registry node. When you pull an image from that registry, Prefabric logs in with these credentials in a temporary Docker config, so your own `~/.docker/config.json` is not changed.
 
 ### What the tree shows
 
@@ -77,7 +77,7 @@ Selecting an item shows tabs in the detail pane:
 
 ## Dockerfiles and Compose files
 
-OpenIDEA recognizes `Dockerfile`, `Containerfile`, `Dockerfile.<name>`, `*.dockerfile` and `*.containerfile`, and Compose files (YAML whose name contains `compose`, or whose content looks like a Compose file). For a file detected by content, a banner lets you choose **Not a Compose file** or **Keep as Docker Compose**.
+Prefabric recognizes `Dockerfile`, `Containerfile`, `Dockerfile.<name>`, `*.dockerfile` and `*.containerfile`, and Compose files (YAML whose name contains `compose`, or whose content looks like a Compose file). For a file detected by content, a banner lets you choose **Not a Compose file** or **Keep as Docker Compose**.
 
 The gutter shows run icons:
 
@@ -135,12 +135,12 @@ Deployment copies project files to a server, or to a local or mounted folder. It
 
 The **Options** page under Deployment has:
 
-| Option                                                       | Default                                                     |
-| ------------------------------------------------------------ | ----------------------------------------------------------- |
-| **Exclude items by name**                                    | `.git;.svn;.hg;.idea;.openidea;.DS_Store;*.pyc;__pycache__` |
-| **Upload changed files automatically to the default server** | **Never** (or **On explicit save action**, **Always**)      |
-| **Delete remote files when local are deleted**               | off                                                         |
-| **Preserve files timestamps**                                | on                                                          |
+| Option                                                       | Default                                                      |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **Exclude items by name**                                    | `.git;.svn;.hg;.idea;.prefabric;.DS_Store;*.pyc;__pycache__` |
+| **Upload changed files automatically to the default server** | **Never** (or **On explicit save action**, **Always**)       |
+| **Delete remote files when local are deleted**               | off                                                          |
+| **Preserve files timestamps**                                | on                                                           |
 
 Automatic upload runs only in trusted projects. Failed automatic transfers are reported; successful ones are silent.
 
@@ -155,7 +155,7 @@ The actions work on the selection in the Project view, or on the file in the act
 - **Open in Browser (Deployed)**: opens the file's URL on the web server.
 - **Browse Remote Host**: opens the **Remote Host** tool window, a tree of the server's files with **Open** (edit a copy; saving uploads it back), **Download to Project**, **New Folder…**, **Rename…**, **Delete…**, **Refresh** and **Copy Path**.
 
-Unknown host keys are confirmed before connecting, and OpenIDEA asks for a password or passphrase when the SSH configuration doesn't save one.
+Unknown host keys are confirmed before connecting, and Prefabric asks for a password or passphrase when the SSH configuration doesn't save one.
 
 ## Not supported
 

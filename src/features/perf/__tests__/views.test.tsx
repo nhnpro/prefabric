@@ -63,7 +63,7 @@ describe("perf views", () => {
     expect(screen.getByTitle("PID 20 · 2 processes")).toBeTruthy();
   });
 
-  it("ends language servers and processes, never OpenIDEA's own", async () => {
+  it("ends language servers and processes, never Prefabric's own", async () => {
     const calls: [string, unknown][] = [];
     mockIPC((cmd, args) => {
       calls.push([cmd, args]);

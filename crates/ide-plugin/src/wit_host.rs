@@ -1479,7 +1479,7 @@ pub(crate) fn commit_draft_to_wit(d: crate::types::CommitDraft) -> commit::Commi
 impl events::Host for StoreData {
     fn subscribe(&mut self, kind: String) -> Fallible<()> {
         let Some(kind) = EventKind::parse(&kind) else {
-            return Ok(Err(wit::Error::Invalid(format!("no event kind {kind:?} in this OpenIDEA"))));
+            return Ok(Err(wit::Error::Invalid(format!("no event kind {kind:?} in this Prefabric"))));
         };
         if matches!(
             kind,

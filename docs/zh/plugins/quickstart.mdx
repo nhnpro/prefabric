@@ -1,13 +1,13 @@
 ---
 title: "快速开始"
-description: "安装插件工具，生成一个 Rust 插件，构建后链接到 OpenIDEA 并运行它的命令。"
+description: "安装插件工具，生成一个 Rust 插件，构建后链接到 Prefabric 并运行它的命令。"
 ---
 
 本文从零创建一个带两个命令的代码插件：先跑单元测试，再构建成 WebAssembly，最后不经安装直接加载到 IDE 中。
 
 ## 准备
 
-- 已安装 OpenIDEA。
+- 已安装 Prefabric。
 - 通过 [rustup](https://rustup.rs) 安装的 Rust。`openidea-plugin build` 发现缺少 `wasm32-wasip2` target 时会通过 rustup 自动安装；也可以自己执行 `rustup target add wasm32-wasip2`。
 
 <Steps>
@@ -82,7 +82,7 @@ description: "安装插件工具，生成一个 Rust 插件，构建后链接到
     `link` 会把当前文件夹写入 IDE 插件目录下的 `links.json`。链接的插件直接从文件夹读取，开发期间不用反复安装。`openidea-plugin links` 列出已链接的文件夹，`openidea-plugin unlink` 取消链接。
 
     <Note>
-    插件目录是 `$OPENIDEA_PLUGINS_DIR`，未设置时为系统应用数据目录下的 `ai.l0ng.openidea/plugins`。从源码运行的 OpenIDEA 开发构建使用自己的数据目录，链接前请把 `OPENIDEA_PLUGINS_DIR` 指向它的 `plugins` 文件夹。见 [数据目录](/zh/reference/data-directories)。
+    插件目录是 `$OPENIDEA_PLUGINS_DIR`，未设置时为系统应用数据目录下的 `dev.prefabric.ide/plugins`。从源码运行的 Prefabric 开发构建使用自己的数据目录，链接前请把 `OPENIDEA_PLUGINS_DIR` 指向它的 `plugins` 文件夹。见 [数据目录](/zh/reference/data-directories)。
     </Note>
 
   </Step>

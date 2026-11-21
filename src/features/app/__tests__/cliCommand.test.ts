@@ -32,7 +32,7 @@ it("explains the Linux PATH step when the user bin is missing from PATH", async 
 });
 
 it("tells users to open a new terminal after installation", async () => {
-  install.mockResolvedValue({ path: "C:/Users/user/OpenIDEA/bin/openidea.cmd", pathDirectory: null });
+  install.mockResolvedValue({ path: "C:/Users/user/Prefabric/bin/prefabric.cmd", pathDirectory: null });
   await run("app.installCli");
   expect(notify).toHaveBeenCalledWith(
     expect.objectContaining({ body: expect.stringContaining("Open a new terminal") }),
@@ -42,7 +42,7 @@ it("tells users to open a new terminal after installation", async () => {
 it("reports an absent command on repeated uninstall", async () => {
   uninstall.mockResolvedValue([]);
   await run("app.uninstallCli");
-  expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "The openidea command is not installed" }));
+  expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: "The prefabric command is not installed" }));
 });
 
 it("reports an install failure and stays quiet when an administrator prompt is cancelled", async () => {

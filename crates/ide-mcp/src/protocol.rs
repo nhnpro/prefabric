@@ -158,15 +158,15 @@ impl Session<'_> {
         let asked = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(LATEST);
         let version = if SUPPORTED.contains(&asked) { asked } else { LATEST };
         let about = match self.project() {
-            Ok(root) => format!("the project OpenIDEA serves at {}", root.display()),
-            Err(_) => "a project open in OpenIDEA or served in the background".to_owned(),
+            Ok(root) => format!("the project Prefabric serves at {}", root.display()),
+            Err(_) => "a project open in Prefabric or served in the background".to_owned(),
         };
         json!({
             "protocolVersion": version,
             "capabilities": { "tools": { "listChanged": false } },
             "serverInfo": { "name": "OpenIDEA", "version": env!("CARGO_PKG_VERSION") },
             "instructions": format!(
-                "Built-in OpenIDEA tools for {about}: they see the files as the IDE has them and, \
+                "Built-in Prefabric tools for {about}: they see the files as the IDE has them and, \
                  for a project open in a window, its editors."
             ),
         })
@@ -222,7 +222,7 @@ impl Session<'_> {
                 RpcError::new(
                     NOT_OPEN,
                     format!(
-                        "this folder isn't open in OpenIDEA and isn't served in the background \
+                        "this folder isn't open in Prefabric and isn't served in the background \
                          (Settings › Agents › IDE MCP Server): {requested}. Open projects: {}",
                         roots.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
                     ),
@@ -235,7 +235,7 @@ impl Session<'_> {
         Err(RpcError::new(
             INVALID_PARAMS,
             format!(
-                "Specify projectPath, X-OpenIDEA-Project or ?project=. Open projects: {}",
+                "Specify projectPath, X-Prefabric-Project or ?project=. Open projects: {}",
                 roots.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
             ),
         ))

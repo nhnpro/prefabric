@@ -7,7 +7,7 @@
 //!   plain JSON (no SSE streams: `GET` is 405). Every request carries
 //!   `Authorization: Bearer <token>` (random, per run); requests from another
 //!   `Origin` or `Host` are refused (DNS rebinding).
-//! - **Projects:** the `X-OpenIDEA-Project` header or the `?project=` query
+//! - **Projects:** the `X-Prefabric-Project` header (or the older `X-OpenIDEA-Project`) or the `?project=` query
 //!   names a folder; the server picks the open project containing it, or the
 //!   project the IDE serves it from without a window.
 //! - **Discovery:** `<app-data>/mcp/server.json` (`address`, `port`, `token`,
@@ -31,7 +31,9 @@ pub use tokio_util::sync::CancellationToken;
 use std::path::{Path, PathBuf};
 
 /// The header naming the project a request is about (an absolute path).
-pub const PROJECT_HEADER: &str = "x-openidea-project";
+pub const PROJECT_HEADER: &str = "x-prefabric-project";
+/// The same header as earlier builds named it, still accepted.
+pub const LEGACY_PROJECT_HEADER: &str = "x-openidea-project";
 /// The command-line flag that runs the executable as the stdio bridge.
 pub const STDIO_FLAG: &str = "--mcp-stdio";
 
@@ -151,8 +153,8 @@ mod tests {
         assert_eq!(endpoint_url_at(ip("100.92.72.95"), 80, Path::new("/p")), "http://100.92.72.95:80/mcp?project=/p");
         assert_eq!(endpoint_url_at(ip("fd7a::1"), 80, Path::new("/p")), "http://[fd7a::1]:80/mcp?project=/p");
         assert_eq!(
-            stdio_command(Path::new("/Applications/OpenIDEA.app/Contents/MacOS/openidea"), Path::new("/p")),
-            ["/Applications/OpenIDEA.app/Contents/MacOS/openidea", "--mcp-stdio", "--project", "/p"]
+            stdio_command(Path::new("/Applications/Prefabric.app/Contents/MacOS/prefabric"), Path::new("/p")),
+            ["/Applications/Prefabric.app/Contents/MacOS/prefabric", "--mcp-stdio", "--project", "/p"]
         );
     }
 

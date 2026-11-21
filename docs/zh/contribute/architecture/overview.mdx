@@ -1,9 +1,9 @@
 ---
 title: "架构总览"
-description: "OpenIDEA 的进程与分层：Tauri 外壳、webview 前端、不依赖 UI 的 Rust Host、功能 crate、外部服务器、插件和远程服务端。"
+description: "Prefabric 的进程与分层：Tauri 外壳、webview 前端、不依赖 UI 的 Rust Host、功能 crate、外部服务器、插件和远程服务端。"
 ---
 
-OpenIDEA 是一个 Tauri 2 桌面应用。UI 是运行在系统 webview 里的 React + CodeMirror 6 前端；凡是涉及磁盘、进程或网络的工作都在 Rust 里完成。Rust 端的设计让同一套后端既能跑在桌面应用里，也能在远程开发时以 `openidea-server` 的形式跑在另一台机器上。
+Prefabric 是一个 Tauri 2 桌面应用。UI 是运行在系统 webview 里的 React + CodeMirror 6 前端；凡是涉及磁盘、进程或网络的工作都在 Rust 里完成。Rust 端的设计让同一套后端既能跑在桌面应用里，也能在远程开发时以 `openidea-server` 的形式跑在另一台机器上。
 
 ## 全景图
 

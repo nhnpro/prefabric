@@ -1,20 +1,20 @@
 ---
 title: "数据目录与日志"
-description: "OpenIDEA 把设置、用户数据、缓存、下载的工具和日志放在哪里，以及如何把可重建的数据移到其他磁盘。"
+description: "Prefabric 把设置、用户数据、缓存、下载的工具和日志放在哪里，以及如何把可重建的数据移到其他磁盘。"
 ---
 
-OpenIDEA 的应用 id 是 `ai.l0ng.openidea`，下面所有目录都以它命名。
+Prefabric 的应用 id 是 `dev.prefabric.ide`，下面所有目录都以它命名。
 
 ## 目录位置
 
-|                    | macOS                                            | Windows                                | Linux                                  |
-| ------------------ | ------------------------------------------------ | -------------------------------------- | -------------------------------------- |
-| 配置               | `~/Library/Application Support/ai.l0ng.openidea` | `%APPDATA%\ai.l0ng.openidea`           | `~/.config/ai.l0ng.openidea`           |
-| 用户数据           | `~/Library/Application Support/ai.l0ng.openidea` | `%APPDATA%\ai.l0ng.openidea`           | `~/.local/share/ai.l0ng.openidea`      |
-| 本地数据（可重建） | `~/Library/Application Support/ai.l0ng.openidea` | `%LOCALAPPDATA%\ai.l0ng.openidea`      | `~/.local/share/ai.l0ng.openidea`      |
-| 日志               | `~/Library/Logs/ai.l0ng.openidea`                | `%LOCALAPPDATA%\ai.l0ng.openidea\logs` | `~/.local/share/ai.l0ng.openidea/logs` |
+|                    | macOS                                             | Windows                                 | Linux                                   |
+| ------------------ | ------------------------------------------------- | --------------------------------------- | --------------------------------------- |
+| 配置               | `~/Library/Application Support/dev.prefabric.ide` | `%APPDATA%\dev.prefabric.ide`           | `~/.config/dev.prefabric.ide`           |
+| 用户数据           | `~/Library/Application Support/dev.prefabric.ide` | `%APPDATA%\dev.prefabric.ide`           | `~/.local/share/dev.prefabric.ide`      |
+| 本地数据（可重建） | `~/Library/Application Support/dev.prefabric.ide` | `%LOCALAPPDATA%\dev.prefabric.ide`      | `~/.local/share/dev.prefabric.ide`      |
+| 日志               | `~/Library/Logs/dev.prefabric.ide`                | `%LOCALAPPDATA%\dev.prefabric.ide\logs` | `~/.local/share/dev.prefabric.ide/logs` |
 
-在 macOS 和 Linux 上，其中几项是同一个文件夹。**关于 OpenIDEA** 对话框会显示配置目录，并提供 **打开配置目录**。
+在 macOS 和 Linux 上，其中几项是同一个文件夹。**关于 Prefabric** 对话框会显示配置目录，并提供 **打开配置目录**。
 
 ### 配置
 
@@ -31,9 +31,9 @@ OpenIDEA 的应用 id 是 `ai.l0ng.openidea`，下面所有目录都以它命名
 
 ### 本地数据
 
-这里的内容都可以重新下载或重建，所以在 OpenIDEA 关闭时删除是安全的：
+这里的内容都可以重新下载或重建，所以在 Prefabric 关闭时删除是安全的：
 
-- `tools/`：OpenIDEA 安装的语言服务器、调试适配器、格式化工具和 JDK。
+- `tools/`：Prefabric 安装的语言服务器、调试适配器、格式化工具和 JDK。
 - `language-server-runtimes/`：运行语言服务器所用的运行时。
 - `index/`：每个项目的符号索引。
 - `cache/`：构建工具（Maven、Gradle）的同步结果和其他缓存。
@@ -45,32 +45,34 @@ OpenIDEA 的应用 id 是 `ai.l0ng.openidea`，下面所有目录都以它命名
 
 ## 项目文件夹
 
-每个项目在根目录的 `.openidea/` 中保存自己的文件：
+每个项目在根目录的 `.prefabric/` 中保存自己的文件：
 
 - `settings.toml`：选中 **此项目** 时保存的设置。
 - `run.toml`：作为项目文件保存的运行配置，适合提交到版本库。
-- `run.local.toml`：只给自己用的运行配置，OpenIDEA 会把它加入 `.openidea/.gitignore`。
+- `run.local.toml`：只给自己用的运行配置，Prefabric 会把它加入 `.prefabric/.gitignore`。
 - `workspace.json`：工作区包含的项目。
+
+用 OpenIDEA 建立的项目保留原来的 `.openidea/` 文件夹：只要项目中没有 `.prefabric/` 文件夹，Prefabric 就继续读写它。
 
 ## 移动本地数据
 
-本地数据可能很大（JDK、语言服务器、索引）。想把它放到其他磁盘，在启动 OpenIDEA 前把 `OPENIDEA_LOCAL_DATA_DIR` 设为一个绝对路径。IDE 随后会使用 `<OPENIDEA_LOCAL_DATA_DIR>/ai.l0ng.openidea`，不存在时自动创建。
+本地数据可能很大（JDK、语言服务器、索引）。想把它放到其他磁盘，在启动 Prefabric 前把 `OPENIDEA_LOCAL_DATA_DIR` 设为一个绝对路径。IDE 随后会使用 `<OPENIDEA_LOCAL_DATA_DIR>/dev.prefabric.ide`，不存在时自动创建。
 
 在 Windows 上，例如：
 
 ```bat
-setx OPENIDEA_LOCAL_DATA_DIR "E:\OpenIDEA"
+setx OPENIDEA_LOCAL_DATA_DIR "E:\Prefabric"
 ```
 
-在 macOS 和 Linux 上，需要在启动 OpenIDEA 的环境中设置这个变量。
+在 macOS 和 Linux 上，需要在启动 Prefabric 的环境中设置这个变量。
 
-- 如果路径是相对路径或不可写，OpenIDEA 会显示错误并退出，而不会退回默认位置。
+- 如果路径是相对路径或不可写，Prefabric 会显示错误并退出，而不会退回默认位置。
 - 配置、用户数据和日志的位置不变，除非也移动它们（见下文）。即使变量设置有误，日志仍会写入，方便排查原因。
-- 已有数据不会自动迁移。可以让 OpenIDEA 重新下载和重建；也可以先退出 OpenIDEA，只移动 `tools/`、`language-server-runtimes/`、`index/`、`cache/`、`lsp/`、`notebook-runtime/`、`server/`、`logs/`、`agents/tools/`、`agents/registry.json` 以及顶层的 `java-usages-*.jar` / `java-usages-*.tmp` 文件，并保持相对路径不变。其他内容请留在原处。
+- 已有数据不会自动迁移。可以让 Prefabric 重新下载和重建；也可以先退出 Prefabric，只移动 `tools/`、`language-server-runtimes/`、`index/`、`cache/`、`lsp/`、`notebook-runtime/`、`server/`、`logs/`、`agents/tools/`、`agents/registry.json` 以及顶层的 `java-usages-*.jar` / `java-usages-*.tmp` 文件，并保持相对路径不变。其他内容请留在原处。
 
 ## 移动配置、用户数据或日志
 
-其他几个目录各有一个变量，设置方法和 `OPENIDEA_LOCAL_DATA_DIR` 相同：设为绝对路径，OpenIDEA 启动时读取。IDE 随后会使用 `<路径>/ai.l0ng.openidea`，不存在时自动创建。
+其他几个目录各有一个变量，设置方法和 `OPENIDEA_LOCAL_DATA_DIR` 相同：设为绝对路径，Prefabric 启动时读取。IDE 随后会使用 `<路径>/dev.prefabric.ide`，不存在时自动创建。
 
 | 变量                  | 移动的目录 |
 | --------------------- | ---------- |
@@ -79,14 +81,14 @@ setx OPENIDEA_LOCAL_DATA_DIR "E:\OpenIDEA"
 | `OPENIDEA_LOG_DIR`    | 日志       |
 
 - 只设置想移动的那几个，其余仍在默认位置。几个变量指向同一路径也可以。
-- 如果配置或用户数据的路径是相对路径或不可用，OpenIDEA 会显示错误并退出，而不会退回默认位置；日志路径有误只会不写日志文件。
-- 已有文件不会自动迁移。想保留设置、插件和历史记录，先退出 OpenIDEA，把原文件夹里的内容复制到新位置。
+- 如果配置或用户数据的路径是相对路径或不可用，Prefabric 会显示错误并退出，而不会退回默认位置；日志路径有误只会不写日志文件。
+- 已有文件不会自动迁移。想保留设置、插件和历史记录，先退出 Prefabric，把原文件夹里的内容复制到新位置。
 
 ## 日志
 
-OpenIDEA 每天写一个日志文件 `openidea.<日期>.log`，保留最近 7 个。程序崩溃（panic）的信息也会写入当前日志。
+Prefabric 每天写一个日志文件 `openidea.<日期>.log`，保留最近 7 个。程序崩溃（panic）的信息也会写入当前日志。
 
-- 用 **帮助 › 在访达中显示日志**（macOS）、**帮助 › 在资源管理器中显示日志**（Windows）或 **帮助 › 在文件管理器中显示日志**（Linux）打开日志目录。**关于 OpenIDEA** 对话框中也有同样的链接。
-- 需要更详细的日志时，启动 OpenIDEA 前设置环境变量 `RUST_LOG`，例如 `RUST_LOG=debug`。默认级别为 `info`，应用自身输出 debug 级别日志。
+- 用 **帮助 › 在访达中显示日志**（macOS）、**帮助 › 在资源管理器中显示日志**（Windows）或 **帮助 › 在文件管理器中显示日志**（Linux）打开日志目录。**关于 Prefabric** 对话框中也有同样的链接。
+- 需要更详细的日志时，启动 Prefabric 前设置环境变量 `RUST_LOG`，例如 `RUST_LOG=debug`。默认级别为 `info`，应用自身输出 debug 级别日志。
 
 [报告问题](/zh/reference/troubleshooting)时请附上日志。

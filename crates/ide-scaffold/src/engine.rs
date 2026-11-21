@@ -329,7 +329,7 @@ fn write_settings(def: &Def, values: &Values, project: &Path) -> IdeResult<()> {
     if table.is_empty() {
         return Ok(());
     }
-    let dir = project.join(".openidea");
+    let dir = ide_core::project_dir::dir(project);
     std::fs::create_dir_all(&dir)?;
     let text = toml::to_string(&table).map_err(|e| IdeError::internal(e.to_string()))?;
     std::fs::write(dir.join("settings.toml"), text)?;

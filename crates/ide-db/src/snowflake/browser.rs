@@ -17,9 +17,9 @@ use tokio::net::{TcpListener, TcpStream};
 const AUTHENTICATOR: &str = "session/authenticator-request";
 /// How long the user has to finish signing in.
 const WAIT: Duration = Duration::from_secs(120);
-const DONE_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>OpenIDEA</title></head>\
+const DONE_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>Prefabric</title></head>\
 <body style=\"font-family: sans-serif; margin: 3em\"><h3>Signed in to Snowflake</h3>\
-<p>You can close this tab and return to OpenIDEA.</p></body></html>";
+<p>You can close this tab and return to Prefabric.</p></body></html>";
 
 /// One browser sign-in at a time: connections opened together share its outcome through [`cached`].
 pub(crate) static FLOW: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));

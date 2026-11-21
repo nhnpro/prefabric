@@ -693,7 +693,7 @@ pub async fn remote_connect(
     }
     if info.version != env!("CARGO_PKG_VERSION") {
         tracing::warn!(
-            "{host}: openidea-server {} with OpenIDEA {}: commands added since are not available",
+            "{host}: openidea-server {} with Prefabric {}: commands added since are not available",
             info.version,
             env!("CARGO_PKG_VERSION")
         );
@@ -1232,7 +1232,7 @@ fn older_server_error(e: IdeError, server_version: &str, host: &str) -> IdeError
         return e;
     }
     IdeError::unavailable(format!(
-        "openidea-server {server_version} on {host} does not match OpenIDEA {app}: {}. Reopen the remote project to \
+        "openidea-server {server_version} on {host} does not match Prefabric {app}: {}. Reopen the remote project to \
          install the matching server",
         e.message
     ))
@@ -1291,7 +1291,7 @@ mod tests {
         assert_eq!(e.kind, ide_core::error::ErrorKind::Unavailable);
         assert!(
             e.message.starts_with(&format!(
-                "openidea-server 0.1.32 on box does not match OpenIDEA {}",
+                "openidea-server 0.1.32 on box does not match Prefabric {}",
                 env!("CARGO_PKG_VERSION")
             )),
             "{}",

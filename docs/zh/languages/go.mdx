@@ -3,13 +3,13 @@ title: "Go"
 description: "基于 gopls 的 Go 代码智能、GOROOT 与构建标签设置、go run 和 go test 运行配置，以及基于 Delve 的调试。"
 ---
 
-OpenIDEA 用 gopls 提供 Go 代码智能，用 `go` 命令运行和测试模块，用 Delve 调试。`go.mod` 和 `go.work` 文件同样有高亮，并由 gopls 提供服务。其他语言的情况见[支持矩阵](/zh/languages/index)。
+Prefabric 用 gopls 提供 Go 代码智能，用 `go` 命令运行和测试模块，用 Delve 调试。`go.mod` 和 `go.work` 文件同样有高亮，并由 gopls 提供服务。其他语言的情况见[支持矩阵](/zh/languages/index)。
 
 ## 语言服务器
 
 gopls 负责 `.go`、`go.mod` 和 `go.work` 文件。工作区从最近的 `go.work` 开始，没有则从最近的 `go.mod` 开始。gopls 的语义高亮默认开启。
 
-缺少 gopls 时，OpenIDEA 会弹出 **gopls 未安装** 通知，点 **安装** 即可。也可以在 **设置 › 语言和框架 › 语言服务器** 中安装，或在那里指定你自己的 `gopls`。IDE 通过 `go install golang.org/x/tools/gopls@latest` 把它装进自己的工具文件夹，因此 `PATH` 上需要有 Go。`PATH` 上已有的 `gopls` 会直接使用。
+缺少 gopls 时，Prefabric 会弹出 **gopls 未安装** 通知，点 **安装** 即可。也可以在 **设置 › 语言和框架 › 语言服务器** 中安装，或在那里指定你自己的 `gopls`。IDE 通过 `go install golang.org/x/tools/gopls@latest` 把它装进自己的工具文件夹，因此 `PATH` 上需要有 Go。`PATH` 上已有的 `gopls` 会直接使用。
 
 ## 环境配置
 
@@ -37,7 +37,7 @@ GOROOT 和模块缓存会出现在项目视图的 **外部库** 下。
 
 ## 运行与测试
 
-OpenIDEA 会为每个模块（项目中的每个 `go.mod`，或 `go.work` 中列出的模块）识别运行配置：
+Prefabric 会为每个模块（项目中的每个 `go.mod`，或 `go.work` 中列出的模块）识别运行配置：
 
 | 配置                  | 条件                      |
 | --------------------- | ------------------------- |
@@ -59,7 +59,7 @@ OpenIDEA 会为每个模块（项目中的每个 `go.mod`，或 `go.work` 中列
 
 ## 调试
 
-Go 调试使用 Delve（`dlv dap`）。开始调试时如果缺少 Delve，OpenIDEA 会提示通过 `go install github.com/go-delve/delve/cmd/dlv@latest` 把它装进工具文件夹。自动识别的 `go run`、`go test` 配置和左侧栏图标都可以直接调试。
+Go 调试使用 Delve（`dlv dap`）。开始调试时如果缺少 Delve，Prefabric 会提示通过 `go install github.com/go-delve/delve/cmd/dlv@latest` 把它装进工具文件夹。自动识别的 `go run`、`go test` 配置和左侧栏图标都可以直接调试。
 
 - **附加到进程…**（`⌥⇧F5` / `Ctrl+Alt+F5`）会在 **Go (Delve)** 分组下列出本机的 Go 进程。
 - **Go 远程** 配置可以附加到本机或其他机器上的 Delve 服务器（`dlv --headless`，Delve 1.7.3 及以上），并支持本地与远程根目录映射。表单中会给出启动远程端的命令。

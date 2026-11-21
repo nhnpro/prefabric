@@ -226,7 +226,7 @@ pub fn run() {
                 let handle = app.handle().clone();
                 app.dialog()
                     .message(error)
-                    .title("OpenIDEA")
+                    .title("Prefabric")
                     .kind(tauri_plugin_dialog::MessageDialogKind::Error)
                     .show(move |_| handle.exit(1));
                 return Ok(());

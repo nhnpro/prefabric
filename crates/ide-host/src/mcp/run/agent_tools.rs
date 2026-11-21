@@ -20,7 +20,7 @@ const READ_CAP: usize = 1 << 20;
 /// Lines of output quoted when a name is still running.
 const BUSY_TAIL_LINES: usize = 20;
 
-const NAME: &str = "Tab name. OpenIDEA shows the tab as `_agent_<name>`; passing the prefixed name works too.";
+const NAME: &str = "Tab name. Prefabric shows the tab as `_agent_<name>`; passing the prefixed name works too.";
 const SEQUENCE: &str = "\n\nUsing the same name for every command of one task reuses its tab: a name whose command \
 has finished starts the next command in the same tab. A name whose command is still running is refused (with that \
 command and its last output); stop it with `stop_run` first or use another name. Nothing is stopped implicitly.";
@@ -126,7 +126,7 @@ pub fn run_command() -> Tool {
     Tool::new(
         "run_command",
         &format!(
-            "Runs a shell command line in a new or reused tab of OpenIDEA's Run tool window, with the shell of \
+            "Runs a shell command line in a new or reused tab of Prefabric's Run tool window, with the shell of \
 Settings › Tools › Terminal. The user is asked first (unless the IDE runs tools without \
 confirmation). Waits up to `timeout` milliseconds (default {RUN_TIMEOUT_MS}) for the command to finish, or until its \
 output matches `pattern`; a command still running then keeps running, and `wait_for_run`, `read_run_output`, \

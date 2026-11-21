@@ -6,14 +6,14 @@ const unavailable = (message: string) => new IpcError({ kind: "unavailable", mes
 const invalid = (message: string) => new IpcError({ kind: "invalidInput", message });
 
 describe("missing debug adapters", () => {
-  it("offers OpenIDEA's debugpy when the interpreter has none", () => {
-    const e = unavailable("debugpy is not installed for /opt/homebrew/bin/python3.14. Install OpenIDEA's copy");
+  it("offers Prefabric's debugpy when the interpreter has none", () => {
+    const e = unavailable("debugpy is not installed for /opt/homebrew/bin/python3.14. Install Prefabric's copy");
     expect(missingAdapter("debugpy", e)).toMatchObject({ tool: "debugpy", title: "debugpy is not installed" });
   });
 
   it("offers the managed install of a missing adapter binary", () => {
     const e = unavailable(
-      "debug adapter `js-debug` not found (`js-debug-adapter` is neither installed by OpenIDEA nor on PATH)",
+      "debug adapter `js-debug` not found (`js-debug-adapter` is neither installed by Prefabric nor on PATH)",
     );
     expect(missingAdapter("js-debug", e)).toMatchObject({
       tool: "js-debug",
@@ -38,7 +38,7 @@ describe("missing debug adapters", () => {
 
   it("offers the managed install of the missing php-debug adapter", () => {
     const e = unavailable(
-      "debug adapter `php-debug` not found (`php-debug-adapter` is neither installed by OpenIDEA nor on PATH). Install PHP Debug (Xdebug) in Settings › Languages & Frameworks › Language Servers, and enable Xdebug",
+      "debug adapter `php-debug` not found (`php-debug-adapter` is neither installed by Prefabric nor on PATH). Install PHP Debug (Xdebug) in Settings › Languages & Frameworks › Language Servers, and enable Xdebug",
     );
     expect(missingAdapter("php-debug", e)).toMatchObject({
       tool: "php-debug",

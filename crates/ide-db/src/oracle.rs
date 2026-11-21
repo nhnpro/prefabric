@@ -121,7 +121,7 @@ pub(crate) fn oracle_err(e: &oracledb::Error) -> IdeError {
             oracledb::ErrorKind::ServerVersionNotSupported => {
                 return IdeError::new(
                     ErrorKind::Unavailable,
-                    "This Oracle Database is older than 12c. OpenIDEA connects to Oracle Database 12c and later; \
+                    "This Oracle Database is older than 12c. Prefabric connects to Oracle Database 12c and later; \
                      11g and earlier are not supported.",
                 );
             }

@@ -646,7 +646,7 @@ impl SnowflakePool {
         if matches!(first_word(sql).as_str(), "PUT" | "GET") {
             // The server only plans these; the client moves the files, which this driver does not do.
             return Err(IdeError::invalid(format!(
-                "{} copies files between this computer and a stage, which OpenIDEA does not do yet: \
+                "{} copies files between this computer and a stage, which Prefabric does not do yet: \
                  run it with the Snowflake CLI (snow sql) or SnowSQL",
                 first_word(sql)
             )));

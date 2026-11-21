@@ -1,9 +1,9 @@
 ---
 title: "Language support"
-description: "Which languages OpenIDEA supports, which language servers and debuggers it uses, and how they get installed."
+description: "Which languages Prefabric supports, which language servers and debuggers it uses, and how they get installed."
 ---
 
-OpenIDEA describes every language in a small definition file, `languages/<id>.toml`. The definition says which files belong to the language, how to highlight them, and which language server and debug adapter provide code intelligence and debugging. Everything a language server offers (completion, navigation, diagnostics, refactorings) then works through the same editor features for every language.
+Prefabric describes every language in a small definition file, `languages/<id>.toml`. The definition says which files belong to the language, how to highlight them, and which language server and debug adapter provide code intelligence and debugging. Everything a language server offers (completion, navigation, diagnostics, refactorings) then works through the same editor features for every language.
 
 ## How language support works
 
@@ -38,7 +38,7 @@ A language can list more than one server:
 
 ## Installing language servers and debuggers
 
-OpenIDEA does not bundle language servers. When you open a file whose server is missing, a notification says that the server is not installed and offers **Install**, which installs it and restarts code insight for that language. You can also manage every tool on one page:
+Prefabric does not bundle language servers. When you open a file whose server is missing, a notification says that the server is not installed and offers **Install**, which installs it and restarts code insight for that language. You can also manage every tool on one page:
 
 <Steps>
   <Step title="Open the Language Servers page">

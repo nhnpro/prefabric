@@ -1,9 +1,9 @@
 ---
 title: "Godot"
-description: "借助 Godot 编辑器的语言服务器编辑 GDScript，运行和调试场景，并从 Godot 中用 OpenIDEA 打开脚本。"
+description: "借助 Godot 编辑器的语言服务器编辑 GDScript，运行和调试场景，并从 Godot 中用 Prefabric 打开脚本。"
 ---
 
-OpenIDEA 支持 Godot 4 项目（含 `project.godot` 文件的文件夹）。GDScript 的代码智能和调试都来自 Godot 编辑器本身：语言服务器和调试适配器运行在编辑器内部，OpenIDEA 只负责连接它们。除了 Godot，不需要另外安装任何东西。
+Prefabric 支持 Godot 4 项目（含 `project.godot` 文件的文件夹）。GDScript 的代码智能和调试都来自 Godot 编辑器本身：语言服务器和调试适配器运行在编辑器内部，Prefabric 只负责连接它们。除了 Godot，不需要另外安装任何东西。
 
 ## 支持的文件
 
@@ -17,7 +17,7 @@ Godot .NET 项目中的 C# 脚本和普通 C# 代码一样处理，见 [C# 与 .
 
 ## 查找 Godot 可执行文件
 
-OpenIDEA 按以下顺序查找 Godot：
+Prefabric 按以下顺序查找 Godot：
 
 1. 在 **设置 › 语言和框架 › 语言服务器** 中为 **godot** 条目选择的可执行文件（保存在设置的 `tools.godot` 中）。
 2. 搜索路径中名为 `godot`、`godot4`、`godot-4`、`Godot`、`godot-mono`、`godot4-mono` 的程序。
@@ -30,12 +30,12 @@ Godot 装在其他位置时，在上述设置页中指定可执行文件即可�
 
 ## 代码智能
 
-GDScript 语言服务器位于 Godot 编辑器内部，通过 TCP 提供 LSP。打开 `.gd` 文件时，OpenIDEA 会：
+GDScript 语言服务器位于 Godot 编辑器内部，通过 TCP 提供 LSP。打开 `.gd` 文件时，Prefabric 会：
 
 1. 如果 `127.0.0.1:6005`（Godot 默认的语言服务器端口）上有编辑器在监听，就直接连接；否则
-2. 为项目启动一个无界面编辑器（`godot --headless --editor --path <project> --lsp-port <空闲端口>`），等它就绪后再连接。第一次启动需要导入项目，可能比较慢，OpenIDEA 最多等待两分钟。
+2. 为项目启动一个无界面编辑器（`godot --headless --editor --path <project> --lsp-port <空闲端口>`），等它就绪后再连接。第一次启动需要导入项目，可能比较慢，Prefabric 最多等待两分钟。
 
-你自己打开的 Godot 编辑器不会被 OpenIDEA 关闭。想让 Godot 编辑器和 IDE 用同一个语言服务器，先在 Godot 中打开项目，再用 OpenIDEA 打开。如果你在 Godot 中改过语言服务器端口（**Editor Settings › Network › Language Server**），IDE 找不到正在运行的编辑器，会自己启动一个无界面编辑器。
+你自己打开的 Godot 编辑器不会被 Prefabric 关闭。想让 Godot 编辑器和 IDE 用同一个语言服务器，先在 Godot 中打开项目，再用 Prefabric 打开。如果你在 Godot 中改过语言服务器端口（**Editor Settings › Network › Language Server**），IDE 找不到正在运行的编辑器，会自己启动一个无界面编辑器。
 
 具体能用哪些功能取决于 Godot 的语言服务器，包括补全、悬停提示、跳转到定义、符号和诊断等。服务器不支持的功能（例如内嵌提示）就不会出现。
 
@@ -57,25 +57,25 @@ GDScript 语言服务器位于 Godot 编辑器内部，通过 TCP 提供 LSP。�
 
 GDScript 调试通过 Godot 编辑器的调试适配器（基于 TCP 的 DAP）进行。
 
-- **调试 Godot 配置。** OpenIDEA 先连接 `127.0.0.1:6006`（Godot 默认的调试适配器端口）上的编辑器；没有的话，就为项目在空闲端口上启动一个无界面编辑器。随后由编辑器按它自己的运行设置播放场景。以这种方式启动的无界面编辑器会随调试会话一起结束。
+- **调试 Godot 配置。** Prefabric 先连接 `127.0.0.1:6006`（Godot 默认的调试适配器端口）上的编辑器；没有的话，就为项目在空闲端口上启动一个无界面编辑器。随后由编辑器按它自己的运行设置播放场景。以这种方式启动的无界面编辑器会随调试会话一起结束。
 - **附加到 Godot。** 这种配置类型只用于调试，默认主机为 `localhost`、端口为 `6006`，用来调试 Godot 编辑器正在运行的游戏。先在 Godot 编辑器中打开项目并播放场景（F5 / F6），再启动该配置。端口在 Godot 的 **Editor Settings › Network › Debug Adapter** 中设置。
 
 断点、调用栈、变量和单步执行的用法与其他语言相同，见[调试](/zh/guide/debugging)。
 
 <Note>
-  Godot 按真实路径匹配脚本。OpenIDEA 在发送断点前会解析项目路径中的符号链接，因此通过符号链接目录（例如 macOS 上的
+  Godot 按真实路径匹配脚本。Prefabric 在发送断点前会解析项目路径中的符号链接，因此通过符号链接目录（例如 macOS 上的
   `/tmp`）打开的项目也能正常命中断点。
 </Note>
 
 ## 从 Godot 中打开脚本
 
-要让 Godot 用 OpenIDEA 打开脚本，在 Godot 的外部编辑器设置（**Editor Settings › Text Editor › External**）中勾选 **Use External Editor**，把 **Exec Path** 设为 OpenIDEA 的可执行文件（macOS 上是 `OpenIDEA.app/Contents/MacOS/` 中的可执行文件），并把 **Exec Flags** 设为：
+要让 Godot 用 Prefabric 打开脚本，在 Godot 的外部编辑器设置（**Editor Settings › Text Editor › External**）中勾选 **Use External Editor**，把 **Exec Path** 设为 Prefabric 的可执行文件（macOS 上是 `Prefabric.app/Contents/MacOS/` 中的可执行文件），并把 **Exec Flags** 设为：
 
 ```text
 {project} --file {file} --line {line} --column {col}
 ```
 
-之后 OpenIDEA 会打开项目，并把光标定位到对应位置。参数含义与 Unity 相同，详见 [Unity](/zh/languages/unity)。
+之后 Prefabric 会打开项目，并把光标定位到对应位置。参数含义与 Unity 相同，详见 [Unity](/zh/languages/unity)。
 
 ## 限制
 

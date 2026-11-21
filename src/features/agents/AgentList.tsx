@@ -876,7 +876,7 @@ function ProviderSettings({
               htmlFor={`agent-github-account-${agent.id}`}
               hint={
                 <T>
-                  Leave empty to use the active GitHub CLI account. OpenIDEA resolves the token at launch and never
+                  Leave empty to use the active GitHub CLI account. Prefabric resolves the token at launch and never
                   stores it.
                 </T>
               }

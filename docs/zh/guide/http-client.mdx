@@ -78,7 +78,7 @@ Content-Type: application/json
 }
 ```
 
-OpenIDEA 会从请求文件所在目录开始，逐级向上查找到项目根目录，每种文件取离得最近的那个，不同层级的文件不会合并。只使用字符串、数字和布尔值。
+Prefabric 会从请求文件所在目录开始，逐级向上查找到项目根目录，每种文件取离得最近的那个，不同层级的文件不会合并。只使用字符串、数字和布尔值。
 
 在编辑器工具栏的 **运行环境：** 中选择环境（**无环境** 或某个环境名），选择按文件记住。修改环境文件后点击 **重新加载环境**。
 
@@ -120,7 +120,7 @@ HTTP 客户端没有单独的设置页面。
 
 ## 端点与 Spring
 
-OpenIDEA 会为 Java 和 Kotlin 中的 Spring Web 端点（带 `@RequestMapping`、`@GetMapping` 等注解的 `@RestController` / `@Controller` 类）建立索引：
+Prefabric 会为 Java 和 Kotlin 中的 Spring Web 端点（带 `@RequestMapping`、`@GetMapping` 等注解的 `@RestController` / `@Controller` 类）建立索引：
 
 - 每个映射方法和控制器旁边都有边栏图标。**在 HTTP 客户端中生成请求** 和 **为控制器生成请求**（也在编辑器右键菜单和意图操作中）会把请求追加到草稿文件 `generated-requests.http` 并打开它。
 - 生成的请求使用 `http://localhost:<server.port>` 加上 `application.properties` 或 `application.yml` 中的上下文路径（端口默认 8080）。路径变量变成 `{{var}}`，并按 `@RequestBody` 类型填好 JSON 骨架。

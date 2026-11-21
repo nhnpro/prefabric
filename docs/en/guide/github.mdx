@@ -3,13 +3,13 @@ title: "GitHub"
 description: "Review, create, check out and merge GitHub pull requests, and clone your repositories, through the GitHub CLI."
 ---
 
-OpenIDEA works with GitHub through the [GitHub CLI](https://cli.github.com) (`gh`). It uses gh's login and calls the GitHub API through `gh api`. It has no account manager or token field of its own and never stores your credentials.
+Prefabric works with GitHub through the [GitHub CLI](https://cli.github.com) (`gh`). It uses gh's login and calls the GitHub API through `gh api`. It has no account manager or token field of its own and never stores your credentials.
 
 ## Set up
 
 <Steps>
   <Step title="Install gh">
-    Install the GitHub CLI. OpenIDEA looks for it in `OPENIDEA_GH` (a full path), then on `PATH`, then in
+    Install the GitHub CLI. Prefabric looks for it in `OPENIDEA_GH` (a full path), then on `PATH`, then in
     `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin` (macOS/Linux) or `C:\Program Files\GitHub CLI\gh.exe`
     (Windows).
   </Step>
@@ -19,7 +19,7 @@ OpenIDEA works with GitHub through the [GitHub CLI](https://cli.github.com) (`gh
     **Retry** when you are done.
   </Step>
   <Step title="Open a project with a GitHub remote">
-    The project needs a Git remote on `github.com`. With one GitHub remote, OpenIDEA connects to it automatically. With
+    The project needs a Git remote on `github.com`. With one GitHub remote, Prefabric connects to it automatically. With
     several, the tool window asks you to pick a **Repository**; the choice is remembered per project. To switch later,
     use **Change Repository or Account…** in the tool window's `⋮` menu.
   </Step>
@@ -79,10 +79,10 @@ The merge button offers the methods the repository allows: **Merge…**, **Squas
 
 ### Comment in the diff
 
-Pull request diffs compare the merge base with the head. OpenIDEA fetches the pull request ref and base branch first if they are missing locally.
+Pull request diffs compare the merge base with the head. Prefabric fetches the pull request ref and base branch first if they are missing locally.
 
 - Hover a line and click **+** in the gutter to comment. Drag to select several lines.
-- Choose **Start Review** (comments stay pending until you submit) or **Add Single Comment**. OpenIDEA remembers which one you used last.
+- Choose **Start Review** (comments stay pending until you submit) or **Add Single Comment**. Prefabric remembers which one you used last.
 - Existing threads show inline under their lines. Set which ones under **Show Review Threads** in the diff settings: **All**, **Unresolved Only** (default) or **Do Not Show**.
 - The diff toolbar has **Refresh Review Data**, **Submit Review…**, **Previous Comment** and **Next Comment**. Past the last change, `F7` moves to the next file of the pull request.
 
@@ -123,7 +123,7 @@ Review mode is on by default and remembered per project.
 4. Optionally set **Reviewers:**, **Assignees:** and **Labels:**.
 5. Click **Create Pull Request**, or use the arrow for **Create Draft Pull Request**.
 
-If the head branch exists only locally, OpenIDEA asks for a remote branch name and pushes it first. If a pull request already exists for the branches, it offers to open it instead.
+If the head branch exists only locally, Prefabric asks for a remote branch name and pushes it first. If a pull request already exists for the branches, it offers to open it instead.
 
 ## Check out a pull request
 

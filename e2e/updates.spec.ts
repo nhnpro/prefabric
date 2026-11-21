@@ -31,7 +31,7 @@ for (const windowKind of ["project", "welcome", "lightEdit"]) {
       window.__ipc.handlers.app_update_announcement = () => true;
       await checkForUpdates();
     }, windowKind);
-    await expect(page.getByRole("status").filter({ hasText: "OpenIDEA 99.0.0 is available" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Prefabric 99.0.0 is available" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Install and Restart", exact: true })).toBeVisible();
   });
 }

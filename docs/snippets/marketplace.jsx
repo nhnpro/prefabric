@@ -5,7 +5,7 @@ export const Marketplace = ({ catalog: pluginCatalog, lang = "en" }) => {
   const TEXT = {
     en: {
       eyebrow: "Plugin Marketplace",
-      title: "Make OpenIDEA yours.",
+      title: "Make Prefabric yours.",
       lead: "Languages, frameworks, linters, themes and tools, signed by their publishers and installed in one click from",
       path: "Settings › Plugins › Marketplace",
       leadEnd: ".",
@@ -22,7 +22,7 @@ export const Marketplace = ({ catalog: pluginCatalog, lang = "en" }) => {
       official: "Official",
       empty: (q) => `No plugins match “${q}”.`,
       buildEyebrow: "Build a plugin",
-      buildTitle: "Ship your plugin to every OpenIDEA user.",
+      buildTitle: "Ship your plugin to every Prefabric user.",
       buildLead:
         "Plugins are sandboxed WebAssembly components with a typed API. Themes, icon themes and languages need no code at all. Scaffold one in a minute, then list it through the community registry.",
       quickstart: "Plugin quickstart",
@@ -37,7 +37,7 @@ export const Marketplace = ({ catalog: pluginCatalog, lang = "en" }) => {
       pluginId: "Plugin id",
       install: (name) => (
         <>
-          <b>Install</b> In OpenIDEA, open <b>Settings › Plugins › Marketplace</b>, search for “{name}” and click{" "}
+          <b>Install</b> In Prefabric, open <b>Settings › Plugins › Marketplace</b>, search for “{name}” and click{" "}
           <b>Install</b>.
         </>
       ),
@@ -57,7 +57,7 @@ export const Marketplace = ({ catalog: pluginCatalog, lang = "en" }) => {
     },
     zh: {
       eyebrow: "插件市场",
-      title: "让 OpenIDEA 成为你的 IDE。",
+      title: "让 Prefabric 成为你的 IDE。",
       lead: "语言、框架、代码检查、主题和工具，均由发布者签名，在",
       path: "设置 › 插件 › 插件市场",
       leadEnd: "中一键安装。",
@@ -74,7 +74,7 @@ export const Marketplace = ({ catalog: pluginCatalog, lang = "en" }) => {
       official: "官方",
       empty: (q) => `没有与“${q}”匹配的插件。`,
       buildEyebrow: "开发插件",
-      buildTitle: "把你的插件交到每一位 OpenIDEA 用户手中。",
+      buildTitle: "把你的插件交到每一位 Prefabric 用户手中。",
       buildLead:
         "插件是运行在沙箱中的 WebAssembly 组件，API 有完整类型。主题、图标主题和语言完全不用写代码。一分钟搭好脚手架，再通过社区登记仓库上架。",
       quickstart: "插件快速开始",
@@ -88,7 +88,7 @@ export const Marketplace = ({ catalog: pluginCatalog, lang = "en" }) => {
       pluginId: "插件 id",
       install: (name) => (
         <>
-          <b>安装</b> 在 OpenIDEA 中打开 <b>设置 › 插件 › 插件市场</b>，搜索“
+          <b>安装</b> 在 Prefabric 中打开 <b>设置 › 插件 › 插件市场</b>，搜索“
           {name}”，点击 <b>安装</b>。
         </>
       ),

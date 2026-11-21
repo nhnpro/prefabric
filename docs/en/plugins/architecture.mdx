@@ -95,7 +95,7 @@ A panic, trap, permission violation or exceeded limit drops the instance. The us
 
 Plugin code runs where the project is. When a window opens a remote project, the desktop sends its enabled code plugins and their grants to `openidea-server`, which runs them next to the files: file reads, searches, processes, network requests and diagnostics all act on the remote machine, and `process:` programs are resolved there. Secrets stay in the desktop's keychain; the server asks for one when a request needs it. Views, notifications, status items and terminals of remote plugins show in the window as usual.
 
-Current limits: project plugins (`.openidea/plugins`) don't run in remote projects yet, and a plugin's storage on the server starts empty.
+Current limits: project plugins (`.prefabric/plugins`) don't run in remote projects yet, and a plugin's storage on the server starts empty.
 
 ## Async and API 2.0
 

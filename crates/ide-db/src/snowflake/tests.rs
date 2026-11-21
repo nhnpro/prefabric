@@ -661,7 +661,7 @@ async fn browser_sign_in_presents_the_token_and_proof_key_then_reuses_the_id_tok
             stream.read_to_end(&mut reply).await.unwrap();
             let reply = String::from_utf8_lossy(&reply).into_owned();
             assert!(reply.starts_with("HTTP/1.1 200 OK"), "{reply}");
-            assert!(reply.contains("return to OpenIDEA"), "{reply}");
+            assert!(reply.contains("return to Prefabric"), "{reply}");
         });
         Ok(())
     }));

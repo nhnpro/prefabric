@@ -1,9 +1,9 @@
 ---
 title: "Development setup"
-description: "Install the toolchain, build OpenIDEA from source, run it from a worktree and avoid the usual first-build pitfalls."
+description: "Install the toolchain, build Prefabric from source, run it from a worktree and avoid the usual first-build pitfalls."
 ---
 
-OpenIDEA is a Tauri 2 app: a Rust backend (`crates/`, `src-tauri/`) and a React + TypeScript frontend (`src/`). You need both toolchains to run it.
+Prefabric is a Tauri 2 app: a Rust backend (`crates/`, `src-tauri/`) and a React + TypeScript frontend (`src/`). You need both toolchains to run it.
 
 ## Prerequisites
 
@@ -69,7 +69,7 @@ Always launch through `pnpm tauri dev` / `pnpm dev:app`, not the raw `pnpm exec 
 
 - starts Vite on a port derived from the worktree path (moving on if it is taken) and passes the actual URL to Tauri;
 - refuses to start a second launcher for the same worktree and prints the running session instead;
-- gives each worktree's debug build its own app identity (`ai.l0ng.openidea.dev.w<hash>`), so data, settings, logs and the single-instance lock are separate per worktree. Different worktrees and an installed release can run at the same time.
+- gives each worktree's debug build its own app identity (`dev.prefabric.ide.dev.w<hash>`), so data, settings, logs and the single-instance lock are separate per worktree. Different worktrees and an installed release can run at the same time.
 
 Launching the same debug binary again focuses its running window and forwards its path argument. `--release` uses the normal release identity and bypasses the wrapper.
 

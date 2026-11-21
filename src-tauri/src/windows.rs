@@ -717,7 +717,7 @@ pub fn report_cli_error(app: &AppHandle, error: IdeError) {
     tracing::warn!("external open failed: {}", error.message);
     app.dialog()
         .message(error.message)
-        .title("OpenIDEA")
+        .title("Prefabric")
         .kind(tauri_plugin_dialog::MessageDialogKind::Error)
         .show(|_| {});
 }

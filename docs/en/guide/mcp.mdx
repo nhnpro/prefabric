@@ -1,11 +1,11 @@
 ---
 title: "MCP server"
-description: "Let Claude Code, Codex and other MCP clients use OpenIDEA's search, code insight, editing, run and Git tools on your open projects."
+description: "Let Claude Code, Codex and other MCP clients use Prefabric's search, code insight, editing, run and Git tools on your open projects."
 ---
 
-OpenIDEA has a built-in [Model Context Protocol](https://modelcontextprotocol.io) server. With it on, AI agents running outside the IDE, such as Claude Code in a terminal, Codex or Cursor, can call the IDE's tools on the projects you have open: search with the project index, look up symbols through the language servers, read the Problems view, rename, reformat, build, run configurations and read Git status.
+Prefabric has a built-in [Model Context Protocol](https://modelcontextprotocol.io) server. With it on, AI agents running outside the IDE, such as Claude Code in a terminal, Codex or Cursor, can call the IDE's tools on the projects you have open: search with the project index, look up symbols through the language servers, read the Problems view, rename, reformat, build, run configurations and read Git status.
 
-Agent tasks started inside OpenIDEA (see [Agents](/en/guide/agents)) get the same tools automatically while the server is on.
+Agent tasks started inside Prefabric (see [Agents](/en/guide/agents)) get the same tools automatically while the server is on.
 
 ## Turn it on
 
@@ -22,14 +22,14 @@ By default the server listens on `127.0.0.1` only, and every request must carry 
 
 - **Listen address.** `127.0.0.1` (the default) lets only this computer connect. To let agents on another computer connect, enter another address of this computer (a LAN or VPN address) or `0.0.0.0` for every address; they connect to `http://<that address>:<port>/mcp` with the token. Anyone who can reach the address and has the token can use the tools, so keep it to networks you trust. **Status** shows the address when it is not `127.0.0.1`.
 - **Port.** By default it listens on the same port, 26371, in every run (**Use a fixed port** and **Port**), so HTTP clients and port forwards (an SSH tunnel to another machine, say) keep working after a restart. When the port is in use or reserved, that run takes a free port and **Status** says why. Turn **Use a fixed port** off for a free port in every run.
-- **Token.** By default the token changes each time OpenIDEA starts. Turn on **Keep the token** to keep one across runs, stored in OpenIDEA's application data for your account only; **Regenerate Token** replaces it, and clients configured with the old one stop working.
+- **Token.** By default the token changes each time Prefabric starts. Turn on **Keep the token** to keep one across runs, stored in Prefabric's application data for your account only; **Regenerate Token** replaces it, and clients configured with the old one stop working.
 
 ## Connect a client
 
 The settings page has two buttons under **Client configuration**. Both copy an `mcpServers` entry in the JSON format most clients accept.
 
-- **Copy Stdio Config** (recommended): the client starts OpenIDEA's executable with `--mcp-stdio`, which relays to the running IDE. It holds no token and keeps working after OpenIDEA restarts.
-- **Copy HTTP Config**: the client connects to `http://<address>:<port>/mcp` (`127.0.0.1` when listening on every address) with `Authorization: Bearer <token>`. It keeps working after OpenIDEA restarts only with a fixed port and a kept token; otherwise copy it again after each restart.
+- **Copy Stdio Config** (recommended): the client starts Prefabric's executable with `--mcp-stdio`, which relays to the running IDE. It holds no token and keeps working after Prefabric restarts.
+- **Copy HTTP Config**: the client connects to `http://<address>:<port>/mcp` (`127.0.0.1` when listening on every address) with `Authorization: Bearer <token>`. It keeps working after Prefabric restarts only with a fixed port and a kept token; otherwise copy it again after each restart.
 
 The stdio configuration looks like this (the path is the one on your machine):
 
@@ -38,21 +38,21 @@ The stdio configuration looks like this (the path is the one on your machine):
   "mcpServers": {
     "openidea": {
       "type": "stdio",
-      "command": "/Applications/OpenIDEA.app/Contents/MacOS/openidea",
+      "command": "/Applications/Prefabric.app/Contents/MacOS/prefabric",
       "args": ["--mcp-stdio", "--project", "/path/to/project"]
     }
   }
 }
 ```
 
-`--project` names the project the client works on. Leave it out and the bridge uses the directory the client starts it in, so one configuration works for every project you open in OpenIDEA.
+`--project` names the project the client works on. Leave it out and the bridge uses the directory the client starts it in, so one configuration works for every project you open in Prefabric.
 
 <Tabs>
   <Tab title="Claude Code">
     Add the server for the current project from a terminal in the project directory:
 
     ```sh
-    claude mcp add openidea -- /Applications/OpenIDEA.app/Contents/MacOS/openidea --mcp-stdio
+    claude mcp add openidea -- /Applications/Prefabric.app/Contents/MacOS/prefabric --mcp-stdio
     ```
 
     Or paste the copied JSON into a `.mcp.json` file at the project root to share it with your team.
@@ -63,7 +63,7 @@ The stdio configuration looks like this (the path is the one on your machine):
 
     ```toml
     [mcp_servers.openidea]
-    command = "/Applications/OpenIDEA.app/Contents/MacOS/openidea"
+    command = "/Applications/Prefabric.app/Contents/MacOS/prefabric"
     args = ["--mcp-stdio"]
     ```
 
@@ -71,15 +71,15 @@ The stdio configuration looks like this (the path is the one on your machine):
 
   </Tab>
   <Tab title="Other clients">
-    Paste the copied configuration into the client's MCP settings (for example `mcp.json` in Cursor). Clients that only speak HTTP can use **Copy HTTP Config**, but must be updated after every restart of OpenIDEA.
+    Paste the copied configuration into the client's MCP settings (for example `mcp.json` in Cursor). Clients that only speak HTTP can use **Copy HTTP Config**, but must be updated after every restart of Prefabric.
   </Tab>
 </Tabs>
 
-Use the executable path from **Copy Stdio Config**; the macOS path above is only an example. On Windows it is `openidea.exe` in the installation (or portable) folder.
+Use the executable path from **Copy Stdio Config**; the macOS path above is only an example. On Windows it is `prefabric.exe` in the installation (or portable) folder.
 
-OpenIDEA must be running for the tools to work, and the project must be open in a window or served as a [background project](#background-projects). A client may name any folder inside such a project; the server picks the project that contains it. HTTP clients name it with the `X-OpenIDEA-Project` header or the `?project=` query.
+Prefabric must be running for the tools to work, and the project must be open in a window or served as a [background project](#background-projects). A client may name any folder inside such a project; the server picks the project that contains it. HTTP clients name it with the `X-Prefabric-Project` header (`X-OpenIDEA-Project` is still accepted) or the `?project=` query.
 
-While the server runs, OpenIDEA writes its port and token to `mcp/server.json` in its application data directory (readable only by you); the stdio bridge reads it from there.
+While the server runs, Prefabric writes its port and token to `mcp/server.json` in its application data directory (readable only by you); the stdio bridge reads it from there.
 
 ## Tools
 
@@ -114,7 +114,7 @@ Notes on what they do:
 
 ## Commands in the Run tool window
 
-`run_command` runs a shell command line in a tab of the Run tool window, with the shell of **Settings › Tools › Terminal**. The agent names the tab and OpenIDEA shows it as `_agent_<name>`, so you see the output as it comes and can type into the command, rerun it or stop it like any run.
+`run_command` runs a shell command line in a tab of the Run tool window, with the shell of **Settings › Tools › Terminal**. The agent names the tab and Prefabric shows it as `_agent_<name>`, so you see the output as it comes and can type into the command, rerun it or stop it like any run.
 
 As JetBrains IDEs do, the command runs on pipes, not a terminal: programs print plain lines instead of progress bars and redraws. The agent gets that output cleaned of escape sequences and cut to 2000 lines (`maxLinesCount`); beyond that the end stays, or the start or both ends with `truncateMode`. The tab's raw output log stays complete.
 
@@ -128,7 +128,7 @@ Plugins can add more tools; they appear in the same list. A plugin tool marked a
 
 ## Background projects
 
-By default the server answers only for projects open in a window. **Serve without a window** lets it also answer for a folder that has no window: the first tool call for a path inside it opens the project, and OpenIDEA unloads it again after it has been idle for a while. The setting is under **Background projects** on **Settings › Agents › IDE MCP Server**. It is off by default.
+By default the server answers only for projects open in a window. **Serve without a window** lets it also answer for a folder that has no window: the first tool call for a path inside it opens the project, and Prefabric unloads it again after it has been idle for a while. The setting is under **Background projects** on **Settings › Agents › IDE MCP Server**. It is off by default.
 
 **Serve without a window** picks which folders are served:
 
@@ -151,7 +151,7 @@ When a project loads and unloads:
 - **Opening the folder in a window** unloads its background project, and the window takes over. A call that arrives while the window is still opening the folder is asked to retry.
 - **Changing what is served unloads at once.** Switching **Serve without a window** to **Off**, removing a folder from the list, revoking the trust that made a project served and turning the server off unload the affected projects without waiting for the idle time.
 - **Unloading stops the runs.** The **Unload** button, a change of the setting or the list, revoking trust and opening the folder in a window unload the project at once and stop the runs it started, without asking. Only the idle unload and the limit leave a project with a live run alone.
-- **Restarting OpenIDEA** starts with none loaded.
+- **Restarting Prefabric** starts with none loaded.
 
 **Open now** lists the loaded projects, each with what it is doing (answering a request, kept open by a run, or how long it has been idle and when it unloads) and an **Unload** button. Unloading does not wait for **Apply**. The project loads again on the next tool call that names it, if the setting still serves it.
 
@@ -169,15 +169,15 @@ A background project has no window, so some tools differ:
 ## Safety
 
 - **Untrusted projects** expose only the read-only tools. Tools that write files, rename, reformat, build or run need a project you have trusted.
-- **Running and building ask first.** `execute_run_configuration`, `build_project`, `run_command` and `http_run_request` show a dialog in OpenIDEA naming the client, the project, the tool and what will run. Choose **Allow** or **Deny**; several requests queue up.
+- **Running and building ask first.** `execute_run_configuration`, `build_project`, `run_command` and `http_run_request` show a dialog in Prefabric naming the client, the project, the tool and what will run. Choose **Allow** or **Deny**; several requests queue up.
 - Tools that write refuse paths outside the project.
 - **Background projects.** Anyone with the token can make the IDE load a project that **Serve without a window** serves, so the setting and the token decide who can open folders on this computer. Listed folders you have not trusted open in Restricted Mode and get only the read-only tools. Keep the list to folders you want agents to reach.
 
 ## Remote development
 
-In a remote window ([SSH](/en/guide/remote/ssh), WSL or [Dev Containers](/en/guide/remote/containers)), `openidea-server` runs its own MCP server on the remote host, configured independently in **Settings › Agents › IDE MCP Server** while that remote window is focused. Coding agents started inside the remote window connect to it automatically; external CLI clients on the remote host can use **Copy Stdio Config** (`~/.openidea/bin/openidea-server --mcp-stdio`) or **Copy HTTP Config**, and clients on your desktop can reach it by forwarding its port in the **Ports** tool window. The remote server serves only the project open in its window: [background projects](#background-projects) are served by OpenIDEA on your desktop, and the **Background projects** group is disabled in a remote window's Settings.
+In a remote window ([SSH](/en/guide/remote/ssh), WSL or [Dev Containers](/en/guide/remote/containers)), `openidea-server` runs its own MCP server on the remote host, configured independently in **Settings › Agents › IDE MCP Server** while that remote window is focused. Coding agents started inside the remote window connect to it automatically; external CLI clients on the remote host can use **Copy Stdio Config** (`~/.prefabric/bin/openidea-server --mcp-stdio`) or **Copy HTTP Config**, and clients on your desktop can reach it by forwarding its port in the **Ports** tool window. The remote server serves only the project open in its window: [background projects](#background-projects) are served by Prefabric on your desktop, and the **Background projects** group is disabled in a remote window's Settings.
 
 ## Limits
 
-- The server serves projects open in a window and, with **Serve without a window** on, the background projects it loads. A project that is neither is not served, and closing a project's window makes its tools unavailable unless the setting serves it. Background projects exist only while OpenIDEA runs.
+- The server serves projects open in a window and, with **Serve without a window** on, the background projects it loads. A project that is neither is not served, and closing a project's window makes its tools unavailable unless the setting serves it. Background projects exist only while Prefabric runs.
 - Responses are plain JSON; the server does not stream over SSE.

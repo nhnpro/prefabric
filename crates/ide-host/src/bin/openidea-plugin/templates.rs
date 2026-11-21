@@ -129,7 +129,7 @@ codegen-units = 1
 panic = "abort"
 "#;
 
-const COMMAND_LIB: &str = r#"//! __NAME__: an OpenIDEA plugin.
+const COMMAND_LIB: &str = r#"//! __NAME__: a Prefabric plugin.
 
 use openidea_plugin::{Error, Invocation, NotificationLevel, Plugin, host, register_plugin};
 
@@ -187,7 +187,7 @@ mod tests {
 
 const COMMAND_README: &str = r#"# __NAME__
 
-An OpenIDEA plugin.
+A Prefabric plugin.
 
 ```sh
 cargo test                       # logic, against the SDK's mock host

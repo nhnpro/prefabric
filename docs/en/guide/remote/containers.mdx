@@ -3,7 +3,7 @@ title: "Containers"
 description: "Reopen a local project in its dev container, and run configurations in Docker or Docker Compose containers."
 ---
 
-OpenIDEA works with containers in two ways:
+Prefabric works with containers in two ways:
 
 - **Dev containers**: the whole project opens inside the container described by its `devcontainer.json`, with the IDE
   backend running there. This is remote development, like [SSH](/en/guide/remote/ssh).
@@ -34,7 +34,7 @@ tool window.
     Choose **File › Reopen in Container**, then **This Window** or **New Window** if asked.
   </Step>
   <Step title="Wait for the container">
-    OpenIDEA runs `devcontainer up` for the folder, which builds or starts the container. The first build can take a
+    Prefabric runs `devcontainer up` for the folder, which builds or starts the container. The first build can take a
     while. Then it installs and starts [`openidea-server`](/en/guide/remote/server) in the container and opens the
     project folder there.
   </Step>
@@ -55,8 +55,8 @@ If something fails (no `devcontainer.json`, Docker not installed, the build fail
 - `forwardPorts`: forwarded to your machine automatically. Forward more in the **Ports** tool window, as in an
   [SSH window](/en/guide/remote/ssh#forward-ports).
 
-Language servers and debuggers that OpenIDEA installs go into the container, under the container user's
-`~/.openidea/data`.
+Language servers and debuggers that Prefabric installs go into the container, under the container user's
+`~/.prefabric/data`.
 
 ### Limits
 

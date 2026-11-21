@@ -1,12 +1,15 @@
 //! Explicit workspaces reference project folders without changing them.
-//! Attaching folders writes only the primary project's `.openidea/` directory.
+//! Attaching folders writes only the primary project's `.prefabric/` directory.
 use ide_core::{IdeError, IdeResult};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub const FILE: &str = ".openidea/workspace.json";
+/// The workspace file of `root`, in its config folder ([`ide_core::project_dir`]).
+pub fn file(root: &Path) -> PathBuf {
+    ide_core::project_dir::path(root, "workspace.json")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -42,7 +45,7 @@ impl Workspace {
     }
 
     pub fn load(root: &Path) -> IdeResult<Option<Self>> {
-        let bytes = match std::fs::read(root.join(FILE)) {
+        let bytes = match std::fs::read(file(root)) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -97,7 +100,7 @@ impl Workspace {
         std::fs::create_dir_all(&root)?;
         let workspace = Self { version: 1, name, projects };
         let bytes = serde_json::to_vec_pretty(&workspace).map_err(|e| IdeError::internal(e.to_string()))?;
-        let file = root.join(FILE);
+        let file = file(&root);
         std::fs::create_dir_all(file.parent().expect("workspace metadata directory"))?;
         if create {
             std::fs::OpenOptions::new().write(true).create_new(true).open(file)?.write_all(&bytes)?;
@@ -151,8 +154,8 @@ fn normalize_projects(root: &Path, projects: Vec<PathBuf>) -> IdeResult<Vec<Path
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => path,
             _ => return Err(IdeError::invalid(format!("Project folder does not exist: {}", path.display()))),
         };
-        if path != root && path.join(FILE).exists() {
-            let mut nested: Workspace = serde_json::from_slice(&std::fs::read(path.join(FILE))?)
+        if path != root && file(&path).exists() {
+            let mut nested: Workspace = serde_json::from_slice(&std::fs::read(file(&path))?)
                 .map_err(|e| IdeError::invalid(format!("Invalid workspace: {e}")))?;
             let primary = nested.projects.first().map(|p| if p.is_absolute() { p.clone() } else { path.join(p) });
             if let Some(primary) = &primary {
@@ -184,9 +187,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(tmp.path()).unwrap();
         Workspace::save(&root, "Container", vec![], true).unwrap();
-        let before = std::fs::read(root.join(FILE)).unwrap();
+        let before = std::fs::read(file(&root)).unwrap();
         assert!(Workspace::save(&root, "Attached", vec![root.clone()], false).is_err());
-        assert_eq!(std::fs::read(root.join(FILE)).unwrap(), before);
+        assert_eq!(std::fs::read(file(&root)).unwrap(), before);
     }
 
     #[test]
@@ -198,7 +201,7 @@ mod tests {
         for projects in [vec![root.clone(), other.clone()], vec![other, root.clone()]] {
             let error = Workspace::save(&root, "Invalid", projects, true).unwrap_err();
             assert_eq!(error.message, "Store the workspace outside its linked project folders");
-            assert!(!root.join(FILE).exists());
+            assert!(!file(&root).exists());
         }
     }
 
@@ -236,7 +239,7 @@ mod tests {
         let saved = Workspace::save(&root, " Full stack ", vec![project.clone(), project.clone()], true).unwrap();
         assert_eq!(saved.projects.len(), 1);
         assert_eq!(Workspace::load(&root).unwrap(), Some(saved));
-        assert!(!project.join(".openidea").exists());
+        assert!(!project.join(".prefabric").exists() && !project.join(".openidea").exists());
         assert!(Workspace::save(&root, "Other", vec![], true).is_err());
         assert_eq!(Workspace::load(&root).unwrap().unwrap().name, "Full stack");
     }
@@ -248,9 +251,9 @@ mod tests {
         std::fs::create_dir(&project).unwrap();
         let root = tmp.path().join("workspace");
         Workspace::save(&root, "Workspace", vec![project.clone()], true).unwrap();
-        let before = std::fs::read(root.join(FILE)).unwrap();
+        let before = std::fs::read(file(&root)).unwrap();
         assert!(Workspace::save(&root, "Changed", vec![tmp.path().join("missing")], false).is_err());
-        assert_eq!(std::fs::read(root.join(FILE)).unwrap(), before);
+        assert_eq!(std::fs::read(file(&root)).unwrap(), before);
         std::fs::remove_dir(project).unwrap();
         assert_eq!(Workspace::load(&root).unwrap().unwrap().projects.len(), 1);
         let missing = Workspace::load(&root).unwrap().unwrap().projects;
@@ -276,7 +279,7 @@ mod tests {
         let write = |dir: &Path, projects: &[&Path]| {
             let projects = projects.iter().map(|p| p.to_path_buf()).collect();
             let workspace = Workspace { version: 1, name: "W".into(), projects };
-            std::fs::write(dir.join(FILE), serde_json::to_vec(&workspace).unwrap()).unwrap();
+            std::fs::write(file(dir), serde_json::to_vec(&workspace).unwrap()).unwrap();
         };
         let root = local.join("root");
 
@@ -294,7 +297,7 @@ mod tests {
         assert!(error.message.starts_with(REFUSED), "{}", error.message);
 
         // A workspace that is on the share links that share's folders.
-        std::fs::remove_file(root.join("sub").join(FILE)).unwrap();
+        std::fs::remove_file(file(&root.join("sub"))).unwrap();
         let root = dunce::canonicalize(share.join("root")).unwrap();
         write(&root, &[&root, &share.join("member")]);
         let projects = Workspace::load(&root).unwrap().unwrap().projects;

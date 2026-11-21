@@ -32,7 +32,7 @@ pub fn allow_external_launches(app: &AppHandle) -> IdeResult<()> {
         }
         if ChangeWindowMessageFilterEx(receiver, WM_COPYDATA, MSGFLT_ALLOW, std::ptr::null_mut()) == 0 {
             return Err(IdeError::unavailable(format!(
-                "Cannot enable external editor requests: {}. Run Unity and OpenIDEA with the same permissions.",
+                "Cannot enable external editor requests: {}. Run Unity and Prefabric with the same permissions.",
                 std::io::Error::last_os_error()
             )));
         }

@@ -618,7 +618,7 @@ mod tests {
             ..Default::default()
         };
         save(tmp.path(), std::slice::from_ref(&s)).unwrap();
-        let text = std::fs::read_to_string(tmp.path().join(".openidea/data-sources.toml")).unwrap();
+        let text = std::fs::read_to_string(tmp.path().join(".prefabric/data-sources.toml")).unwrap();
         assert!(!text.contains("password ="), "{text}");
         assert_eq!(load(tmp.path()).unwrap(), vec![s]);
         assert!(save(tmp.path(), &[DataSource::default()]).is_err());

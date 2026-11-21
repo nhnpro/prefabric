@@ -3,11 +3,11 @@ title: "Android and Logcat"
 description: "Watch the log of a connected Android device or emulator in the Logcat tool window."
 ---
 
-OpenIDEA's Android support is the **Logcat** tool window: it streams the log of a connected device or emulator through `adb`, with level and text filters. It does not build, install or run Android apps, manage emulators or edit Android resources.
+Prefabric's Android support is the **Logcat** tool window: it streams the log of a connected device or emulator through `adb`, with level and text filters. It does not build, install or run Android apps, manage emulators or edit Android resources.
 
 ## Set up adb
 
-Logcat drives the `adb` command from the Android SDK platform-tools. OpenIDEA does not bundle it. It looks for `adb` in this order:
+Logcat drives the `adb` command from the Android SDK platform-tools. Prefabric does not bundle it. It looks for `adb` in this order:
 
 1. The `OPENIDEA_ADB` environment variable (full path to the executable).
 2. `platform-tools/` under `ANDROID_HOME` or `ANDROID_SDK_ROOT`.
@@ -16,7 +16,7 @@ Logcat drives the `adb` command from the Android SDK platform-tools. OpenIDEA do
 
 <Note>
   On macOS, an app started from the Dock does not see variables exported in your shell profile. If you rely on
-  `ANDROID_HOME`, install the SDK in the default location or start OpenIDEA from a terminal.
+  `ANDROID_HOME`, install the SDK in the default location or start Prefabric from a terminal.
 </Note>
 
 ## Open Logcat

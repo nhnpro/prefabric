@@ -25,7 +25,7 @@ impl SourcesWatch {
     /// Calls `on_change` once a burst of changes to either file settled, on a
     /// background thread.
     pub fn start(root: &Path, global: Option<&Path>, on_change: Box<dyn Fn() + Send>) -> IdeResult<Self> {
-        let config: PathBuf = root.join(project_dir::DIR);
+        let config: PathBuf = project_dir::dir(root);
         let (tx, rx) = mpsc::channel::<()>();
         let relevant = {
             let config = config.clone();
@@ -124,11 +124,11 @@ mod tests {
         let (count, on_change) = counting();
         let _watch = SourcesWatch::start(&project, Some(&global), on_change).unwrap();
 
-        // No `.openidea/` yet: it is created, then the file written into it.
-        std::fs::create_dir_all(project.join(".openidea")).unwrap();
+        // No `.prefabric/` yet: it is created, then the file written into it.
+        std::fs::create_dir_all(project.join(".prefabric")).unwrap();
         assert!(wait_for(&count, 1));
         let seen = count.load(Ordering::SeqCst);
-        std::fs::write(project.join(".openidea/data-sources.toml"), "").unwrap();
+        std::fs::write(project.join(".prefabric/data-sources.toml"), "").unwrap();
         assert!(wait_for(&count, seen + 1), "project file");
 
         let seen = count.load(Ordering::SeqCst);

@@ -38,6 +38,6 @@ fn components_the_host_cannot_link_are_refused() {
     for (case, wat, names) in cases {
         let err = check(wat).expect_err(case);
         assert!(err.contains(names), "{case}: {err}");
-        assert!(err.contains("update OpenIDEA") && err.contains("rebuild"), "{case}: {err}");
+        assert!(err.contains("update Prefabric") && err.contains("rebuild"), "{case}: {err}");
     }
 }

@@ -37,7 +37,7 @@ Without a key, `index` lists every package in the folder, each checked against t
 openidea-plugin merge market/index.json https://github.com/l0ng-ai/openidea/releases/latest/download/plugins-index.json --keep acme
 ```
 
-`merge` replaces every publisher in your index except `--keep` with the publishers, plugins and revocations of the other index (a path or URL), and makes their download links absolute. This is how OpenIDEA's own release index takes in the community registry. Use it to offer the official and community plugins next to your own. `--out FILE` writes the result elsewhere.
+`merge` replaces every publisher in your index except `--keep` with the publishers, plugins and revocations of the other index (a path or URL), and makes their download links absolute. This is how Prefabric's own release index takes in the community registry. Use it to offer the official and community plugins next to your own. `--out FILE` writes the result elsewhere.
 
 ## Point the IDE at it
 
@@ -46,7 +46,7 @@ In **Settings â€º Plugins**, open the gear menu and choose **Plugin Repositoryâ€
 The IDE reads one index. If you want users to keep seeing the official plugins, merge the official index into yours.
 
 <Note>
-  Release builds of OpenIDEA pin the official publisher's key. Plugins named `openidea.*` must be signed with it, or
+  Release builds of Prefabric pin the official publisher's key. Plugins named `openidea.*` must be signed with it, or
   with a key it endorsed, whatever keys your index lists for `openidea`.
 </Note>
 

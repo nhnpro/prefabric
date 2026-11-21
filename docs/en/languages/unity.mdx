@@ -1,18 +1,18 @@
 ---
 title: "Unity"
-description: "Use OpenIDEA as Unity's external script editor, browse a Unity project, and keep .meta files in step with your assets."
+description: "Use Prefabric as Unity's external script editor, browse a Unity project, and keep .meta files in step with your assets."
 ---
 
-OpenIDEA recognizes a folder as a Unity project when it has an `Assets` folder and `ProjectSettings/ProjectVersion.txt`. It opens scripts that Unity sends it, hides Unity's caches, moves `.meta` files along with their assets, and uses the C# language server for code intelligence. No Unity package or editor plugin is needed.
+Prefabric recognizes a folder as a Unity project when it has an `Assets` folder and `ProjectSettings/ProjectVersion.txt`. It opens scripts that Unity sends it, hides Unity's caches, moves `.meta` files along with their assets, and uses the C# language server for code intelligence. No Unity package or editor plugin is needed.
 
-## Set OpenIDEA as the external script editor
+## Set Prefabric as the external script editor
 
 <Steps>
   <Step title="Open External Tools in Unity">
     In Unity, open **Edit › Preferences › External Tools** (on macOS, **Unity › Settings** or **Unity › Preferences**, then **External Tools**).
   </Step>
-  <Step title="Choose OpenIDEA">
-    Under **External Script Editor**, choose **Browse** and select the OpenIDEA executable (on macOS, `OpenIDEA.app`).
+  <Step title="Choose Prefabric">
+    Under **External Script Editor**, choose **Browse** and select the Prefabric executable (on macOS, `Prefabric.app`).
   </Step>
   <Step title="Set the arguments">
     Set **External Script Editor Args** to:
@@ -26,7 +26,7 @@ OpenIDEA recognizes a folder as a Unity project when it has an `Assets` folder a
   </Step>
 </Steps>
 
-Double-click a script in Unity's Project window, or a source location in the Console. OpenIDEA opens the project, or focuses the window that already has it open, opens the file and puts the caret at the line and column. Other open tabs stay where they are.
+Double-click a script in Unity's Project window, or a source location in the Console. Prefabric opens the project, or focuses the window that already has it open, opens the file and puts the caret at the line and column. Other open tabs stay where they are.
 
 ### How the arguments work
 
@@ -43,10 +43,10 @@ These arguments belong to the application executable:
 
 The file can also follow the project folder as a second path, without `--file` (`$(ProjectPath) --line $(Line) --column $(Column) $(File)`); a relative one resolves against the working directory.
 
-If you call the executable yourself, quote paths as your shell requires. The separately installed `openidea` command has a different syntax (`--line` and `--column` come before the file, and there is no `--file`); see [Command line](/en/reference/cli).
+If you call the executable yourself, quote paths as your shell requires. The separately installed `prefabric` command has a different syntax (`--line` and `--column` come before the file, and there is no `--file`); see [Command line](/en/reference/cli).
 
 <Note>
-  On Windows, run Unity and OpenIDEA with the same permissions (both elevated or both not). If a running OpenIDEA does
+  On Windows, run Unity and Prefabric with the same permissions (both elevated or both not). If a running Prefabric does
   not react to a double-click, restart both with matching permissions and try again.
 </Note>
 
@@ -90,7 +90,7 @@ The IDE notices when Unity writes those files and picks them up without reopenin
 
 ## Limitations
 
-- OpenIDEA does not generate Unity's C# project files; Unity has to.
-- There is no Unity debugger integration: you cannot attach to the Unity editor or a player from OpenIDEA.
+- Prefabric does not generate Unity's C# project files; Unity has to.
+- There is no Unity debugger integration: you cannot attach to the Unity editor or a player from Prefabric.
 - There are no Unity-specific inspections, run configurations or ShaderLab support.
 - Opening files from Unity works for local projects only, not projects in WSL.

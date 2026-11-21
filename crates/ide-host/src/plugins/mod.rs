@@ -102,8 +102,9 @@ use std::time::{Duration, Instant};
 
 const STATE_FILE: &str = "state.json";
 const LINKS_FILE: &str = "links.json";
-/// Project plugins live here, relative to a project root.
-pub const DEV_PLUGINS_DIR: &str = ".openidea/plugins";
+/// Project plugins live here, relative to a project root (in older projects, under
+/// `.openidea/` instead: see [`ide_core::project_dir`]).
+pub const DEV_PLUGINS_DIR: &str = ".prefabric/plugins";
 
 #[derive(Default, Serialize, Deserialize)]
 struct PersistedState {
@@ -1287,7 +1288,7 @@ impl PluginHost {
         let plugin = self.get(id)?;
         if plugin.source != PluginSource::Installed {
             return Err(IdeError::invalid(
-                "development plugins are removed by deleting them from .openidea/plugins or unlinking them",
+                "development plugins are removed by deleting them from .prefabric/plugins or unlinking them",
             ));
         }
         // Its secrets (kept outside its directory, in the OS keychain on the desktop) go with it.

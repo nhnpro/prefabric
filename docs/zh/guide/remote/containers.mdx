@@ -3,7 +3,7 @@ title: "容器"
 description: "在开发容器中重新打开本地项目，以及在 Docker 或 Docker Compose 容器中执行运行配置。"
 ---
 
-OpenIDEA 以两种方式使用容器：
+Prefabric 以两种方式使用容器：
 
 - **开发容器**：整个项目在其 `devcontainer.json` 描述的容器中打开，IDE 后端也运行在容器里。这属于远程开发，和
   [SSH](/zh/guide/remote/ssh) 类似。
@@ -28,7 +28,7 @@ OpenIDEA 以两种方式使用容器：
   <Step title="在本地打开项目">打开包含 `devcontainer.json` 的文件夹，并信任它。</Step>
   <Step title="在容器中重新打开">选择**文件 › 在容器中重新打开**，如有提示再选择**当前窗口**或**新窗口**。</Step>
   <Step title="等待容器就绪">
-    OpenIDEA 会对该文件夹运行 `devcontainer up` 来构建或启动容器，首次构建可能需要一段时间。随后在容器中安装并启动
+    Prefabric 会对该文件夹运行 `devcontainer up` 来构建或启动容器，首次构建可能需要一段时间。随后在容器中安装并启动
     [`openidea-server`](/zh/guide/remote/server)，再打开容器里的项目文件夹。
   </Step>
 </Steps>
@@ -44,7 +44,7 @@ OpenIDEA 以两种方式使用容器：
 - `remoteEnv`：作用于容器内的终端、运行、语言服务器和工具。修改后选择**文件 › 重新加载环境**，新进程即可使用新值。
 - `forwardPorts`：自动转发到本机。需要更多端口时，在**端口**工具窗口中添加，用法与 [SSH 窗口](/zh/guide/remote/ssh#端口转发)相同。
 
-OpenIDEA 安装的语言服务器和调试器会装进容器，位于容器用户的 `~/.openidea/data` 下。
+Prefabric 安装的语言服务器和调试器会装进容器，位于容器用户的 `~/.prefabric/data` 下。
 
 ### 限制
 
