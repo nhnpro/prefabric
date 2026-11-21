@@ -4,19 +4,31 @@
  * direct interpreter invocation for main files. Best effort, IDEA-style.
  */
 import type { RunConfig } from "@/platform/ipc";
+import { jvmModuleDir } from "@/platform/javaLaunch";
 import { djangoLabel, djangoTestsOf, hasDjangoTests } from "./djangoTypes";
+import { inGradleModule } from "./gradleModuleTests";
+import { systemPython } from "./pythonTypes";
 import { phpunitArgs } from "./testing/phpunit";
 import { goTestParts } from "./goArguments";
 import { goBuildType } from "./goTypes";
 import { isWindows } from "./jvmTypes";
+import { withMavenTests } from "./mavenTests";
 import { typeFor } from "./types";
 import { runTemplate } from "./runTemplates";
+import { appendScriptArgs } from "./scriptArgs";
+import { csharpTargets } from "./csharpTargets";
 
 export type FileRole = "test" | "main" | "script" | null;
 
 /** `django`: a Django project, whose default test module is `tests.py` (elsewhere a script). */
 export function fileRole(relPath: string, content?: string, windows = isWindows(), django = false): FileRole {
+  if (/\.cs$/i.test(relPath) && content && csharpTargets(content).some((target) => target.kind === "test"))
+    return "test";
   const name = relPath.split("/").pop() ?? relPath;
+  // A JVM class with a `main` is a runnable program even when its name looks like
+  // a test's (`Test.java`): content decides before the test-name pattern does.
+  if (/\.(kt|java)$/.test(name) && content !== undefined && /\bfun\s+main\s*\(|static\s+void\s+main\s*\(/.test(content))
+    return "main";
   if (
     /\.(test|spec)\.[cm]?[jt]sx?$/.test(name) ||
     /(^|\/)__tests__\//.test(relPath) ||
@@ -26,14 +38,11 @@ export function fileRole(relPath: string, content?: string, windows = isWindows(
     /Test\.php$/.test(name) ||
     /_(spec|test)\.rb$|^test_.*\.rb$/.test(name) ||
     /(Test|Tests|Spec|IT)\.(kt|java|scala|groovy)$/.test(name) ||
-    (/(^|\/)tests\/[^/]+\.rs$/.test(relPath) && name !== "mod.rs") ||
-    /(Test|Tests)\.cs$/.test(name)
+    (/(^|\/)tests\/[^/]+\.rs$/.test(relPath) && name !== "mod.rs")
   )
     return "test";
   if (/(^|\/)src\/main\.rs$|(^|\/)src\/bin\/[^/]+\.rs$/.test(relPath)) return "main";
   if (/\.go$/.test(name) && content !== undefined && /^\s*package\s+main\b/m.test(content)) return "main";
-  if (/\.(kt|java)$/.test(name) && content !== undefined && /\bfun\s+main\s*\(|static\s+void\s+main\s*\(/.test(content))
-    return "main";
   // `static Main`, or `Program.cs` holding top-level statements.
   if (
     /\.cs$/.test(name) &&
@@ -51,6 +60,7 @@ const stem = (p: string) => (p.split("/").pop() ?? p).replace(/\.[^.]+$/, "");
 
 /** Kinds whose test configs can run a file of this extension. */
 function testKinds(relPath: string): string[] {
+  if (/\.cs$/i.test(relPath)) return ["unity-test", "dotnet-test"];
   if (/\.[cm]?[jt]sx?$/.test(relPath)) return ["npm", "deno", "bun"];
   if (/\.py$/.test(relPath)) return ["pytest", "python", "django-test"];
   if (/\.php$/.test(relPath)) return ["phpunit"];
@@ -59,17 +69,13 @@ function testKinds(relPath: string): string[] {
   if (/\.go$/.test(relPath)) return ["go"];
   if (/\.rs$/.test(relPath)) return ["cargo"];
   if (/\.(kt|java|scala|groovy)$/.test(relPath)) return ["gradle", "maven"];
-  if (/\.cs$/.test(relPath)) return ["unity-test", "dotnet-test"];
   return [];
 }
 
 /** The module owning a configuration's targets, relative to the project root. */
 export function configScope(config: RunConfig): string {
-  // A .NET configuration covers its project's folder.
-  if ((config.kind === "dotnet" || config.kind === "dotnet-test") && config.params?.project) {
-    const project = config.params.project.replace(/\\/g, "/");
-    return (/\.\w+proj$/.test(project) ? dirOf(project) : project).replace(/^\.(?:\/|$)/, "").replace(/\/+$/, "");
-  }
+  if (config.kind === "dotnet" || config.kind === "dotnet-test")
+    return dirOf((config.params?.project || "").replace(/\\/g, "/"));
   return (
     config.kind === "go"
       ? (config.params?.module ?? config.module ?? config.cwd ?? "")
@@ -129,7 +135,8 @@ export function projectPython(configs: RunConfig[], relPath?: string): { command
       configs.filter((c) => ["python", "pytest", "django-test"].includes(c.kind)),
       relPath,
     );
-  const py = configs.find((c) => c.kind === "python");
+  // A detected configuration says what the project uses; one made by hand only what it runs itself.
+  const py = configs.find((c) => c.kind === "python" && c.detected) ?? configs.find((c) => c.kind === "python");
   if (py) {
     // The interpreter part ends where the program starts: `-m`, or the script (`manage.py`). What follows
     // (`runserver`, `test`…) belongs to that program, never to the interpreter.
@@ -149,11 +156,6 @@ export function projectPython(configs: RunConfig[], relPath?: string): { command
   if (pytest.args[0] === "run" && pytest.args[1] === "pytest")
     return { command: pytest.command, prefix: ["run", "python"] };
   return null;
-}
-
-/** `python` on Windows (where `python3` is not a command), `python3` elsewhere. */
-function systemPython(): string {
-  return isWindows() ? "python" : "python3";
 }
 
 /**
@@ -223,15 +225,29 @@ export function testBasesFor(relPath: string, configs: RunConfig[]): RunConfig[]
  * File-level test configuration for `relPath` (the closest matching test config,
  * or `base`, narrowed to the file).
  */
-export function testConfigFor(relPath: string, configs: RunConfig[], base?: RunConfig): RunConfig | null {
+export function testConfigFor(
+  relPath: string,
+  configs: RunConfig[],
+  base?: RunConfig,
+  content?: string,
+): RunConfig | null {
   base ??= testBasesFor(relPath, configs)[0];
   if (!base) return null;
   const file = relToCwd(relPath, base);
   switch (base.kind) {
+    case "dotnet-test": {
+      const methods = csharpTargets(content ?? "")
+        .filter((t) => t.kind === "test")
+        .map((t) => t.path.join("."));
+      return methods.length
+        ? derived(base, relPath, {
+            params: { ...base.params, testMethods: JSON.stringify(methods) },
+          })
+        : null;
+    }
     case "npm":
     case "bun": {
-      // `npm run test -- file` works for npm, pnpm, yarn and bun.
-      const args = base.args.includes("--") ? [...base.args, file] : [...base.args, "--", file];
+      const args = appendScriptArgs(base.command, base.args, [file]);
       return derived(base, relPath, { args });
     }
     case "deno":
@@ -270,10 +286,13 @@ export function testConfigFor(relPath: string, configs: RunConfig[], base?: RunC
       const m = /(?:^|\/)tests\/([^/]+)\.rs$/.exec(relPath);
       return m ? derived(base, relPath, { args: [...base.args, "--test", m[1]!] }) : base;
     }
-    case "gradle":
-      return derived(base, relPath, { args: [...base.args, "--tests", `*${stem(relPath)}`] });
+    case "gradle": {
+      // Class and method runs narrow this file configuration, so they inherit its subproject task.
+      const module = inGradleModule(base, jvmModuleDir(relPath, configs));
+      return derived(module, relPath, { args: [...module.args, "--tests", `*${stem(relPath)}`] });
+    }
     case "maven":
-      return derived(base, relPath, { args: [...base.args, `-Dtest=${stem(relPath)}`] });
+      return derived(base, relPath, { args: withMavenTests(base.args, stem(relPath)) });
   }
   return base;
 }
@@ -432,7 +451,7 @@ export function contextConfig(
   windows = isWindows(),
 ): RunConfig | null {
   const role = fileRole(relPath, content, windows, hasDjangoTests(configs));
-  if (role === "test") return testConfigFor(relPath, configs);
+  if (role === "test") return testConfigFor(relPath, configs, undefined, content);
   if (role === "main") return mainConfigFor(relPath, configs) ?? scriptConfigFor(relPath, configs, windows, content);
   if (role === "script") return scriptConfigFor(relPath, configs, windows, content);
   return null;

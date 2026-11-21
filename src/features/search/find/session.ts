@@ -78,12 +78,12 @@ export class FindSession {
     this.update({ ...this.state, stale: true, matchCount: 0, summary: null, error: null }, true);
   }
 
-  /** Starts (or restarts) a search; an empty pattern resets to idle. */
-  async search(query: SearchQuery): Promise<void> {
+  /** Starts (or restarts) a search; missing query or pattern resets to idle. */
+  async search(query: SearchQuery | null): Promise<void> {
     const seq = ++this.seq;
     this.disposed = false;
     this.cancelRunning();
-    if (!query.pattern) {
+    if (!query?.pattern) {
       this.update({ ...IDLE }, true);
       return;
     }
@@ -197,7 +197,8 @@ export function matchRows(files: readonly FileMatches[]): MatchRow[] {
         .filter(([s, e]) => e > s);
       const first = m.ranges[0] ?? [0, 0];
       rows.push({
-        key: `${f.path}:${m.line}`,
+        // A long line comes in several windows: the column tells them apart.
+        key: `${f.path}:${m.line}:${first[0] + m.textOffset}`,
         path: f.path,
         relPath: f.relPath,
         line: m.line,

@@ -67,8 +67,8 @@ describe("Unity tests", () => {
     expect(fed).toHaveLength(2);
   });
 
-  it("reruns tests by their full names, a case by its method", () => {
-    const rerun = testsConfig(config, [["Game.T", "A"], ["Game.T", "Add", "Add(1,2)"], ["Game.U"]], "Rerun");
+  it("reruns tests by their full names, a case by its method", async () => {
+    const rerun = await testsConfig(config, [["Game.T", "A"], ["Game.T", "Add", "Add(1,2)"], ["Game.U"]], "Rerun");
     expect(rerun?.args).toEqual(["Game.T.A", "Game.T.Add", "Game.U"]);
     expect(rerun?.params).toEqual({ assembly: "Game.Tests", mode: "editMode", tests: "Game.T.A Game.T.Add Game.U" });
   });

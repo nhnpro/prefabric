@@ -5,11 +5,12 @@
 
 pub(crate) mod cmake;
 mod dotnet;
+mod zig;
 
 use crate::RunConfig;
 use ide_core::project_roots::expand_members;
 use serde_json::Value as Json;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -43,7 +44,7 @@ pub(crate) fn detect_with_profiles(
                     .iter()
                     .any(|name| dir.join(name).join(PyEnv::bin_dir()).join(PyEnv::python_exe()).is_file())
         },
-        detect_python,
+        |dir, out| detect_python(root, dir, out),
         &mut out,
     );
     detect_projects(
@@ -53,6 +54,18 @@ pub(crate) fn detect_with_profiles(
         &mut out,
     );
     detect_projects_matching(root, ruby_project, detect_ruby, &mut out);
+    detect_projects(root, &["rebar.config"], detect_rebar, &mut out);
+    detect_projects(root, &["mix.exs"], detect_mix, &mut out);
+    // A project's own `build.sbt` belongs to the build above it.
+    detect_projects_matching(
+        root,
+        |dir| {
+            dir.join("build.sbt").is_file()
+                && !dir.ancestors().skip(1).take_while(|a| a.starts_with(root)).any(|a| a.join("build.sbt").is_file())
+        },
+        detect_sbt,
+        &mut out,
+    );
     for dir in ide_core::project_roots::discover(root, &["CMakeLists.txt"]) {
         let start = out.len();
         cmake::detect(&dir, if dir == root { profiles } else { None }, &mut out);
@@ -70,10 +83,12 @@ pub(crate) fn detect_with_profiles(
             }
         }
     }
+    detect_projects(root, &["build.zig"], zig::detect, &mut out);
     dotnet::detect(root, &mut out);
     detect_projects(root, &["Makefile", "makefile", "GNUmakefile"], detect_make, &mut out);
     detect_projects(root, &["justfile", "Justfile", ".justfile"], detect_just, &mut out);
     detect_godot(root, &mut out);
+    detect_projects(root, &["pubspec.yaml"], detect_flutter, &mut out);
     crate::external::detect(root, &mut out);
 
     let mut seen = HashSet::new();
@@ -547,6 +562,23 @@ fn detect_maven(root: &Path, excluded_poms: &[PathBuf], out: &mut Vec<RunConfig>
     }
 }
 
+/// Configurations of the Maven / Gradle builds in `dirs`: the builds a user linked explicitly,
+/// however deep below `root` or outside it (ids and working directory then absolute).
+pub(crate) fn detect_builds(root: &Path, dirs: &[PathBuf]) -> Vec<RunConfig> {
+    let mut out = Vec::new();
+    for dir in dirs {
+        if dir.join("pom.xml").is_file() {
+            detect_maven_build(root, dir, &mut out);
+        }
+        if GRADLE_SETTINGS.iter().chain(GRADLE_BUILDS).any(|name| dir.join(name).is_file()) {
+            detect_gradle_build(root, dir, &mut out);
+        }
+    }
+    let mut seen = HashSet::new();
+    out.retain(|c| seen.insert(c.id.clone()));
+    out
+}
+
 fn detect_maven_build(root: &Path, dir: &Path, out: &mut Vec<RunConfig>) {
     let Some(text) = collect_texts(dir, &["pom.xml"]) else { return };
     let scope = Scope::new(root, dir);
@@ -577,14 +609,15 @@ fn spring_boot_apps(root: &Path, build: &Path, out: &mut Vec<RunConfig>) {
         level = level.iter().flat_map(|d| subdirs(d)).filter(|d| !d.ends_with("src")).collect();
         modules.extend(level.iter().cloned());
     }
-    for module in modules {
-        if !applies_spring_boot(&module) {
+    let mut annotations = BootAnnotations::new(&modules);
+    for module in &modules {
+        if !applies_spring_boot(build, module) {
             continue;
         }
         // A budget per module: a large common library must not starve later app modules.
         let mut budget = SPRING_SCAN_FILES;
-        let module_rel = (module != root).then(|| relative(root, &module).to_string_lossy().replace('\\', "/"));
-        for class in spring_boot_classes(&module, &mut budget) {
+        let module_rel = (module != root).then(|| relative(root, module).to_string_lossy().replace('\\', "/"));
+        for class in spring_boot_classes(module, &mut budget, &mut annotations) {
             let simple = class.rsplit(['.', '$']).next().unwrap_or(&class).to_owned();
             let id = match &module_rel {
                 Some(m) => format!("application:{m}:{class}"),
@@ -598,28 +631,177 @@ fn spring_boot_apps(root: &Path, build: &Path, out: &mut Vec<RunConfig>) {
     }
 }
 
-/// The module's own build applies the Spring Boot plugin, and it has main sources.
-fn applies_spring_boot(module: &Path) -> bool {
+/// The module has main sources and Spring Boot on its classpath, as far as its build files
+/// tell: its own build, or a build above it in `build` that hands Spring Boot to its modules,
+/// references it (a dependency, the starter parent, the BOM or the plugin). A Maven module that
+/// depends on Spring Boot through a parent or another module is a Spring Boot application even
+/// without the packaging plugin; only `<pluginManagement>` alone doesn't count.
+fn applies_spring_boot(build: &Path, module: &Path) -> bool {
     if !["java", "kotlin"].iter().any(|l| module.join("src/main").join(l).is_dir()) {
         return false;
     }
     if let Some(pom) = read(&module.join("pom.xml")) {
-        return pom.contains("spring-boot-maven-plugin") && !pom.contains("<packaging>pom</packaging>");
+        if pom.contains("<packaging>pom</packaging>") {
+            return false;
+        }
+        if references_spring_boot(&without_plugin_management(&pom)) {
+            return true;
+        }
+    } else if GRADLE_BUILDS
+        .iter()
+        .filter_map(|n| read(&module.join(n)))
+        .any(|text| applies_boot_gradle_plugin(&text) || text.contains("org.springframework.boot:"))
+    {
+        return true;
     }
-    GRADLE_BUILDS.iter().filter_map(|n| read(&module.join(n))).any(|text| {
-        text.lines().any(|l| {
-            let l = l.split("//").next().unwrap_or_default();
-            // The plugin id (`id("org.springframework.boot")`), not a dependency (`org.springframework.boot:…`).
-            ["org.springframework.boot\"", "org.springframework.boot'"].iter().any(|p| l.contains(p))
-                && !l.contains("apply false")
+    module.ancestors().skip(1).take_while(|dir| dir.starts_with(build)).any(|dir| {
+        if let Some(pom) = read(&dir.join("pom.xml")) {
+            return references_spring_boot(&without_plugin_management(&pom));
+        }
+        GRADLE_BUILDS.iter().filter_map(|n| read(&dir.join(n))).any(|text| {
+            (text.contains("subprojects") || text.contains("allprojects")) && applies_boot_gradle_plugin(&text)
         })
     })
 }
 
-/// Binary names of the `@SpringBootApplication` classes with a `main` under
+/// A POM (without its `<pluginManagement>`) referencing Spring Boot: a dependency or the parent
+/// (`org.springframework.boot`), a starter, the BOM import or the plugin.
+fn references_spring_boot(pom: &str) -> bool {
+    ["org.springframework.boot", "spring-boot-starter", "spring-boot-dependencies", "spring-boot-maven-plugin"]
+        .iter()
+        .any(|m| pom.contains(m))
+}
+
+/// A Gradle build applying the plugin (`id("org.springframework.boot")`, `apply plugin: '…'`),
+/// not only depending on Spring Boot (`org.springframework.boot:…`).
+fn applies_boot_gradle_plugin(text: &str) -> bool {
+    text.lines().any(|l| {
+        let l = l.split("//").next().unwrap_or_default();
+        ["org.springframework.boot\"", "org.springframework.boot'"].iter().any(|p| l.contains(p))
+            && !l.contains("apply false")
+    })
+}
+
+/// A POM without its `<pluginManagement>` sections, which configure plugins without applying them.
+fn without_plugin_management(pom: &str) -> String {
+    let mut out = String::with_capacity(pom.len());
+    let mut rest = pom;
+    while let Some(at) = rest.find("<pluginManagement>") {
+        out.push_str(&rest[..at]);
+        let Some(end) = rest[at..].find("</pluginManagement>") else { return out };
+        rest = &rest[at + end + "</pluginManagement>".len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Annotations that mark a Spring Boot application class: `@SpringBootApplication`,
+/// `@SpringCloudApplication`, and the project's own annotations meta-annotated with either.
+struct BootAnnotations {
+    /// `src/main/{java,kotlin}` of every module, where a project annotation is looked up.
+    roots: Vec<PathBuf>,
+    known: HashMap<String, bool>,
+}
+
+const BOOT_ANNOTATIONS: [&str; 2] = ["SpringBootApplication", "SpringCloudApplication"];
+
+impl BootAnnotations {
+    fn new(modules: &[PathBuf]) -> Self {
+        let roots = modules
+            .iter()
+            .flat_map(|m| ["java", "kotlin"].map(|l| m.join("src/main").join(l)))
+            .filter(|d| d.is_dir())
+            .collect();
+        Self { roots, known: HashMap::new() }
+    }
+
+    /// Whether `@name`, as written in a file of `package` with `imports`, marks an application.
+    fn marks_application(&mut self, name: &str, package: Option<&str>, imports: &[&str]) -> bool {
+        let simple = name.rsplit('.').next().unwrap_or(name);
+        if BOOT_ANNOTATIONS.contains(&simple) {
+            return true;
+        }
+        let qualified = if name.contains('.') {
+            name.to_owned()
+        } else if let Some(import) = imports.iter().find(|i| i.rsplit('.').next() == Some(name)) {
+            (*import).to_owned()
+        } else {
+            match package {
+                Some(p) => format!("{p}.{name}"),
+                None => name.to_owned(),
+            }
+        };
+        if qualified.starts_with("org.springframework.") {
+            return false;
+        }
+        if let Some(&known) = self.known.get(&qualified) {
+            return known;
+        }
+        // Not yet known: no cycle through an annotation that names itself.
+        self.known.insert(qualified.clone(), false);
+        let found = self.declares_boot_annotation(&qualified);
+        self.known.insert(qualified, found);
+        found
+    }
+
+    /// The project declares annotation `qualified` and annotates it as an application.
+    fn declares_boot_annotation(&mut self, qualified: &str) -> bool {
+        let path = qualified.replace('.', "/");
+        let simple = qualified.rsplit('.').next().unwrap_or(qualified);
+        let source = self
+            .roots
+            .iter()
+            .flat_map(|r| ["java", "kt"].map(|x| r.join(format!("{path}.{x}"))))
+            .find_map(|f| read(&f));
+        let Some(src) = source else { return false };
+        let code = strip_line_comments(&src);
+        let Some(decl) = [format!("@interface {simple}"), format!("annotation class {simple}")]
+            .iter()
+            .find_map(|d| code.find(d.as_str()))
+        else {
+            return false;
+        };
+        let (package, imports) = package_and_imports(&code);
+        annotations_in(&code[..decl]).iter().any(|a| self.marks_application(a, package.as_deref(), &imports))
+    }
+}
+
+fn strip_line_comments(src: &str) -> String {
+    src.lines().map(|l| l.split("//").next().unwrap_or_default()).collect::<Vec<_>>().join("\n")
+}
+
+fn package_and_imports(code: &str) -> (Option<String>, Vec<&str>) {
+    let package = code
+        .lines()
+        .map(str::trim)
+        .find_map(|l| l.strip_prefix("package "))
+        .map(|p| p.trim_end_matches(';').trim().to_owned())
+        .filter(|p| !p.is_empty());
+    let imports = code
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("import "))
+        .map(|i| i.trim_end_matches(';').trim())
+        .filter(|i| !i.starts_with("static ") && !i.ends_with('*'))
+        .collect();
+    (package, imports)
+}
+
+/// Names of the annotations in `code` (`@Foo`, `@a.b.Foo(…)`), in order; `@interface` excluded.
+fn annotations_in(code: &str) -> Vec<&str> {
+    code.match_indices('@')
+        .filter_map(|(at, _)| {
+            let rest = &code[at + 1..];
+            let len = rest.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.')).unwrap_or(rest.len());
+            let name = rest[..len].trim_end_matches('.');
+            (!name.is_empty() && name != "interface" && !name.starts_with("file:")).then_some(name)
+        })
+        .collect()
+}
+
+/// Binary names of the Spring Boot application classes with a `main` under
 /// `src/main/{java,kotlin}`, from the shallowest packages that declare one (the
 /// application class sits in the root package of the code it scans).
-fn spring_boot_classes(module: &Path, budget: &mut usize) -> Vec<String> {
+fn spring_boot_classes(module: &Path, budget: &mut usize, annotations: &mut BootAnnotations) -> Vec<String> {
     let mut found = Vec::new();
     let mut level: Vec<PathBuf> =
         ["java", "kotlin"].iter().map(|l| module.join("src/main").join(l)).filter(|d| d.is_dir()).collect();
@@ -647,7 +829,7 @@ fn spring_boot_classes(module: &Path, budget: &mut usize) -> Vec<String> {
                 if fs::metadata(&file).is_ok_and(|m| m.len() > 256 * 1024) {
                     continue;
                 }
-                if let Some(class) = read(&file).and_then(|src| spring_boot_class(&src, &file)) {
+                if let Some(class) = read(&file).and_then(|src| spring_boot_class(&src, &file, annotations)) {
                     found.push(class);
                 }
             }
@@ -658,40 +840,34 @@ fn spring_boot_classes(module: &Path, budget: &mut usize) -> Vec<String> {
     found
 }
 
-/// The class to launch for a source file declaring a `@SpringBootApplication` with a `main`.
-pub(crate) fn spring_boot_class(src: &str, file: &Path) -> Option<String> {
-    let code: Vec<&str> = src.lines().map(|l| l.split("//").next().unwrap_or_default()).collect();
-    let code = code.join("\n");
-    let at = code.find("@SpringBootApplication")?;
-    let package = code
-        .lines()
-        .map(str::trim)
-        .find_map(|l| l.strip_prefix("package "))
-        .map(|p| p.trim_end_matches(';').trim().to_owned())
-        .filter(|p| !p.is_empty());
+/// The class to launch for a source file declaring a Spring Boot application class with a `main`.
+fn spring_boot_class(src: &str, file: &Path, annotations: &mut BootAnnotations) -> Option<String> {
+    let code = strip_line_comments(src);
+    let (package, imports) = package_and_imports(&code);
     let qualify = |name: &str| match &package {
         Some(p) => format!("{p}.{name}"),
         None => name.to_owned(),
     };
-    if file.extension().is_some_and(|x| x == "kt") {
-        // A top-level `fun main` compiles into the file facade (`AppKt`, or `@file:JvmName`).
-        if code.lines().any(|l| l.starts_with("fun main(")) {
-            let jvm_name = code
-                .lines()
-                .find_map(|l| l.trim().strip_prefix("@file:JvmName(")?.split('"').nth(1).map(str::to_owned));
-            let facade = jvm_name.unwrap_or_else(|| {
-                let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                let mut chars = stem.chars();
-                let upper: String = chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default();
-                format!("{upper}Kt")
-            });
-            return Some(qualify(&facade));
-        }
-        if !code.contains("fun main(") {
-            return None;
-        }
-    } else if !code.contains("void main(") {
+    let kotlin = file.extension().is_some_and(|x| x == "kt");
+    if !(if kotlin { code.contains("fun main(") } else { code.contains("void main(") }) {
         return None;
+    }
+    // The annotation right before a class declaration: `@SpringBootApplication` or one carrying it.
+    let at = annotations_in(&code)
+        .into_iter()
+        .find(|a| !a.starts_with("file:") && annotations.marks_application(a, package.as_deref(), &imports))?;
+    let at = code.find(&format!("@{at}"))?;
+    if kotlin && code.lines().any(|l| l.starts_with("fun main(")) {
+        // A top-level `fun main` compiles into the file facade (`AppKt`, or `@file:JvmName`).
+        let jvm_name =
+            code.lines().find_map(|l| l.trim().strip_prefix("@file:JvmName(")?.split('"').nth(1).map(str::to_owned));
+        let facade = jvm_name.unwrap_or_else(|| {
+            let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let mut chars = stem.chars();
+            let upper: String = chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default();
+            format!("{upper}Kt")
+        });
+        return Some(qualify(&facade));
     }
     let name: String = code[at..]
         .split_whitespace()
@@ -804,6 +980,25 @@ impl PyEnv {
         }
         if let Some(env) = Self::pixi_env(root) {
             return Self::Pixi(env);
+        }
+        Self::System
+    }
+
+    /// [`PyEnv::detect`] of `dir`, else of the first of its parents up to `top` that has an
+    /// environment: a Django project in `src/` uses the virtualenv or lock file next to it.
+    /// Paths stay relative to `dir`.
+    fn detect_within(top: &Path, dir: &Path) -> Self {
+        for (up, base) in dir.ancestors().enumerate() {
+            if !base.starts_with(top) {
+                break;
+            }
+            let parent = "../".repeat(up);
+            match Self::detect(base) {
+                Self::System => {}
+                Self::Venv(v) => return Self::Venv(format!("{parent}{v}")),
+                Self::Pixi(v) => return Self::Pixi(format!("{parent}{v}")),
+                runner => return runner,
+            }
         }
         Self::System
     }
@@ -929,9 +1124,10 @@ fn uses_pytest(root: &Path) -> bool {
         .any(|f| read(&root.join(f)).is_some_and(|s| s.contains("pytest")))
 }
 
-fn detect_python(root: &Path, out: &mut Vec<RunConfig>) {
+/// Python configurations of the project at `root`, a folder of the opened project `top`.
+fn detect_python(top: &Path, root: &Path, out: &mut Vec<RunConfig>) {
     let markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "pytest.ini", "tox.ini", "manage.py"];
-    let env = PyEnv::detect(root);
+    let env = PyEnv::detect_within(top, root);
     // A project virtualenv or pixi environment marks a Python project too
     // (scripts + tests without packaging files).
     let venv = matches!(env, PyEnv::Venv(_) | PyEnv::Pixi(_));
@@ -968,7 +1164,10 @@ fn detect_python(root: &Path, out: &mut Vec<RunConfig>) {
             &["-m", &m],
         ));
     }
-    if uses_pytest(root) || env.has_tool(root, "pytest") {
+    // Only an environment of the folder itself makes it a pytest project: one borrowed from a
+    // parent would give every folder with a `requirements.txt` its own pytest run.
+    let own_pytest = matches!(env, PyEnv::Venv(ref v) if !v.starts_with("../")) && env.has_tool(root, "pytest");
+    if uses_pytest(root) || own_pytest {
         out.push(py_config("pytest".into(), "pytest".into(), "pytest", env.tool(root, "pytest"), &[]).test());
     }
     // After pytest: a project set up for pytest (pytest-django) keeps it as the default test runner.
@@ -1168,6 +1367,7 @@ fn detect_ruby(root: &Path, out: &mut Vec<RunConfig>) {
             ("ruby".into(), Vec::new()),
             &["bin/rails", "server"],
         );
+        c = c.debug("rdbg");
         c.extras.folder = Some("Rails".into());
         out.push(c);
     }
@@ -1180,12 +1380,15 @@ fn detect_ruby(root: &Path, out: &mut Vec<RunConfig>) {
             if task == "test" || task == "spec" || task.ends_with(":test") || task.ends_with(":spec") {
                 c = c.test();
             }
+            c = c.debug("rdbg");
             c.extras.folder = Some("Rake".into());
             out.push(c);
         }
     }
     if uses_rspec(root) {
-        out.push(ruby_config("rspec".into(), "rspec".into(), "rspec", ruby_tool(root, "rspec"), &[]).test());
+        out.push(
+            ruby_config("rspec".into(), "rspec".into(), "rspec", ruby_tool(root, "rspec"), &[]).test().debug("rdbg"),
+        );
     } else if root.join("test").is_dir() && !out.iter().any(|c| c.id == "rake:test") {
         // Minitest / Test::Unit without a `test` Rake task: load every test file under `test/`.
         let mut args = Vec::new();
@@ -1196,7 +1399,11 @@ fn detect_ruby(root: &Path, out: &mut Vec<RunConfig>) {
         }
         args.extend(["-e".to_owned(), MINITEST_RUNNER.to_owned(), "test".to_owned()]);
         let extra: Vec<&str> = args.iter().map(String::as_str).collect();
-        out.push(ruby_config("minitest".into(), "minitest".into(), "ruby", ruby_tool(root, "ruby"), &extra).test());
+        out.push(
+            ruby_config("minitest".into(), "minitest".into(), "ruby", ruby_tool(root, "ruby"), &extra)
+                .test()
+                .debug("rdbg"),
+        );
     }
 }
 
@@ -1295,6 +1502,46 @@ pub(crate) fn just_recipes(src: &str) -> Vec<String> {
 
 // ---------------------------------------------------------------- godot
 
+// ---------------------------------------------------------------- rebar3 / mix
+
+/// rebar3 (Erlang): the shell with the applications started, the EUnit tests and, with
+/// `*_SUITE.erl` suites, Common Test. A `rebar3` script in the project wins over the PATH.
+fn detect_rebar(root: &Path, out: &mut Vec<RunConfig>) {
+    let rebar = wrapper(root, "rebar3", "rebar3.cmd", "rebar3");
+    out.push(config("rebar3:shell", "rebar3 shell", "rebar3", &rebar, &["shell"]));
+    out.push(config("rebar3:eunit", "rebar3 eunit", "rebar3", &rebar, &["eunit"]).test());
+    let suites = |dir: &Path| {
+        fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().ends_with("_SUITE.erl"))
+    };
+    let mut apps = subdirs(&root.join("apps")).into_iter().chain(subdirs(&root.join("lib")));
+    if suites(&root.join("test")) || apps.any(|app| suites(&app.join("test"))) {
+        out.push(config("rebar3:ct", "rebar3 ct", "rebar3", &rebar, &["ct"]).test());
+    }
+}
+
+/// Mix (Elixir): the application in IEx (`phx.server` for Phoenix) and its ExUnit tests.
+fn detect_mix(root: &Path, out: &mut Vec<RunConfig>) {
+    let phoenix = read(&root.join("mix.exs")).is_some_and(|src| src.contains("{:phoenix,"));
+    if phoenix {
+        out.push(config("mix:phx.server", "iex -S mix phx.server", "mix", "iex", &["-S", "mix", "phx.server"]));
+    } else {
+        out.push(config("mix:iex", "iex -S mix", "mix", "iex", &["-S", "mix"]));
+    }
+    out.push(config("mix:test", "mix test", "mix", "mix", &["test"]).test());
+}
+
+/// sbt (Scala): `sbt run` and `sbt test` on the build's root project, with the build's
+/// own launcher script when it has one. Other tasks run from the sbt tool window.
+fn detect_sbt(root: &Path, out: &mut Vec<RunConfig>) {
+    let sbt = wrapper(root, "sbt", "sbt.bat", "sbt");
+    out.push(config("sbt:run", "sbt run", "sbt", &sbt, &["run"]));
+    out.push(config("sbt:test", "sbt test", "sbt", &sbt, &["test"]).test());
+}
+
 /// Godot projects (`project.godot`) at the root or one level down: "Godot Project"
 /// runs the main scene (`godot --path .`), debuggable through the editor's adapter.
 fn detect_godot(root: &Path, out: &mut Vec<RunConfig>) {
@@ -1310,6 +1557,17 @@ fn detect_godot(root: &Path, out: &mut Vec<RunConfig>) {
             (format!("godot:project:{r}"), format!("Godot Project ({r})"), Some(rel.clone()))
         };
         out.push(config(id, name, "godot", "godot", &["--path", "."]).debug("godot").in_dir(cwd));
+    }
+}
+
+/// A Flutter app: depends on the SDK and has the conventional entry point (packages have none).
+fn detect_flutter(root: &Path, out: &mut Vec<RunConfig>) {
+    if root.join("lib/main.dart").is_file()
+        && read(&root.join("pubspec.yaml")).is_some_and(|pubspec| pubspec.contains("sdk: flutter"))
+    {
+        out.push(
+            config("flutter:run", "flutter run", "flutter", "flutter", &["run", "-t", "lib/main.dart"]).debug("dart"),
+        );
     }
 }
 

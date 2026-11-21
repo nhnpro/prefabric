@@ -1,12 +1,17 @@
 //! Interpreters / toolchains (`ide-sdk`): discovery, Python virtualenvs and packages.
 use crate::Host;
 use crate::ops::Channel;
-use crate::rpc::Dispatcher;
+use ide_command::command;
 
 use ide_core::{IdeError, IdeResult, RequestId};
 use ide_sdk::python::PythonPackage;
 use ide_sdk::{Sdk, SdkKind};
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub mod container_python;
+pub use container_python::{ContainerPython, sdk_container_python, sdk_container_python_refresh};
 
 fn join_err(e: impl std::fmt::Display) -> IdeError {
     IdeError::internal(e.to_string())
@@ -20,10 +25,22 @@ pub struct LocatedTools {
     pub compile_dir: ide_core::IpcPath,
 }
 
+/// An interpreter another project uses: the project root and the SDK itself.
+#[derive(Clone, Debug, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInterpreter {
+    pub project: ide_core::IpcPath,
+    pub sdk: Sdk,
+}
+
 /// Installed interpreters / toolchains of `kind`; project-local ones first.
+#[command(trust = outside_restricted)]
 pub async fn sdk_detect(host: &Host, window: &str, kind: SdkKind) -> IdeResult<Vec<Sdk>> {
-    host.require_trust(window)?;
+    host.require_trust_if_project(window)?;
     let project = host.project(window).ok();
+    if kind == SdkKind::Jdk {
+        host.apply_added_jdks();
+    }
     let root = project.as_ref().map(|p| p.root.clone());
     // The interpreter the project uses is a choice even where detection doesn't look (a
     // virtualenv in a subfolder, one picked by path), so it shows by name and version.
@@ -45,9 +62,58 @@ pub async fn sdk_detect(host: &Host, window: &str, kind: SdkKind) -> IdeResult<V
     .map_err(join_err)
 }
 
+/// The Python interpreters of the recently opened projects, each with its project.
+#[command(trust = outside_restricted)]
+pub async fn sdk_python_project_interpreters(host: &Host, window: &str) -> IdeResult<Vec<ProjectInterpreter>> {
+    // Newest first. The open project is skipped: `sdk_detect` lists its own.
+    host.require_trust_if_project(window)?;
+    let current = host.project(window).ok().map(|p| p.root.clone());
+    let config = host.config_dir.clone();
+    // Probing runs the project's interpreter (and its settings may name any program): only
+    // projects trusted in their own right, not ones last opened in Restricted Mode.
+    let roots: Vec<PathBuf> = ide_workspace::RecentProjects::load(&config)
+        .list()
+        .into_iter()
+        .map(|p| p.path.into_path_buf())
+        .filter(|root| current.as_deref() != Some(root.as_path()))
+        .filter(|root| host.trust.window_trusted(root).unwrap_or(false))
+        .collect();
+    tokio::task::spawn_blocking(move || {
+        // Each project resolves its configured interpreter, else its own virtualenv. The
+        // probes run `python`, so keep them off the async runtime and bound how many run at
+        // once: the recent list can hold ~30 projects, and each probe starts a process.
+        const PROBES: usize = 4;
+        let results = Mutex::new(Vec::with_capacity(roots.len()));
+        let next = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..roots.len().min(PROBES) {
+                scope.spawn(|| {
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(root) = roots.get(index) else { break };
+                        let settings = ide_workspace::SettingsStore::load(&config, Some(root)).effective();
+                        let Some(python) = ide_sdk::apply::python_interpreter(root, &settings) else { continue };
+                        let Some(sdk) = ide_sdk::python_interpreter_sdk(&python, Some(root)) else { continue };
+                        results
+                            .lock()
+                            .unwrap()
+                            .push((index, ProjectInterpreter { project: root.as_path().into(), sdk }));
+                    }
+                });
+            }
+        });
+        let mut found = results.into_inner().unwrap();
+        found.sort_by_key(|(index, _)| *index);
+        found.into_iter().map(|(_, interpreter)| interpreter).collect()
+    })
+    .await
+    .map_err(join_err)
+}
+
 /// An existing Python executable or virtualenv folder as an SDK; `None` if Python cannot run.
+#[command(trust = outside_restricted)]
 pub async fn sdk_python_interpreter(host: &Host, window: &str, path: PathBuf) -> IdeResult<Option<Sdk>> {
-    host.require_trust(window)?;
+    host.require_trust_if_project(window)?;
     let root = host.project(window).ok().map(|p| p.root.clone());
     tokio::task::spawn_blocking(move || Ok(ide_sdk::python_interpreter_sdk(&path, root.as_deref())))
         .await
@@ -55,24 +121,43 @@ pub async fn sdk_python_interpreter(host: &Host, window: &str, path: PathBuf) ->
 }
 
 /// The interpreter the project uses: the configured one, else its virtualenv.
-pub fn sdk_python_effective(host: &Host, window: &str, near: Option<PathBuf>) -> IdeResult<Option<ide_core::IpcPath>> {
+#[command(trust = trusted)]
+pub async fn sdk_python_effective(
+    host: &Host,
+    window: &str,
+    near: Option<PathBuf>,
+) -> IdeResult<Option<ide_core::IpcPath>> {
     host.require_trust(window)?;
     let project = host.project(window)?;
-    let member = ide_workspace::workspace::Workspace::load(&project.root)?.and_then(|w| {
-        let near = near.as_deref()?;
-        w.projects.into_iter().filter(|root| near.starts_with(root)).max_by_key(|root| root.components().count())
-    });
-    let (root, settings) = match member {
-        Some(root) => {
-            let settings = ide_workspace::SettingsStore::load(&host.config_dir, Some(&root)).effective();
-            (root, settings)
-        }
-        None => (project.root.clone(), project.settings.effective()),
-    };
-    Ok(ide_sdk::apply::python_interpreter_near(&root, near.as_deref(), &settings).map(Into::into))
+    let (config_dir, project_root) = (host.config_dir.clone(), project.root.clone());
+    // Loading a member's settings needs more stack than a sync command's main thread has left.
+    tokio::task::spawn_blocking(move || {
+        let member = ide_workspace::workspace::Workspace::load(&project_root).ok().flatten().and_then(|w| {
+            let near = near.as_deref()?;
+            w.projects.into_iter().filter(|root| near.starts_with(root)).max_by_key(|root| root.components().count())
+        });
+        let (root, settings) = match member {
+            Some(root) => {
+                let settings = ide_workspace::SettingsStore::load(&config_dir, Some(&root)).effective();
+                (root, settings)
+            }
+            None => (project_root.clone(), project.settings.effective()),
+        };
+        // A member with no Python of its own falls back to the primary project's
+        // (the same chain run configurations use), so every answer names one interpreter.
+        let interpreter = ide_sdk::apply::python_interpreter_near(&root, near.as_deref(), &settings).or_else(|| {
+            (root != project_root)
+                .then(|| ide_sdk::apply::python_interpreter(&project_root, &project.settings.effective()))
+                .flatten()
+        });
+        Ok(interpreter.map(Into::into))
+    })
+    .await
+    .map_err(join_err)?
 }
 
 /// The PHP interpreter chosen in Settings › Languages & Frameworks › PHP; `None`: the `php` on `PATH`.
+#[command(trust = trusted)]
 pub fn sdk_php_effective(host: &Host, window: &str) -> IdeResult<Option<ide_core::IpcPath>> {
     host.require_trust(window)?;
     let project = host.project(window)?;
@@ -82,6 +167,7 @@ pub fn sdk_php_effective(host: &Host, window: &str) -> IdeResult<Option<ide_core
 
 /// The version of the PHP interpreter `php` and of the Xdebug it loads, run in `cwd` (default: the
 /// project root).
+#[command(trust = trusted)]
 pub async fn sdk_php_xdebug(
     host: &Host,
     window: &str,
@@ -107,6 +193,8 @@ pub struct PhpLanguageLevels {
     pub member: Option<ide_core::IpcPath>,
 }
 
+/// The PHP language level of the project `path` belongs to: the effective one and Auto's.
+#[command(trust = trusted)]
 pub async fn sdk_php_language_level(host: &Host, window: &str, path: PathBuf) -> IdeResult<PhpLanguageLevels> {
     let project = host.project(window)?;
     let (project_root, project_settings) = (project.root.clone(), project.settings.effective());
@@ -137,12 +225,14 @@ pub struct ComposerInstallState {
     pub reason: ide_sdk::php::ComposerInstall,
 }
 
-/// `None` in an untrusted project too: `composer install` runs the project's scripts.
+/// The Composer project `path` belongs to, when its dependencies need `composer install`.
+#[command(trust = trusted)]
 pub async fn sdk_php_composer_install(
     host: &Host,
     window: &str,
     path: PathBuf,
 ) -> IdeResult<Option<ComposerInstallState>> {
+    // `None` in an untrusted project too: `composer install` runs the project's scripts.
     let project = host.project(window)?;
     if !project.is_trusted() {
         return Ok(None);
@@ -158,6 +248,7 @@ pub async fn sdk_php_composer_install(
 
 /// SDK / library source folders shown under "External Libraries" in the Project view,
 /// with the Maven / Gradle dependency jars of the build model.
+#[command(trust = trusted)]
 pub async fn sdk_project_libraries(
     host: &Host,
     window: &str,
@@ -168,12 +259,17 @@ pub async fn sdk_project_libraries(
     let project = host.project(window)?;
     let (root, cache, settings) = (project.root.clone(), project.build_cache_dir(), project.settings.effective());
     let cancel = host.begin_project_request(window, request);
+    let container = container_python::library_group(host, &root, &settings);
     let libraries = {
         let (root, settings, cancel, on_groups) = (root.clone(), settings.clone(), cancel.clone(), on_groups.clone());
         tokio::task::spawn_blocking(move || {
-            ide_sdk::libraries::project_libraries_stream(&root, &settings, &[], &cancel, &|groups| {
+            if let Some(group) = &container {
+                let _ = on_groups.send(vec![group.clone()]);
+            }
+            let groups = ide_sdk::libraries::project_libraries_stream(&root, &settings, &[], &cancel, &|groups| {
                 let _ = on_groups.send(groups);
-            })
+            });
+            container.into_iter().chain(groups).collect::<Vec<_>>()
         })
     };
     let dependencies = {
@@ -207,10 +303,17 @@ pub async fn sdk_project_libraries(
     if cancel.is_cancelled() {
         return Err(IdeError::cancelled());
     }
-    Ok(ide_sdk::libraries::merge_groups([libraries.map_err(join_err)?, dependencies.map_err(join_err)?].concat()))
+    let groups =
+        ide_sdk::libraries::merge_groups([libraries.map_err(join_err)?, dependencies.map_err(join_err)?].concat());
+    if host.project(window).is_ok_and(|current| std::sync::Arc::ptr_eq(&current, &project)) {
+        host.mcp_reports
+            .set_libraries(window, groups.iter().flat_map(|g| g.roots.iter().map(|r| r.path.0.clone())).collect());
+    }
+    Ok(groups)
 }
 
 /// Looks up `names` (bare command names): `node_modules/.bin` above `near`, then the search path.
+#[command(trust = trusted)]
 pub async fn sdk_locate_tools(
     host: &Host,
     window: &str,
@@ -227,6 +330,7 @@ pub async fn sdk_locate_tools(
 }
 
 /// Creates a Python environment with `tool` (`venv` / `uv` / `poetry`); output streams through `on_output`.
+#[command(trust = outside_restricted)]
 pub async fn sdk_python_create_venv(
     host: &Host,
     window: &str,
@@ -236,7 +340,7 @@ pub async fn sdk_python_create_venv(
     request: RequestId,
     on_output: Channel<String>,
 ) -> IdeResult<Sdk> {
-    host.require_trust(window)?;
+    host.require_trust_if_project(window)?;
     let cancel = host.begin_project_request(window, request);
     let result = tokio::task::spawn_blocking(move || {
         ide_sdk::python::create_venv(tool, &base, &location, &cancel, &|line| {
@@ -249,13 +353,14 @@ pub async fn sdk_python_create_venv(
     result?
 }
 
+#[command(trust = outside_restricted)]
 pub async fn sdk_python_packages(
     host: &Host,
     window: &str,
     python: PathBuf,
     request: RequestId,
 ) -> IdeResult<Vec<PythonPackage>> {
-    host.require_trust(window)?;
+    host.require_trust_if_project(window)?;
     let cancel = host.begin_project_request(window, request);
     let result =
         tokio::task::spawn_blocking(move || ide_sdk::python::list_packages(&python, &cancel)).await.map_err(join_err);
@@ -265,6 +370,7 @@ pub async fn sdk_python_packages(
 
 /// Installs (`uninstall = false`) or removes a package; output streams through `on_output`.
 #[allow(clippy::too_many_arguments)]
+#[command(trust = outside_restricted)]
 pub async fn sdk_python_pip(
     host: &Host,
     window: &str,
@@ -275,7 +381,7 @@ pub async fn sdk_python_pip(
     request: RequestId,
     on_output: Channel<String>,
 ) -> IdeResult<()> {
-    host.require_trust(window)?;
+    host.require_trust_if_project(window)?;
     let project_root = host.project(window).ok().map(|p| p.root.clone());
     let cancel = host.begin_project_request(window, request);
     let result = tokio::task::spawn_blocking(move || {
@@ -294,58 +400,15 @@ pub async fn sdk_python_pip(
     result?
 }
 
-/// Commands of this module the remote server answers.
-pub(crate) fn register(d: &mut Dispatcher) {
-    d.add("sdk_detect", |c| async move { sdk_detect(&c.host, &c.window, c.arg("kind")?).await });
-    d.add(
-        "sdk_python_interpreter",
-        |c| async move { sdk_python_interpreter(&c.host, &c.window, c.arg("path")?).await },
-    );
-    d.add("sdk_python_effective", |c| async move { sdk_python_effective(&c.host, &c.window, c.arg("near")?) });
-    d.add("sdk_php_effective", |c| async move { sdk_php_effective(&c.host, &c.window) });
-    d.add("sdk_php_xdebug", |c| async move { sdk_php_xdebug(&c.host, &c.window, c.arg("php")?, c.arg("cwd")?).await });
-    d.add(
-        "sdk_php_language_level",
-        |c| async move { sdk_php_language_level(&c.host, &c.window, c.arg("path")?).await },
-    );
-    d.add(
-        "sdk_php_composer_install",
-        |c| async move { sdk_php_composer_install(&c.host, &c.window, c.arg("path")?).await },
-    );
-    d.add("sdk_project_libraries", |c| async move {
-        sdk_project_libraries(&c.host, &c.window, c.arg("request")?, c.sender("onGroups")?).await
-    });
-    d.add("sdk_locate_tools", |c| async move {
-        sdk_locate_tools(&c.host, &c.window, c.arg("names")?, c.arg("near")?).await
-    });
-    d.add("sdk_python_create_venv", |c| async move {
-        sdk_python_create_venv(
-            &c.host,
-            &c.window,
-            c.arg("tool")?,
-            c.arg("base")?,
-            c.arg("location")?,
-            c.arg("request")?,
-            c.sender("onOutput")?,
-        )
-        .await
-    });
-    d.add("sdk_python_packages", |c| async move {
-        sdk_python_packages(&c.host, &c.window, c.arg("python")?, c.arg("request")?).await
-    });
-    d.add("sdk_python_pip", |c| async move {
-        sdk_python_pip(
-            &c.host,
-            &c.window,
-            c.arg("python")?,
-            c.arg("requirement")?,
-            c.arg("uninstall")?,
-            c.arg("upgrade")?,
-            c.arg("request")?,
-            c.sender("onOutput")?,
-        )
-        .await
-    });
+/// The JDK whose home is `path`, as the SDK list shows it; `None` when it is no JDK home.
+#[command(trust = trusted)]
+pub async fn sdk_jdk_at(path: String) -> IdeResult<Option<Sdk>> {
+    // A macOS bundle too (Add JDK from Disk…).
+    tokio::task::spawn_blocking(move || {
+        ide_sdk::java::jdk_at(std::path::Path::new(&path)).map(|j| ide_sdk::jdk_sdk(&j))
+    })
+    .await
+    .map_err(join_err)
 }
 
 #[cfg(all(test, unix))]
@@ -408,8 +471,75 @@ mod tests {
         host.open_project("main", &root).unwrap();
         let detected = sdk_detect(&host, "main", SdkKind::Python).await.unwrap();
         assert!(detected.iter().any(|s| s.path == sdk.path && s.name == sdk.name));
-        assert_eq!(sdk_python_effective(&host, "main", None).unwrap(), Some(sdk.path));
+        assert_eq!(sdk_python_effective(&host, "main", None).await.unwrap(), Some(sdk.path));
         assert!(sdk_python_interpreter(&host, "main", root.join("README.md")).await.unwrap().is_none());
         host.close_project("main");
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn another_projects_interpreter_is_listed_with_its_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(temp.path()).unwrap();
+        let root = base.join("project");
+        let other = base.join("shop");
+        std::fs::create_dir_all(other.join(".openidea")).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        let python = fake_venv(&other, ".venv");
+        std::fs::write(
+            other.join(".openidea/settings.toml"),
+            "[languages.python]\ninterpreter = \".venv/bin/python\"\n",
+        )
+        .unwrap();
+        // The projects the user opened before this one.
+        let config = base.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        let recent = serde_json::json!([
+            { "path": other.to_str().unwrap(), "name": "shop", "openedAtMs": 2.0, "branch": null },
+            { "path": root.to_str().unwrap(), "name": "project", "openedAtMs": 1.0, "branch": null },
+        ]);
+        std::fs::write(config.join("recent.json"), serde_json::to_vec(&recent).unwrap()).unwrap();
+
+        let host = Host::new(HostConfig {
+            config_dir: config,
+            data_dir: base.join("data"),
+            local_data_dir: base.join("local"),
+            languages: Arc::new(ide_language::LanguageRegistry::load(None).unwrap()),
+            syntax: Arc::default(),
+            sink_for: Box::new(|_| Arc::new(|_| {})),
+            owner: |w| w,
+            runtime: tokio::runtime::Handle::current(),
+            project_environment: false,
+        });
+        host.trust.decide(&root, true, false).unwrap();
+        host.open_project("main", &root).unwrap();
+
+        // A project last opened in Restricted Mode: its interpreter is never run.
+        host.trust.decide(&other, false, false).unwrap();
+        assert!(sdk_python_project_interpreters(&host, "main").await.unwrap().is_empty());
+        host.trust.decide(&other, true, false).unwrap();
+        let list = sdk_python_project_interpreters(&host, "main").await.unwrap();
+        assert_eq!(list.len(), 1, "{list:?}");
+        assert_eq!(&*list[0].project, other.as_path());
+        assert_eq!(&*list[0].sdk.path, python.as_path());
+        assert_eq!(list[0].sdk.name, "Python 3.12 (shop)");
+        host.close_project("main");
+    }
 }
+
+ide_command::domain!(
+    sdk:
+    sdk_detect,
+    sdk_jdk_at,
+    sdk_locate_tools,
+    sdk_php_composer_install,
+    sdk_php_effective,
+    sdk_php_language_level,
+    sdk_php_xdebug,
+    sdk_project_libraries,
+    sdk_python_create_venv,
+    sdk_python_effective,
+    sdk_python_interpreter,
+    sdk_python_packages,
+    sdk_python_pip,
+    sdk_python_project_interpreters,
+);

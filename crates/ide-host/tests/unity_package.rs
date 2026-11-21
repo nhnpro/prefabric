@@ -69,21 +69,21 @@ async fn installs_the_package_and_generates_project_files() {
     host.trust.decide(&root, false, false).unwrap();
     host.open_project(WINDOW, &root).unwrap();
 
-    let info = ops::project::current(&host, WINDOW).unwrap().unity.unwrap();
+    let info = ops::project::project_current(&host, WINDOW).unwrap().unity.unwrap();
     assert_eq!(info.package, Some(UnityPackageStatus::Missing));
     // Generating needs the package, and runs project code: not in Restricted Mode.
-    assert!(ops::unity::generate_project_files(&host, WINDOW, RequestId::next()).await.is_err());
+    assert!(ops::unity::unity_generate_project_files(&host, WINDOW, RequestId::next()).await.is_err());
 
-    let info = ops::unity::install_package(&host, WINDOW).await.unwrap().unity.unwrap();
+    let info = ops::unity::unity_install_package(&host, WINDOW).await.unwrap().unity.unwrap();
     assert_eq!(info.package, Some(UnityPackageStatus::Current));
-    let Err(err) = ops::unity::generate_project_files(&host, WINDOW, RequestId::next()).await else {
+    let Err(err) = ops::unity::unity_generate_project_files(&host, WINDOW, RequestId::next()).await else {
         panic!("generated in Restricted Mode")
     };
     assert!(err.message.contains("Restricted Mode"), "{err:?}");
 
     host.set_project_trust(&root, true, false).await.unwrap();
     let started = std::time::Instant::now();
-    let info = ops::unity::generate_project_files(&host, WINDOW, RequestId::next()).await.unwrap().unity.unwrap();
+    let info = ops::unity::unity_generate_project_files(&host, WINDOW, RequestId::next()).await.unwrap().unity.unwrap();
     eprintln!("generated in {:?}", started.elapsed());
     assert_eq!(info.solutions, ["unity-sample.slnx"]);
     assert!(info.projects.contains(&"Game.Runtime.csproj".to_owned()), "{:?}", info.projects);
@@ -98,8 +98,8 @@ async fn installs_the_package_and_generates_project_files() {
         let host = host.clone();
         let root = root.clone();
         async move {
-            let doc = ops::doc::open(&host, WINDOW, root.join(file)).await.unwrap().id;
-            let text = ops::doc::snapshot(&host, WINDOW, doc).await.unwrap().text;
+            let doc = ops::doc::doc_open(&host, WINDOW, root.join(file)).await.unwrap().id;
+            let text = ops::doc::doc_snapshot(&host, WINDOW, doc).await.unwrap().text;
             let (line, content) =
                 text.lines().enumerate().find(|(_, l)| l.contains(&format!("class {class}"))).unwrap();
             let pos = Pos { line: line as u32, col: content.find(class).unwrap() as u32 };
@@ -128,7 +128,7 @@ async fn installs_the_package_and_generates_project_files() {
          noNamespaceSchemaLocation=\"../../UIElementsSchema/UIElements.xsd\">\n    <ui:\n</ui:UXML>\n",
     )
     .unwrap();
-    let doc = ops::doc::open(&host, WINDOW, uxml.clone()).await.unwrap().id;
+    let doc = ops::doc::doc_open(&host, WINDOW, uxml.clone()).await.unwrap().id;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
         let items = ops::lsp::lsp_completion(&host, WINDOW, RequestId(78), doc, Pos { line: 1, col: 8 }, None)
@@ -141,11 +141,11 @@ async fn installs_the_package_and_generates_project_files() {
         assert!(std::time::Instant::now() < deadline, "no UXML element completion: {:?}", items.first());
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
-    ops::doc::close(&host, WINDOW, doc).unwrap();
+    ops::doc::doc_close(&host, WINDOW, doc).await.unwrap();
     std::fs::remove_file(&uxml).unwrap();
 
     // `.asmdef` navigation: definitions of the project and of the packages Unity resolved.
-    let definitions = ops::unity::assembly_definitions(&host, WINDOW).await.unwrap();
+    let definitions = ops::unity::unity_assembly_definitions(&host, WINDOW).await.unwrap();
     let runtime = definitions.iter().find(|d| d.name == "Game.Runtime").unwrap();
     let meta = std::fs::read_to_string(root.join("Assets/Scripts/Game.Runtime.asmdef.meta")).unwrap();
     assert!(meta.contains(&format!("guid: {}", runtime.guid.as_deref().unwrap())));
@@ -171,8 +171,8 @@ async fn installs_the_package_and_generates_project_files() {
     let rename = |file: PathBuf, find: &'static str, new_name: &'static str| {
         let host = host.clone();
         async move {
-            let doc = ops::doc::open(&host, WINDOW, file).await.unwrap().id;
-            let text = ops::doc::snapshot(&host, WINDOW, doc).await.unwrap().text;
+            let doc = ops::doc::doc_open(&host, WINDOW, file).await.unwrap().id;
+            let text = ops::doc::doc_snapshot(&host, WINDOW, doc).await.unwrap().text;
             let (line, content) = text.lines().enumerate().find(|(_, l)| l.contains(find)).unwrap();
             let pos = Pos { line: line as u32, col: content.find(find).unwrap() as u32 };
             let renamed =
@@ -228,7 +228,7 @@ public static class RenameCheck
 "#,
     )
     .unwrap();
-    let version = ops::project::current(&host, WINDOW).and_then(|p| p.unity).and_then(|u| u.editor_version);
+    let version = ops::project::project_current(&host, WINDOW).and_then(|p| p.unity).and_then(|u| u.editor_version);
     let version = version.unwrap_or_else(|| "6000.6.8f1".to_owned());
     let editor = ide_workspace::unity::editor::find(&version).unwrap();
     let status = std::process::Command::new(editor)

@@ -6,11 +6,17 @@
  */
 import type { CommitOptions, CommitSelection, PartialCommitFile } from "@/bindings";
 import { call, commands } from "@/platform/ipc";
-import { workflowSettings } from "@/platform/workflowSettings";
-import { maybeEditorService, provideCommitService, useCommitCheckProviders } from "@/workbench/contributions";
+import { onWorkflowSettingsChange, workflowSettings } from "@/platform/workflowSettings";
+import {
+  maybeEditorService,
+  provideCommitService,
+  useCommitCheckProviders,
+  type CommitChanges,
+} from "@/workbench/contributions";
 import { commitRepos, planCommit, type CommitPlan } from "./changes";
 import type { CommitProblem } from "./commitChecks";
-import { useChangelists, withListDefaults } from "./changelists";
+import { useChangelists } from "./changelists";
+import { inclusionChecks, stagingAreaOn } from "./staging";
 import { useCommit } from "./commitStore";
 import { hunkKeys } from "./hunks";
 import { baseName, rootOf } from "./model";
@@ -28,12 +34,18 @@ export function installDraftRevision(): () => void {
       revision++;
   });
   const offLists = useChangelists.subscribe(() => void revision++);
+  const offDefault = onWorkflowSettingsChange(
+    (s) => s.vcs.commit.includeChangesByDefault,
+    () => void revision++,
+  );
   const offRepo = useVcs.subscribe((s, p) => {
-    if (s.root !== p.root) revision++;
+    // With the staging area the index is the inclusion: a status change may change the commit.
+    if (s.root !== p.root || (s.status !== p.status && stagingAreaOn())) revision++;
   });
   return () => {
     offCommit();
     offLists();
+    offDefault();
     offRepo();
   };
 }
@@ -41,8 +53,8 @@ export function installDraftRevision(): () => void {
 /** The included changes, as the status (refreshed by the caller) and the checkboxes say. */
 export function currentPlan(): CommitPlan {
   const { status, root } = useVcs.getState();
-  const checks = withListDefaults(status, root ?? "", useChangelists.getState().state, useCommit.getState().checks);
-  return planCommit(status, checks);
+  const checks = inclusionChecks(status, root ?? "", useChangelists.getState().state, useCommit.getState().checks);
+  return planCommit(status, checks, workflowSettings().vcs.commit.includeChangesByDefault);
 }
 
 /**
@@ -86,7 +98,11 @@ export async function selectionOf(plan: CommitPlan): Promise<CommitSelection> {
   const stage = [...plan.stage, ...partial.whole];
   const fallback = useVcs.getState().root ?? "";
   const repositories = repos.map((repo) => {
-    const inRepo = (path: string) => repos.length === 1 || (rootOf(path, roots) ?? null) === repo;
+    // A path in another known repository never goes to this one, even when it is the only one committed.
+    const inRepo = (path: string) => {
+      const root = rootOf(path, roots);
+      return root === null ? repos.length === 1 : root === repo;
+    };
     const options: CommitOptions = {
       amend,
       signOff,
@@ -113,9 +129,29 @@ async function pendingSelection(): Promise<CommitSelection | null> {
   return { ...selection, revision: rev };
 }
 
+/** What Commit would commit now, one patch per repository: the staged or chosen blocks only. */
+async function pendingChanges(): Promise<CommitChanges | null> {
+  if (!useVcs.getState().root) return null;
+  await saveAll();
+  await refreshNow();
+  if (!useVcs.getState().root) return null;
+  const rev = revision;
+  const plan = currentPlan();
+  if (!plan.included.length) return { revision: rev, roots: [], patch: "" };
+  const selection = await selectionOf(plan);
+  const patches: string[] = [];
+  for (const { root, options } of selection.repositories) {
+    const patch = await call(commands.vcsPendingPatch(root, options));
+    if (patch.trim()) patches.push(patch);
+  }
+  return { revision: rev, roots: selection.repositories.map((r) => r.root), patch: patches.join("\n") };
+}
+
 export function provideCommit(): () => void {
   provideCommitService({
     selection: pendingSelection,
+    changes: pendingChanges,
+    revision: draftRevision,
     setMessage: (rev, message) => {
       if (rev !== revision || !useVcs.getState().root) return false;
       useCommit.setState({ message });

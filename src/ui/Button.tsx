@@ -1,8 +1,9 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import clsx from "clsx";
-import { getAction, executeAction } from "@/platform/actions";
+import { getAction, executeAction, useRunningActions } from "@/platform/actions";
 import { shortcutLabel } from "@/platform/keymap";
 import { Icon, type IconName } from "./icons";
+import { Spinner } from "./Spinner";
 import { tooltipAttrs } from "./Tooltip";
 import styles from "./Button.module.css";
 import { useGivenTx } from "@/platform/i18n";
@@ -44,6 +45,7 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
   shortcut?: string;
   /** Toggle state (renders `aria-pressed`). */
   pressed?: boolean;
+  /** Button dimensions; icons keep their 16px size unless iconSize is set. */
   size?: "small" | "normal" | "large";
   iconSize?: number;
   tone?: "default" | "danger" | "accent";
@@ -73,6 +75,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   const a = action ? getAction(action) : undefined;
   const label = tx(title) ?? a?.title ?? action ?? icon;
   const keys = shortcut ?? (action ? shortcutLabel(action) : undefined);
+  const busy = useRunningActions((s) => (action ? s.running.has(action) : false));
+  const glyphSize = iconSize ?? 16;
+  const close = icon === "close";
   return (
     <button
       ref={ref}
@@ -80,16 +85,35 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       aria-label={tx(ariaLabel) ?? label}
       aria-pressed={pressed}
       aria-keyshortcuts={keys}
+      aria-busy={busy || undefined}
+      // Not `disabled`: a disabled button drops keyboard focus while the action runs.
+      aria-disabled={busy || undefined}
       disabled={disabled}
-      className={clsx(styles.iconButton, styles[`is-${size}`], tone !== "default" && styles[`tone-${tone}`], className)}
+      className={clsx(
+        styles.iconButton,
+        styles[`is-${size}`],
+        close && styles.closeButton,
+        tone !== "default" && styles[`tone-${tone}`],
+        className,
+      )}
       onClick={(e) => {
+        if (busy) return;
         onClick?.(e);
         if (!e.defaultPrevented && action) void executeAction(action, actionArg);
       }}
       {...tooltipAttrs(label, keys, true)}
       {...rest}
     >
-      <Icon name={icon} size={iconSize ?? (size === "small" ? 14 : 16)} />
+      {busy ? (
+        <Spinner size={glyphSize} />
+      ) : close ? (
+        <>
+          <Icon name="project-tab-close" size={16} className={styles.closeIdle} />
+          <Icon name="project-tab-close-hovered" size={16} className={styles.closeHovered} />
+        </>
+      ) : (
+        <Icon name={icon} size={glyphSize} />
+      )}
     </button>
   );
 });

@@ -7,6 +7,7 @@
 //! [`super::resolve`] turns them into IDE coordinates.
 
 use ide_core::Severity;
+pub(crate) use ide_core::output_encoding::strip_ansi;
 use serde_json::Value;
 
 /// Output dialect of a build step.
@@ -24,8 +25,8 @@ pub(crate) enum Format {
     Go,
     /// GCC / Clang (through `cmake --build`): `src/a.cpp:12:5: error: msg`.
     Gcc,
-    /// MSBuild (`dotnet build`): `/p/A.cs(12,5): error CS0103: msg [/p/A.csproj]`.
-    MsBuild,
+    /// MSBuild (`dotnet build`): `C:\p\A.cs(12,5): error CS1002: msg [C:\p\App.csproj]`.
+    Msbuild,
 }
 
 /// What a printed column counts.
@@ -88,9 +89,6 @@ pub(crate) struct Parsed {
     pub console: Option<String>,
 }
 
-/// Where and what a message says, to drop repeats.
-type MessageKey = (Option<String>, Option<u32>, Option<u32>, String);
-
 /// A message waiting for its detail lines.
 struct Pending {
     msg: RawMessage,
@@ -102,33 +100,7 @@ pub(crate) struct OutputParser {
     format: Format,
     pending: Option<Pending>,
     /// MSBuild prints a message once per target framework and project that compiles the file.
-    seen: std::collections::HashSet<MessageKey>,
-}
-
-/// Removes ANSI escape sequences (colour, cursor movement).
-pub(crate) fn strip_ansi(s: &str) -> String {
-    if !s.contains('\u{1b}') {
-        return s.to_owned();
-    }
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\u{1b}' {
-            out.push(c);
-            continue;
-        }
-        if chars.peek() == Some(&'[') {
-            chars.next();
-            for c in chars.by_ref() {
-                if c.is_ascii_alphabetic() || c == '~' {
-                    break;
-                }
-            }
-        } else {
-            chars.next();
-        }
-    }
-    out
+    seen: std::collections::HashSet<String>,
 }
 
 fn num(s: &str) -> Option<u32> {
@@ -176,6 +148,13 @@ fn bracket_pos(s: &str) -> Option<(u32, Option<u32>, &str)> {
     Some((line, col, rest.trim_start()))
 }
 
+/// `/C:/p/A.java` → `C:/p/A.java`: Maven and file URIs put a `/` before the drive letter on Windows.
+/// Joined as is, it would become the drive-relative `C:p/A.java`.
+fn drive_path(p: &str) -> &str {
+    let b = p.as_bytes();
+    if b.len() > 2 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' { &p[1..] } else { p }
+}
+
 /// `file:///p/A.kt` → `/p/A.kt` (percent-decoded).
 fn from_file_uri(s: &str) -> String {
     let Some(rest) = s.strip_prefix("file://") else { return s.to_owned() };
@@ -194,9 +173,7 @@ fn from_file_uri(s: &str) -> String {
         out.push(bytes[i]);
         i += 1;
     }
-    let path = String::from_utf8_lossy(&out).into_owned();
-    // `file:///C:/x` on Windows.
-    if path.len() > 2 && path.as_bytes()[0] == b'/' && path.as_bytes()[2] == b':' { path[1..].to_owned() } else { path }
+    drive_path(&String::from_utf8_lossy(&out)).to_owned()
 }
 
 /// Kotlin: `file:///p/A.kt:12:5 msg` or `/p/A.kt: (12, 5): msg`, after the `e: ` / `w: ` prefix.
@@ -254,7 +231,7 @@ fn maven_line(line: &str) -> Option<RawMessage> {
         && looks_like_source_path(path)
         && let Some((ln, col, msg)) = bracket_pos(&format!("[{pos}"))
     {
-        return Some(RawMessage::new(severity, msg, ColUnit::Char).at(path, ln, col));
+        return Some(RawMessage::new(severity, msg, ColUnit::Char).at(drive_path(path), ln, col));
     }
     if let Some(m) = kotlin_line(rest) {
         return Some(m);
@@ -295,6 +272,53 @@ fn tsc_line(line: &str) -> Option<RawMessage> {
     Some(m)
 }
 
+/// MSBuild's canonical form: `path(12,5): error CS1002: msg [project]`, `path(12,5,12,9): …`,
+/// or `path : error NU1101: msg [project]` for a project-level message (no position).
+/// The path may contain spaces (`C:\Users\Jane Doe\…`); "error" / "warning" are never localized.
+fn msbuild_line(line: &str) -> Option<RawMessage> {
+    let line = line.trim();
+    // The project the message came from, appended by the console logger.
+    let line = match line.rfind(" [") {
+        Some(i) if line.ends_with(']') => &line[..i],
+        _ => line,
+    };
+    let (head, severity, rest) =
+        [(" error ", Severity::Error), (" warning ", Severity::Warning)].into_iter().find_map(|(word, severity)| {
+            let i = line.find(&format!(":{word}"))?;
+            Some((&line[..i], severity, &line[i + word.len() + 1..]))
+        })?;
+    let (code, msg) = rest.split_once(':')?;
+    let code = code.trim();
+    if code.is_empty() || code.contains(' ') {
+        return None;
+    }
+    let head = head.trim_end();
+    let (path, pos) = match head.strip_suffix(')').and_then(|h| h.rsplit_once('(')) {
+        Some((path, pos)) => (path, pos.split(',').map(num).collect::<Vec<_>>()),
+        None => (head, Vec::new()),
+    };
+    let at = |i: usize| pos.get(i).copied().flatten();
+    // `MSBUILD : error MSB1009` and the like name no file.
+    let file = path.rsplit(['/', '\\']).next().is_some_and(|n| n.contains('.'));
+    let mut m = RawMessage::new(severity, msg.trim(), ColUnit::Utf16);
+    if file {
+        m.path = Some(path.trim().to_owned());
+        (m.line, m.col, m.end_line, m.end_col) = (at(0), at(1), at(2), at(3));
+    }
+    m.code = Some(code.to_owned());
+    Some(m)
+}
+
+/// `line` without the target framework MSBuild appends to the project
+/// (`[/p/A.csproj::TargetFramework=net8.0]`), so a multi-targeted project's repeats match.
+fn msbuild_key(line: &str) -> String {
+    let line = line.trim();
+    match line.rfind(" [").and_then(|i| line[i..].find("::").map(|j| i + j)) {
+        Some(i) if line.ends_with(']') => format!("{}]", &line[..i]),
+        _ => line.to_owned(),
+    }
+}
+
 /// go: `./a.go:12:5: msg` (errors only; `go vet` style `a.go:12: msg` too).
 fn go_line(line: &str) -> Option<RawMessage> {
     let (path, ln, col, rest) = path_line_col(line)?;
@@ -314,52 +338,6 @@ fn gcc_line(line: &str) -> Option<RawMessage> {
             .into_iter()
             .find_map(|(prefix, severity)| rest.strip_prefix(prefix).map(|m| (severity, m.trim())))?;
     (!msg.is_empty()).then(|| RawMessage::new(severity, msg, ColUnit::Byte).at(path, ln, col))
-}
-
-/// MSBuild's canonical message: `origin: [subcategory] error|warning code: text [project]`,
-/// where origin is `file(line[,col[,endLine,endCol]])`, a file, or a tool (`CSC`, `MSBUILD`).
-fn msbuild_line(line: &str) -> Option<(RawMessage, &str)> {
-    let (at, severity, kw) = [(": error ", Severity::Error), (": warning ", Severity::Warning)]
-        .into_iter()
-        .filter_map(|(kw, sev)| line.find(kw).map(|i| (i, sev, kw)))
-        .min_by_key(|(i, ..)| *i)?;
-    let origin = line[..at].trim();
-    if origin.is_empty() {
-        return None;
-    }
-    let rest = &line[at + kw.len()..];
-    let (code, text) = match rest.split_once(':') {
-        Some((code, text)) if !code.is_empty() && !code.contains(' ') => (Some(code.to_owned()), text.trim()),
-        _ => (None, rest.trim_start_matches(':').trim()),
-    };
-    // The project that reported it (`[/p/A.csproj::TargetFramework=net8.0]`).
-    let (text, project) = match text.rfind(" [") {
-        Some(i) if text.ends_with(']') => {
-            let project = &text[i + 2..text.len() - 1];
-            (text[..i].trim_end(), project.split("::").next().unwrap_or(project))
-        }
-        _ => (text, ""),
-    };
-    let mut m = match origin.strip_suffix(')').and_then(|o| o.rsplit_once('(')) {
-        Some((path, pos)) if pos.bytes().all(|b| b.is_ascii_digit() || b == b',' || b == b'-') => {
-            // `l`, `l-el`, `l,c`, `l,c-ec` or `l,c,el,ec`.
-            let (lines, cols) = pos.split_once(',').unwrap_or((pos, ""));
-            let (line, _) = lines.split_once('-').unwrap_or((lines, ""));
-            let cols: Vec<Option<u32>> = cols.split([',', '-']).map(num).collect();
-            let mut m = RawMessage::new(severity, text, ColUnit::Utf16).at(path.trim(), num(line)?, cols[0]);
-            match cols[..] {
-                [_, Some(ec)] => (m.end_line, m.end_col) = (m.line, Some(ec)),
-                [_, el @ Some(_), ec @ Some(_)] => (m.end_line, m.end_col) = (el, ec),
-                _ => {}
-            }
-            m
-        }
-        // A file without a position (`/p/A.csproj : error NU1101: …`): its first line.
-        _ if origin.contains(['/', '\\']) => RawMessage::new(severity, text, ColUnit::Utf16).at(origin, 1, None),
-        _ => RawMessage::new(severity, format!("{origin}: {text}"), ColUnit::Utf16),
-    };
-    m.code = code;
-    Some((m, project))
 }
 
 /// rustc's JSON diagnostic (`reason: compiler-message`) → message and its rendered text.
@@ -478,10 +456,7 @@ impl OutputParser {
             Format::Go => go_line(&line),
             Format::Gcc => gcc_line(&line),
             // Once per message and project (not per target framework).
-            Format::MsBuild => msbuild_line(&line).and_then(|(m, project)| {
-                let key = (m.path.clone(), m.line, m.col, format!("{:?}{}[{project}]", m.code, m.text));
-                self.seen.insert(key).then_some(m)
-            }),
+            Format::Msbuild => msbuild_line(&line).filter(|_| self.seen.insert(msbuild_key(&line))),
             Format::Cargo => None,
         };
         if let Some(msg) = parsed {
@@ -537,6 +512,20 @@ mod tests {
         assert_eq!(out[0].text, "cannot find symbol\nsymbol:   class Foo\nlocation: class a.A");
         assert_eq!(pos(&out[1]), (Severity::Warning, "/p/src/main/java/a/B.java", 3, Some(8)));
         assert_eq!(out[1].unit, ColUnit::Char);
+    }
+
+    #[test]
+    fn maven_windows_paths_drop_the_slash_before_the_drive() {
+        let out = parse(
+            Format::Maven,
+            "[ERROR] /C:/dev/p/src/main/java/a/A.java:[18,41] package a.b does not exist\n\
+             [ERROR] C:\\dev\\p\\B.java:[3,8] cannot find symbol\n\
+             [ERROR] file:///C:/dev/p/K.kt:4:9 Unresolved reference 'x'.\n",
+        );
+        assert_eq!(out.len(), 3, "{out:?}");
+        assert_eq!(pos(&out[0]), (Severity::Error, "C:/dev/p/src/main/java/a/A.java", 18, Some(41)));
+        assert_eq!(pos(&out[1]), (Severity::Error, "C:\\dev\\p\\B.java", 3, Some(8)));
+        assert_eq!(pos(&out[2]), (Severity::Error, "C:/dev/p/K.kt", 4, Some(9)));
     }
 
     #[test]
@@ -616,6 +605,27 @@ mod tests {
     }
 
     #[test]
+    fn msbuild_canonical_messages() {
+        let out = parse(
+            Format::Msbuild,
+            "  Determining projects to restore...\n\
+             C:\\Users\\Jane Doe\\App\\Program.cs(12,5): error CS1002: ; expected [C:\\Users\\Jane Doe\\App\\App.csproj]\n\
+             /p/App/Models/User.cs(3,8,3,12): warning CS0168: The variable 'e' is declared but never used [/p/App/App.csproj]\n\
+             /p/App/App.csproj : error NU1101: Unable to find package Foo. [/p/App/App.csproj]\n\
+             MSBUILD : error MSB1009: Project file does not exist.\n\
+             Build FAILED.\n",
+        );
+        assert_eq!(out.len(), 4, "{out:?}");
+        assert_eq!(pos(&out[0]), (Severity::Error, "C:\\Users\\Jane Doe\\App\\Program.cs", 12, Some(5)));
+        assert_eq!((out[0].code.as_deref(), out[0].text.as_str()), (Some("CS1002"), "; expected"));
+        assert_eq!(pos(&out[1]), (Severity::Warning, "/p/App/Models/User.cs", 3, Some(8)));
+        assert_eq!((out[1].end_line, out[1].end_col), (Some(3), Some(12)));
+        assert_eq!((out[2].path.as_deref(), out[2].line), (Some("/p/App/App.csproj"), None));
+        assert_eq!(out[2].text, "Unable to find package Foo.");
+        assert_eq!((out[3].path.as_deref(), out[3].code.as_deref()), (None, Some("MSB1009")));
+    }
+
+    #[test]
     fn tsc_plain_and_pretty() {
         let out = parse(
             Format::Tsc,
@@ -636,39 +646,15 @@ mod tests {
     }
 
     #[test]
-    fn msbuild_messages() {
+    fn msbuild_repeats_once_per_project() {
         let out = parse(
-            Format::MsBuild,
-            "  Game -> /p/bin/Game.dll\n\
-             /p/src/A.cs(3,9): error CS0103: The name 'x' does not exist in the current context [/p/src/Game.csproj::TargetFramework=net8.0]\n\
-             /p/src/A.cs(3,9): error CS0103: The name 'x' does not exist in the current context [/p/src/Game.csproj::TargetFramework=net9.0]\n\
-             /My Projects/B.cs(10,5,10,12): warning CS0168: The variable 'e' is declared but never used [/p/B.csproj]\n\
-             /p/C.cs(4,2-6): warning UNT0001: Empty Unity message\n\
-             /p/D.csproj(7): error MSB4025: The project file could not be loaded.\n\
-             CSC : error CS5001: Program does not contain a static 'Main' method [/p/E.csproj]\n\
-             CSC : error CS5001: Program does not contain a static 'Main' method [/p/F.csproj]\n\
-             /p/G.csproj : error NU1101: Unable to find package X. [/p/App.sln]\n\
-             Build FAILED.\n",
+            Format::Msbuild,
+            "/p/src/A.cs(3,9): error CS0103: The name 'x' does not exist [/p/src/Game.csproj::TargetFramework=net8.0]\n\
+             /p/src/A.cs(3,9): error CS0103: The name 'x' does not exist [/p/src/Game.csproj::TargetFramework=net9.0]\n\
+             /p/src/A.cs(3,9): error CS0103: The name 'x' does not exist [/p/src/Tests.csproj]\n",
         );
-        let summary: Vec<_> = out.iter().map(|m| (m.path.as_deref(), m.line, m.col, m.end_line, m.end_col)).collect();
-        assert_eq!(
-            summary,
-            [
-                (Some("/p/src/A.cs"), Some(3), Some(9), None, None),
-                (Some("/My Projects/B.cs"), Some(10), Some(5), Some(10), Some(12)),
-                (Some("/p/C.cs"), Some(4), Some(2), Some(4), Some(6)),
-                (Some("/p/D.csproj"), Some(7), None, None, None),
-                (None, None, None, None, None),
-                (None, None, None, None, None),
-                (Some("/p/G.csproj"), Some(1), None, None, None),
-            ]
-        );
-        assert_eq!(out[6].text, "Unable to find package X.");
-        assert_eq!(out[0].code.as_deref(), Some("CS0103"));
-        assert_eq!(out[0].text, "The name 'x' does not exist in the current context");
-        assert_eq!(out[1].severity, Severity::Warning);
-        assert_eq!(out[4].text, "CSC: Program does not contain a static 'Main' method");
-        assert_eq!(out[4].code.as_deref(), Some("CS5001"));
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0].text, "The name 'x' does not exist");
     }
 
     #[test]

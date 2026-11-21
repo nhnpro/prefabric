@@ -75,8 +75,30 @@ impl Plugin for Jobs {
                 )?;
                 Ok(None)
             }
+            "notify-project" => {
+                // The argument is a path in the target project, as a scheduled check would have.
+                let path = arg.unwrap_or_default();
+                let project = host::project_of(path).ok_or("no project contains the path")?;
+                let action = openidea_plugin::NotificationAction::new("Disable", "context").argument(path);
+                project.notify(NotificationLevel::Info, "Project update", path, &[action])?;
+                Ok(None)
+            }
             "copy" => {
                 host::copy_to_clipboard(arg.unwrap_or_default())?;
+                Ok(None)
+            }
+            "console-rules" => {
+                // No argument: two rules; `""` clears; anything else is one rule with that pattern.
+                use openidea_plugin::ConsoleRule;
+                let rules = match arg {
+                    None => vec![
+                        ConsoleRule::new(r"\[AUDIT\]").foreground("bright-yellow").style("bold").whole_line(),
+                        ConsoleRule::new(r"job-\d+").ignore_case().foreground("cyan").background("teal"),
+                    ],
+                    Some("") => Vec::new(),
+                    Some(pattern) => vec![ConsoleRule::new(pattern).foreground("red")],
+                };
+                host::set_console_rules(&rules)?;
                 Ok(None)
             }
             "open-url" => {

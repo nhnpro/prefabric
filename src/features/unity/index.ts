@@ -6,7 +6,6 @@ import { CONTRIBUTED_RENAME, registerEditorContribution } from "@/editor/api";
 import { registerActions } from "@/platform/actions";
 import {
   registerEditorBanner,
-  registerSearchEverywhereTab,
   registerStatusItem,
   registerTextEditorWrapper,
   registerTitleItem,
@@ -23,7 +22,7 @@ import { hierarchyActions, hierarchyWrapper } from "./hierarchy";
 import { showYamlOnNavigation } from "./hierarchy/follow";
 import { isSceneOrPrefab } from "./hierarchy/modes";
 import { unityLenses } from "./lenses";
-import { unitySearchTab } from "./searchTab";
+import { trackUnitySearchCategory } from "./searchTab";
 import { unityRename } from "./rename";
 import { unityYamlBanner, unityYamlLock } from "./unityYaml";
 import { ussSupport } from "./uss";
@@ -64,7 +63,7 @@ export function activate() {
     if (s.project?.root !== prev.project?.root) clearUnityBases();
   });
   const unregisterBanner = registerEditorBanner(unityYamlBanner);
-  const unregisterSearch = registerSearchEverywhereTab(unitySearchTab);
+  const unregisterSearch = trackUnitySearchCategory();
   const unregisterHierarchy = registerTextEditorWrapper(hierarchyWrapper);
   const unregisterActions = registerActions([...hierarchyActions(), ...playActions(), showInUnityAction()]);
   const unregisterShowMenus = showInUnityMenus();
@@ -87,7 +86,7 @@ export function activate() {
   const unregisterConsole = registerToolWindow({
     id: "unity.console",
     title: "Unity Console",
-    icon: "toolwindow-logcat",
+    icon: "toolwindow-unity-console",
     anchor: "bottom",
     // Listed under the stripe's "…" until first opened: most projects are not Unity ones.
     stripe: "onUse",

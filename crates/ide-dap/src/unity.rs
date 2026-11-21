@@ -2,11 +2,47 @@
 //! development players, which announce themselves over UDP multicast `225.0.0.222`.
 
 use crate::attach::{AttachKind, AttachableProcess, RawProcess};
+use ide_core::{IdeError, IdeResult};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::{Duration, Instant};
 
 /// The Mono debug adapter (`nhnpro/prefabric-unity-debugger`).
 pub const ADAPTER: &str = "unity-debugger";
+
+/// Waits until Mono reports its threads.
+pub(crate) async fn wait_for_threads(session: &crate::session::Session) -> IdeResult<()> {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let body = session.conn.request_timeout("threads", serde_json::json!({}), Duration::from_secs(5)).await?;
+            if body.get("threads").and_then(serde_json::Value::as_array).is_some_and(|t| !t.is_empty()) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        IdeError::unavailable(
+            "Unity debugger did not become ready. Enable Editor Attaching and Debug Mode in the Editor, or build the player with Script Debugging, then retry.",
+        )
+    })?
+}
+
+/// Whether an adapter event shows Mono still starting up: loading assemblies or binding breakpoints.
+pub(crate) fn is_startup_activity(event: &str) -> bool {
+    matches!(event, "module" | "breakpoint")
+}
+
+// Mono binds breakpoints asynchronously and resumes threads itself during startup: wait for that burst to end.
+pub(crate) async fn settle_startup(session: &crate::session::Session) {
+    *session.unity_startup_activity.lock() = Instant::now();
+    let _ = tokio::time::timeout(Duration::from_secs(3), async {
+        while session.unity_startup_activity.lock().elapsed() < Duration::from_secs(1) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+}
 
 const MULTICAST_GROUP: Ipv4Addr = Ipv4Addr::new(225, 0, 0, 222);
 /// Ports Unity players send their announcements to.

@@ -14,7 +14,7 @@
  */
 import { syntaxTree } from "@codemirror/language";
 import type { Tree } from "@lezer/common";
-import { Prec, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
+import { Prec, StateEffect, StateField, type EditorState, type Extension, type Text } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { commands, type SemanticTokens } from "@/platform/ipc";
 import { editorPrefs } from "@/platform/editorSettings";
@@ -26,8 +26,11 @@ import { languageSemantics, type SemanticRange } from "./languages";
 // elsewhere go through the re-exported `languageSemantics`.
 export { languageSemantics } from "./languages";
 // Registers each language's semantics (highlighting hooks, construct docs).
+import "./kotlin";
 import "./python";
 import "./php";
+import "./go";
+import "./java";
 
 const semanticBackoff = featureBackoff();
 
@@ -43,6 +46,8 @@ const TYPE_CLASS: Record<string, string> = {
   typeParameter: "typeParameter",
   function: "function",
   method: "function",
+  // typescript-language-server passes tsserver's name for methods through (vtsls renames it `method`).
+  member: "function",
   macro: "macro",
   decorator: "annotation",
   // jdtls extensions
@@ -59,7 +64,8 @@ const TYPE_CLASS: Record<string, string> = {
   lifetime: "annotation",
   selfParameter: "self",
   clsParameter: "self",
-  selfKeyword: "self",
+  // rust-analyzer's `self`: RustRover colours the self parameter as a keyword.
+  selfKeyword: "keyword",
 };
 
 const MODIFIER_CLASS: Record<string, string> = {
@@ -120,7 +126,8 @@ export function semanticRanges(
 ): SemanticRange[] {
   const semantics = languageSemantics(language);
   const symbols = semantics?.symbolKinds && tree ? semantics.symbolKinds(tree, doc) : undefined;
-  const syntax = semantics?.syntaxRanges && tree ? semantics.syntaxRanges(tree, doc, symbols ?? new Map()) : [];
+  const format = editorPrefs().docstringFormat;
+  const syntax = semantics?.syntaxRanges && tree ? semantics.syntaxRanges(tree, doc, symbols ?? new Map(), format) : [];
   const covered = rangeCoverage(syntax);
   const serverRanges: Array<{ from: number; to: number }> = [];
   const out: SemanticRange[] = [];
@@ -203,11 +210,17 @@ const semanticField = StateField.define<DecorationSet>({
   },
 });
 
+/** The semantic marks the editor shows over the syntax colours (empty without semantic highlighting). */
+export function semanticHighlights(state: EditorState): DecorationSet {
+  return state.field(semanticField, false) ?? Decoration.none;
+}
+
 const semanticPlugin = ViewPlugin.fromClass(
   class {
     private refresh = debounce(() => void this.run(), 600);
     private offReady: () => void;
     private rainbow = editorPrefs().semanticHighlighting;
+    private docstringFormat = editorPrefs().docstringFormat;
     /** Last answer, re-decorated without a request when Semantic highlighting is toggled. */
     private last: { doc: Text; tokens: SemanticTokens | null } | null = null;
     private destroyed = false;
@@ -230,8 +243,10 @@ const semanticPlugin = ViewPlugin.fromClass(
         });
       }
       const rainbow = editorPrefs().semanticHighlighting;
-      if (rainbow === this.rainbow) return;
+      const docstringFormat = editorPrefs().docstringFormat;
+      if (rainbow === this.rainbow && docstringFormat === this.docstringFormat) return;
       this.rainbow = rainbow;
+      this.docstringFormat = docstringFormat;
       const last = this.last;
       // Settings arrive as a compartment reconfiguration; no dispatching inside an update.
       if (last && last.doc === u.state.doc)
@@ -244,7 +259,9 @@ const semanticPlugin = ViewPlugin.fromClass(
       const tree = syntaxTree(this.view.state);
       const semantics = languageSemantics(docOf(this.view)?.language);
       const symbols = semantics?.symbolKinds ? semantics.symbolKinds(tree, doc) : undefined;
-      const syntax = semantics?.syntaxRanges ? semantics.syntaxRanges(tree, doc, symbols ?? new Map()) : [];
+      const syntax = semantics?.syntaxRanges
+        ? semantics.syntaxRanges(tree, doc, symbols ?? new Map(), editorPrefs().docstringFormat)
+        : [];
       const covered = rangeCoverage(syntax);
       const retained: Array<{ from: number; to: number }> = [];
       const marks = syntax.map((r) => markFor(r.className, r.source).range(r.from, r.to));
@@ -314,8 +331,8 @@ const semanticPlugin = ViewPlugin.fromClass(
 
 export function semanticExtension(): Extension {
   // Higher-precedence decoration sources create the *inner* DOM nodes, so this
-  // must outrank Lezer's highlighter for semantic colours to win; they only set
-  // colour / style, never backgrounds. `Prec.highest`, not `Prec.high`: the
+  // must outrank Lezer's highlighter for Color Scheme attributes to win.
+  // `Prec.highest`, not `Prec.high`: the
   // highlighter (`treeHighlighter` in @codemirror/language) is itself
   // `Prec.high`, and at equal precedence the later source ends up outside —
   // its inner span then re-set the colour (a field's `variableName` grey hid

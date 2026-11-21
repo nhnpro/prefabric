@@ -37,7 +37,7 @@ async fn diagnostics(root: &std::path::Path, file: &str, text: &str, wait: std::
     }));
     host.trust.decide(root, true, false).unwrap();
     host.open_project("main", root).unwrap();
-    ops::doc::open(&host, "main", file).await.unwrap();
+    ops::doc::doc_open(&host, "main", file).await.unwrap();
     let deadline = std::time::Instant::now() + wait;
     loop {
         let latest = events.lock().unwrap().iter().rev().find_map(|e| match e {

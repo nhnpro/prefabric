@@ -5,7 +5,8 @@
 import { registerOverlay, registerStatusItem } from "@/workbench/contributions";
 import { AboutOverlay } from "./AboutDialog";
 import { appActions, updateActions } from "./appActions";
-import { checkForUpdatesOnStartup } from "./updates";
+import { installUpdateChecks } from "./updates";
+import { cliActions } from "./cliCommand";
 import { installCloseGuard } from "./closeGuard";
 import { TerminationOverlay } from "./termination";
 import { InvalidateCachesOverlay, registerInvalidateCachesActions } from "./InvalidateCaches";
@@ -21,16 +22,11 @@ import { installLaunchHandling, installLightEditAutoClose, windowActions } from 
 import { WorkspaceDialogHost } from "./WorkspaceDialog";
 import { installWindowGroups } from "@/platform/windowGroups";
 
-/** The UI locale of a secondary (Settings, comparison) window. */
-export const activateLocale = installLocaleSync;
-/** Native menu items of a secondary window that runs actions itself (comparison). */
-export const activateMenuBridge = installMenuBridge;
-export { confirmLeave } from "./closeGuard";
-
 export function activate(): () => void {
   const disposers = [
     installLocaleSync(),
     registerLocalizedActions(() => [...appActions(), ...windowActions()]),
+    registerLocalizedActions(cliActions),
     registerOverlay({ id: "app.about", component: AboutOverlay }),
     registerOverlay({ id: "app.keymapReference", component: KeymapReferenceOverlay }),
     registerOverlay({ id: "app.invalidateCaches", component: InvalidateCachesOverlay }),
@@ -58,7 +54,7 @@ export function activate(): () => void {
   void buildInfo().then((b) => {
     if (!b?.updates || disposed) return;
     disposers.push(registerLocalizedActions(updateActions));
-    void checkForUpdatesOnStartup();
+    disposers.push(installUpdateChecks());
   });
   return () => {
     disposed = true;

@@ -1,5 +1,7 @@
 /** Installed plugins, their UI contributions, the selected plugin theme, and the operations on them. */
 import { create } from "zustand";
+import { tx } from "@/platform/i18n";
+import { isErrorKind } from "@/platform/ipc";
 import type {
   ActiveTheme,
   CapabilityInfo,
@@ -165,6 +167,7 @@ export function uninstallPlugin(id: string): Promise<boolean> {
   return withBusy(id, `Could not uninstall ${name}`, async () => {
     await pluginsBackend().uninstall(id);
     notifications().notify({ group: "plugins", level: "info", title: `Uninstalled ${name}` });
+    await refreshMarket(false);
   });
 }
 
@@ -189,6 +192,11 @@ export function setPluginCapability(id: string, capability: string, granted: boo
   return withBusy(id, `Could not change ${capability} of ${nameOf(id)}`, () =>
     pluginsBackend().setCapability(id, capability, granted),
   );
+}
+
+export function revokePluginNetHost(id: string, host: string): Promise<boolean> {
+  const name = nameOf(id);
+  return withBusy(id, tx`Could not revoke ${host} for ${name}`, () => pluginsBackend().revokeNetHost(id, host));
 }
 
 export async function refreshCatalog(): Promise<void> {
@@ -406,7 +414,7 @@ export async function runPluginCommand(
     const status = usePlugins.getState().plugins.find((p) => p.id === pluginId)?.status;
     // A trap disables the plugin and the backend already announced why; a
     // consent request opens its own dialog.
-    const permission = (e as { kind?: string }).kind === "permissionDenied";
+    const permission = isErrorKind(e, "permissionDenied");
     if (status !== "failed" && !permission)
       notifications().notify({ group: "plugins", level: "error", title: `${title} failed`, body: errorText(e) });
     return null;

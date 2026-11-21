@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RunConfig } from "@/platform/ipc";
 import { usePlatform } from "@/platform/platformInfo";
+import { registerRunConfigType } from "@/workbench/contributions";
 import {
+  categoryOf,
+  kindLabel,
   commandLine,
   duplicateConfig,
   formatArgs,
@@ -17,6 +20,9 @@ import {
 import { contextConfig, fileRole } from "./context";
 import { cacheRunTemplates } from "./runTemplates";
 import { registerBuiltinTypes } from "./types";
+// After "./types": tomcat → buildUpdate → store → types is a cycle; importing tomcat first
+// would freeze tomcatType at undefined inside BUILTIN_TYPES.
+import { tomcatType } from "./tomcat";
 import { envFromRows } from "./EnvDialog";
 import { configRemoved, defaultSelection, rerunConfig, useRun, type RunSession } from "./store";
 
@@ -183,6 +189,14 @@ describe("context configuration", () => {
     expect(fileRole("lib/tasks/gen.rb")).toBe("script");
     expect(fileRole("src/main.rs")).toBe("main");
     expect(fileRole("cmd/main.go", "package main\nfunc main() {}")).toBe("main");
+    // A JVM class with a `main` runs as a program even under a test-like name.
+    expect(
+      fileRole("src/test/java/com/example/Test.java", "class Test { public static void main(String[] a) {} }"),
+    ).toBe("main");
+    expect(fileRole("src/test/kotlin/Spec.kt", "fun main() {}")).toBe("main");
+    // Without content (the menu's first pass) the name still says test.
+    expect(fileRole("src/test/java/com/example/Test.java")).toBe("test");
+    expect(fileRole("src/test/java/com/example/OrderBookTest.java", "@Test void totals() {}")).toBe("test");
     expect(fileRole("tools/gen.py")).toBe("script");
     expect(fileRole("scripts/build.bat", undefined, true)).toBe("script");
     expect(fileRole("scripts/run.cmd", undefined, true)).toBe("script");
@@ -193,13 +207,32 @@ describe("context configuration", () => {
   it("runs a JS test file through the closest test script", () => {
     const c = contextConfig("web/src/cart.test.ts", configs)!;
     expect(c).toMatchObject({
-      args: ["run", "test", "--", "src/cart.test.ts"],
+      args: ["run", "test", "src/cart.test.ts"],
       cwd: "web",
       isTest: true,
       name: "cart.test.ts",
     });
     expect(c.id).toBe("context:npm:web:test:web/src/cart.test.ts");
-    expect(contextConfig("src/a.spec.js", configs)!.args).toEqual(["run", "test", "--", "src/a.spec.js"]);
+    expect(contextConfig("src/a.spec.js", configs)!.args).toEqual(["run", "test", "src/a.spec.js"]);
+  });
+
+  it.each([
+    ["npm", ["--"]],
+    ["pnpm", []],
+    ["/opt/bin/pnpm", []],
+    ["C:\\tools\\pnpm.CMD", []],
+    ["yarn", ["--"]],
+    ["bun", ["--"]],
+  ])("forwards test files through %s", (command, separator) => {
+    const base = cfg({ id: "js:test", kind: "npm", command, args: ["run", "test"], isTest: true });
+    expect(contextConfig("tests/cart.test.ts", [base])!.args).toEqual([
+      "run",
+      "test",
+      ...separator,
+      "tests/cart.test.ts",
+    ]);
+    const explicit = { ...base, args: ["run", "test", "--", "--reporter=verbose"] };
+    expect(contextConfig("tests/cart.test.ts", [explicit])!.args).toEqual([...explicit.args, "tests/cart.test.ts"]);
   });
 
   it("narrows rspec and rake test runs to the file", () => {
@@ -372,6 +405,17 @@ describe("context configuration", () => {
     expect(contextConfig("tools/gen.py", uv)).toMatchObject({ command: "uv", args: ["run", "python", "tools/gen.py"] });
   });
 
+  it("prefers a detected Python config's interpreter over one made by hand", () => {
+    const configs = [
+      cfg({ id: "mine", kind: "python", command: "python3", args: ["tool.py"], detected: false }),
+      cfg({ id: "found", kind: "python", command: "uv", args: ["run", "python", "-m", "app"], detected: true }),
+    ];
+    expect(contextConfig("tools/gen.py", configs)).toMatchObject({
+      command: "uv",
+      args: ["run", "python", "tools/gen.py"],
+    });
+  });
+
   it("takes the interpreter from a Django runserver config without its arguments", () => {
     const runserver = (command: string, args: string[]) =>
       cfg({ id: "django:runserver", kind: "python", command, args: [...args, "manage.py", "runserver"] });
@@ -506,5 +550,32 @@ describe("rerunning a session after its configuration changed (#1497)", () => {
     useRun.setState({ configs: [base] });
     expect(rerunConfig(session(derived, base))).toBe(derived);
     useRun.setState({ configs: [] });
+  });
+});
+
+describe("categoryOf", () => {
+  it("maps kinds to their language categories and unlisted ones to Others", () => {
+    expect(categoryOf("spring-boot")).toBe("Java");
+    expect(categoryOf("maven")).toBe("Build Tools");
+    expect(categoryOf("npm")).toBe("JavaScript");
+    expect(categoryOf("cargo")).toBe("Rust");
+    expect(categoryOf("godot")).toBe("Others");
+  });
+
+  it("prefers a registered type's group (Servers, Docker) over the category map", () => {
+    const disposeTomcat = registerRunConfigType(tomcatType);
+    expect(categoryOf("tomcat")).toBe("Servers");
+    expect(kindLabel("tomcat")).toBe("Tomcat Server");
+    disposeTomcat();
+    const dispose = registerRunConfigType({
+      id: "fake-server",
+      label: "Fake",
+      icon: "server",
+      group: "Servers",
+      fields: [],
+      commandLine: () => null,
+    });
+    expect(categoryOf("fake-server")).toBe("Servers");
+    dispose();
   });
 });

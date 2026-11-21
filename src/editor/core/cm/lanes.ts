@@ -58,15 +58,12 @@ export function unfoldAround(state: EditorState, pos: number): StateEffect<unkno
   return out;
 }
 
-/** The class an outer scroller gets while a lane draws its scrollbar (its native one is hidden). */
-const OUTER_SCROLLER = "cm-openidea-overviewScroller";
-
 class OverviewLane {
   dom: HTMLElement;
-  /** What scrolls the document: the editor's own scroller, or an outer one the editor is laid out in. */
   private scroller: HTMLElement;
-  private resize: ResizeObserver | null = null;
   private scheduled = false;
+  /** Set while a resize burst is being coalesced; see [`scheduleMarksLater`]. */
+  private markTimer: number | undefined;
   private lastKey = "";
   /** The last pointer position over the editor, to re-check the thumb when it scrolls. */
   private pointer: { x: number; y: number } | null = null;
@@ -76,13 +73,10 @@ class OverviewLane {
    */
   private thumb: HTMLElement;
 
-  constructor(
-    private view: EditorView,
-    outer?: HTMLElement,
-  ) {
-    this.scroller = outer ?? view.scrollDOM;
+  constructor(private view: EditorView) {
+    this.scroller = view.scrollDOM;
     this.dom = document.createElement("div");
-    this.dom.className = outer ? "cm-openidea-overview cm-openidea-overview-sticky" : "cm-openidea-overview";
+    this.dom.className = "cm-openidea-overview";
     this.dom.setAttribute("aria-hidden", "true");
     this.thumb = document.createElement("div");
     this.thumb.className = "cm-openidea-overviewThumb";
@@ -91,26 +85,34 @@ class OverviewLane {
     view.dom.addEventListener("mousemove", this.onPointerMove);
     view.dom.addEventListener("mouseleave", this.onPointerLeave);
     this.scroller.addEventListener("scroll", this.onScroll, { passive: true });
-    if (outer) {
-      // First in the editor, sticking to the top of the outer scroller's viewport.
-      view.dom.prepend(this.dom);
-      outer.classList.add(OUTER_SCROLLER);
-      this.resize = new ResizeObserver(() => this.schedule());
-      this.resize.observe(outer);
-    } else view.dom.appendChild(this.dom);
+    view.dom.appendChild(this.dom);
     this.schedule();
   }
 
   update(u: ViewUpdate) {
+    // A window resize reaches the editor once per frame: keep the thumb current, which is one
+    // measure, and coalesce the mark maths that walks every mark's line block.
+    if (u.geometryChanged) {
+      this.scheduleThumb();
+      this.scheduleMarksLater();
+      return;
+    }
     if (
       u.docChanged ||
-      u.geometryChanged ||
       u.heightChanged ||
       u.viewportChanged ||
       u.selectionSet ||
       u.startState.facet(scrollbarMarks) !== u.state.facet(scrollbarMarks)
     )
       this.schedule();
+  }
+
+  /** Recomputes the marks once a resize burst has stopped instead of on every step of it. */
+  private scheduleMarksLater() {
+    this.markTimer ??= window.setTimeout(() => {
+      this.markTimer = undefined;
+      this.schedule();
+    }, 120);
   }
 
   private schedule() {
@@ -159,10 +161,6 @@ class OverviewLane {
         };
       },
       write: ({ rows, caret, unit, laneHeight }) => {
-        if (this.scroller !== this.view.scrollDOM) {
-          this.dom.style.height = `${laneHeight}px`;
-          this.dom.style.marginBottom = `-${laneHeight}px`;
-        }
         const key =
           rows.map((r) => `${r.top},${r.height},${r.mark.color},${r.mark.kind}`).join("|") +
           `#${caret}${unit}${laneHeight}`;
@@ -301,24 +299,14 @@ class OverviewLane {
   };
 
   destroy() {
+    if (this.markTimer !== undefined) window.clearTimeout(this.markTimer);
     this.dom.removeEventListener("mousedown", this.onMouseDown);
     this.thumb.removeEventListener("mousedown", this.onThumbMouseDown);
     this.view.dom.removeEventListener("mousemove", this.onPointerMove);
     this.view.dom.removeEventListener("mouseleave", this.onPointerLeave);
     this.scroller.removeEventListener("scroll", this.onScroll);
-    this.resize?.disconnect();
-    if (this.scroller !== this.view.scrollDOM) this.scroller.classList.remove(OUTER_SCROLLER);
     this.dom.remove();
   }
-}
-
-/**
- * The overview lane over an outer scroller that holds the editor at its full height (the panes of
- * an aligned side-by-side diff scroll together in their container): `scroller` finds it once the
- * editor is in the DOM. The lane sticks to the right edge of this editor.
- */
-export function overviewLaneIn(scroller: (view: EditorView) => HTMLElement | null): Extension {
-  return ViewPlugin.define((view) => new OverviewLane(view, scroller(view) ?? undefined));
 }
 
 export const overviewLane: Extension = [

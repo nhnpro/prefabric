@@ -25,6 +25,8 @@ pub struct EditorContext {
 /// Where a command or event batch comes from: the window and its project.
 #[derive(Clone, Debug, Default)]
 pub struct Invocation {
+    /// Plugin instances waiting on this command chain; never re-enter one.
+    pub command_chain: Vec<String>,
     pub client: Option<String>,
     pub workspace_root: Option<PathBuf>,
     /// Settings actions can read the global layer while retaining their project context.
@@ -35,7 +37,7 @@ pub struct Invocation {
 }
 
 /// A failed host call, as the plugin sees it (WIT `types.error`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostError {
     /// Not granted; names the capability.
     Denied(String),
@@ -68,6 +70,44 @@ pub struct StatusItem {
     pub tooltip: Option<String>,
     /// One of the plugin's commands, run on click.
     pub command: Option<String>,
+    /// Opened on click instead of running `command` when not empty (API 1.14).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[specta(optional)]
+    pub menu: Vec<StatusMenuEntry>,
+}
+
+/// An entry of a plugin status bar item's menu (API 1.14, `ui.set-status-item-menu`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum StatusMenuEntry {
+    /// Runs one of the plugin's commands with `argument`.
+    #[serde(rename_all = "camelCase")]
+    Action {
+        label: String,
+        description: Option<String>,
+        command: String,
+        argument: Option<String>,
+    },
+    Separator,
+    Header {
+        label: String,
+    },
+}
+
+/// A plugin's highlight rule for Run and Debug console output (API 1.12, `ui.set-console-rules`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsoleRule {
+    pub pattern: String,
+    pub ignore_case: bool,
+    /// A console palette colour (`red`, `bright-blue`); `None` keeps the text's own.
+    pub foreground: Option<String>,
+    pub background: Option<String>,
+    /// `bold`, `italic`, `underline`, `strikethrough`, `dim`.
+    pub styles: Vec<String>,
+    /// The whole line, or only the matched text.
+    pub whole_line: bool,
+    pub enabled: bool,
 }
 
 /// An entry of a plugin's `pick` or `pick-many`.
@@ -92,40 +132,75 @@ pub enum Prompt {
     Confirm { title: String, message: String },
     #[serde(rename_all = "camelCase")]
     PickDirectory { title: String, initial: Option<String> },
+    /// The host's own question under `net:ask` (never plugin-initiated): the
+    /// plugin reached an HTTPS host its manifest does not list.
+    #[serde(rename_all = "camelCase")]
+    NetPermission { host: String, session_only: bool },
 }
 
 /// Kinds of workbench events a plugin can subscribe to (`on-event:<kind>`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum EventKind {
+    DocumentChanged,
+    WebsocketReady,
+    FileClosed,
+    SettingsChanged,
+    InputModeChanged,
+    RunExited,
+    TerminalExited,
+    ContentTabAction,
+    ExtensionsChanged,
     FileOpened,
     FileSaved,
     FilesChanged,
     EditorFocused,
     ActionPerformed,
     VcsChanged,
+    /// Problems of the window's files changed (a language server or a report).
+    ProblemsChanged,
     Scheduled,
 }
 
 impl EventKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 17] = [
+        Self::DocumentChanged,
+        Self::WebsocketReady,
+        Self::FileClosed,
+        Self::SettingsChanged,
+        Self::InputModeChanged,
+        Self::RunExited,
+        Self::TerminalExited,
+        Self::ContentTabAction,
+        Self::ExtensionsChanged,
         Self::FileOpened,
         Self::FileSaved,
         Self::FilesChanged,
         Self::EditorFocused,
         Self::ActionPerformed,
         Self::VcsChanged,
+        Self::ProblemsChanged,
         Self::Scheduled,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
+            Self::DocumentChanged => "document-changed",
+            Self::WebsocketReady => "websocket-ready",
+            Self::FileClosed => "file-closed",
+            Self::SettingsChanged => "settings-changed",
+            Self::InputModeChanged => "input-mode-changed",
+            Self::RunExited => "run-exited",
+            Self::TerminalExited => "terminal-exited",
+            Self::ContentTabAction => "content-tab-action",
+            Self::ExtensionsChanged => "extensions-changed",
             Self::FileOpened => "file-opened",
             Self::FileSaved => "file-saved",
             Self::FilesChanged => "files-changed",
             Self::EditorFocused => "editor-focused",
             Self::ActionPerformed => "action-performed",
             Self::VcsChanged => "vcs-changed",
+            Self::ProblemsChanged => "problems-changed",
             Self::Scheduled => "scheduled",
         }
     }
@@ -138,8 +213,12 @@ impl EventKind {
     /// manifest declares).
     pub fn capability(self) -> Option<ide_extension::Capability> {
         match self {
-            Self::ActionPerformed => Some(ide_extension::Capability::InputEvents),
-            Self::Scheduled => None,
+            Self::ActionPerformed | Self::InputModeChanged => Some(ide_extension::Capability::InputEvents),
+            Self::Scheduled
+            | Self::RunExited
+            | Self::TerminalExited
+            | Self::ContentTabAction
+            | Self::ExtensionsChanged => None,
             _ => Some(ide_extension::Capability::Events),
         }
     }
@@ -188,28 +267,102 @@ pub struct FilesChanged {
     pub removed: Vec<String>,
 }
 
+/// The focused editor's input mode and optional visual sub-mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct InputMode {
+    pub path: String,
+    pub mode: String,
+    pub sub: Option<String>,
+}
+
+/// One UTF-16 replacement in a locally edited editor document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct DocumentTextChange {
+    pub from: u32,
+    pub to: u32,
+    pub insert: String,
+}
+
+/// Local changes accepted by the editor's shared document model.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentChanged {
+    pub path: String,
+    /// The open project `path` is relative to, set when the event is handed to a plugin
+    /// (the editor posts the absolute path and `null`).
+    pub project: Option<String>,
+    pub base_version: u64,
+    pub version: u64,
+    pub changes: Vec<DocumentTextChange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WebsocketReady {
+    pub plugin_id: String,
+    pub connection: u64,
+}
+
+/// A host-owned background WebSocket request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebSocketRequest {
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub subprotocol: String,
+}
+
+/// Frames received from a host-owned WebSocket and its transport state.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSocketBatch {
+    pub messages: Vec<Vec<u8>>,
+    pub closed: bool,
+}
+
 /// A workbench event delivered to plugins.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "value")]
 pub enum WorkbenchEvent {
+    DocumentChanged(DocumentChanged),
+    WebsocketReady(WebsocketReady),
+    RunExited(crate::RunExited),
+    TerminalExited(crate::TerminalExited),
+    ContentTabAction(crate::ContentTabAction),
+    FileClosed(String),
+    SettingsChanged(Vec<String>),
+    /// Ids of extension points the receiving plugin declares whose contributions changed.
+    ExtensionsChanged(Vec<String>),
+    InputModeChanged(InputMode),
     FileOpened(String),
     FileSaved(String),
     FilesChanged(FilesChanged),
     EditorFocused(Option<String>),
     ActionPerformed(ActionPerformed),
     VcsChanged(String),
+    /// Problems of the window's files changed; plugins re-read `problems`.
+    ProblemsChanged,
     Scheduled,
 }
 
 impl WorkbenchEvent {
     pub fn kind(&self) -> EventKind {
         match self {
+            Self::DocumentChanged(_) => EventKind::DocumentChanged,
+            Self::WebsocketReady(_) => EventKind::WebsocketReady,
+            Self::RunExited(_) => EventKind::RunExited,
+            Self::TerminalExited(_) => EventKind::TerminalExited,
+            Self::ContentTabAction(_) => EventKind::ContentTabAction,
+            Self::FileClosed(_) => EventKind::FileClosed,
+            Self::SettingsChanged(_) => EventKind::SettingsChanged,
+            Self::ExtensionsChanged(_) => EventKind::ExtensionsChanged,
+            Self::InputModeChanged(_) => EventKind::InputModeChanged,
             Self::FileOpened(_) => EventKind::FileOpened,
             Self::FileSaved(_) => EventKind::FileSaved,
             Self::FilesChanged(_) => EventKind::FilesChanged,
             Self::EditorFocused(_) => EventKind::EditorFocused,
             Self::ActionPerformed(_) => EventKind::ActionPerformed,
             Self::VcsChanged(_) => EventKind::VcsChanged,
+            Self::ProblemsChanged => EventKind::ProblemsChanged,
             Self::Scheduled => EventKind::Scheduled,
         }
     }
@@ -350,6 +503,8 @@ pub struct HttpRequest {
     pub headers: Vec<(String, String)>,
     pub body: Option<Vec<u8>>,
     pub timeout: Duration,
+    /// Grants checked again before following a redirect.
+    pub grants: Vec<ide_extension::Capability>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -371,6 +526,8 @@ pub struct ProcessOutput {
 /// the environment to add to the inherited one (WIT `process.command`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProcessCommand {
+    /// The invoking project whose executable override applies, independent of cwd.
+    pub approval_root: Option<PathBuf>,
     pub program: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
@@ -388,24 +545,46 @@ pub struct ProcessChunk {
 /// Where `net:` requests may go: the URL's host when it is `https`, or
 /// `http` to the loopback interface.
 pub fn net_host(url: &str) -> Result<String, String> {
-    let (scheme, rest) = url.split_once("://").ok_or_else(|| format!("{url:?} is not an absolute URL"))?;
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    let authority = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-    let host = if let Some(v6) = authority.strip_prefix('[') {
-        v6.split(']').next().unwrap_or_default().to_owned()
+    let parsed = url::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!("unsupported scheme {:?}", parsed.scheme()));
+    }
+    match parsed.host() {
+        Some(url::Host::Domain(host)) => {
+            let host = host.trim_end_matches('.').to_ascii_lowercase();
+            if host.is_empty() || host.contains('*') {
+                return Err("URL must name one exact host".into());
+            }
+            Ok(host)
+        }
+        Some(url::Host::Ipv4(host)) => Ok(host.to_string()),
+        Some(url::Host::Ipv6(host)) => Ok(host.to_string()),
+        None => Err("URL has no host".into()),
+    }
+}
+
+/// The grant required by a URL; loopback HTTP retains the original `net:` rule.
+pub fn net_capability(url: &str) -> Result<ide_extension::Capability, String> {
+    let host = net_host(url)?;
+    if url::Url::parse(url).is_ok_and(|u| u.scheme() == "http")
+        && !matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+    {
+        Ok(ide_extension::Capability::NetHttp(host))
     } else {
-        authority.split(':').next().unwrap_or_default().to_ascii_lowercase()
+        Ok(ide_extension::Capability::Net(host))
+    }
+}
+
+/// The grant a WebSocket URL requires: the same as its `https`/`http` counterpart.
+pub fn websocket_capability(url: &str) -> Result<ide_extension::Capability, String> {
+    let mut parsed = url::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
+    let scheme = match parsed.scheme() {
+        "wss" => "https",
+        "ws" => "http",
+        other => return Err(format!("unsupported WebSocket scheme {other:?}")),
     };
-    if host.is_empty() {
-        return Err(format!("{url:?} has no host"));
-    }
-    let loopback = matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1");
-    match scheme.to_ascii_lowercase().as_str() {
-        "https" => Ok(host),
-        "http" if loopback => Ok(host),
-        "http" => Err(format!("{url:?}: plain http is only allowed to localhost")),
-        other => Err(format!("{url:?}: unsupported scheme {other:?}")),
-    }
+    parsed.set_scheme(scheme).map_err(|()| "invalid WebSocket URL".to_owned())?;
+    net_capability(parsed.as_str())
 }
 
 #[cfg(test)]
@@ -427,9 +606,34 @@ mod tests {
         assert_eq!(net_host("https://API.example.com:8443/v1?x").unwrap(), "api.example.com");
         assert_eq!(net_host("http://localhost:11434/api").unwrap(), "localhost");
         assert_eq!(net_host("https://user:pw@h.io/").unwrap(), "h.io");
-        assert!(net_host("http://example.com/").is_err());
+        assert_eq!(
+            net_capability("http://example.com/").unwrap(),
+            ide_extension::Capability::NetHttp("example.com".into())
+        );
+        for (url, host) in [
+            ("https://EXAMPLE.com.:8443/", "example.com"),
+            ("https://bücher.example/", "xn--bcher-kva.example"),
+            ("https://xn--bcher-kva.example/", "xn--bcher-kva.example"),
+            ("https://127.1/", "127.0.0.1"),
+            ("https://[0:0:0:0:0:0:0:1]:8443/", "::1"),
+            ("https://sub.example.com/", "sub.example.com"),
+        ] {
+            assert_eq!(net_host(url).unwrap(), host);
+        }
+        assert_ne!(net_host("https://аpi.example/").unwrap(), net_host("https://api.example/").unwrap());
+        assert_eq!(
+            websocket_capability("wss://Collab.example.com/socket?room=1").unwrap(),
+            ide_extension::Capability::Net("collab.example.com".into())
+        );
+        assert_eq!(
+            websocket_capability("ws://localhost:9000/").unwrap(),
+            ide_extension::Capability::Net("localhost".into())
+        );
+        assert!(websocket_capability("https://example.com/").is_err());
         assert!(net_host("file:///etc/passwd").is_err());
         assert!(net_host("example.com").is_err());
+        assert!(net_host("https://*.example.com/").is_err());
+        assert!(net_host("https://./").is_err());
     }
 }
 
@@ -442,7 +646,8 @@ pub struct ProviderDocument {
     pub text: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename = "PluginLocation")]
 pub struct Location {
     pub path: PathBuf,
     pub range: ide_core::Range,
@@ -702,6 +907,14 @@ pub struct Endpoint {
     pub location: Location,
 }
 
+/// The clipboard as `ui.read-clipboard` returns it (API 1.11): `None` for a kind it doesn't
+/// hold; `image` is PNG bytes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClipboardContent {
+    pub text: Option<String>,
+    pub image: Option<Vec<u8>>,
+}
+
 /// A notification button that runs one of the publishing plugin's commands.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -709,4 +922,125 @@ pub struct NotificationAction {
     pub label: String,
     pub command: String,
     pub argument: Option<String>,
+}
+
+/// An open editor reported by its window.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenEditor {
+    pub path: String,
+    pub language: String,
+    pub dirty: bool,
+    pub active: bool,
+}
+/// Find in Files options.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TextQuery {
+    pub pattern: String,
+    pub regex: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
+}
+/// A search hit, using UTF-16 coordinates.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct TextMatch {
+    pub location: Location,
+    pub line: String,
+}
+/// Bounded search results.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct TextSearch {
+    pub matches: Vec<TextMatch>,
+    pub limit_hit: bool,
+}
+/// A file's problems from one producer.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct FileProblems {
+    pub path: String,
+    pub source: String,
+    pub diagnostics: Vec<ide_core::Diagnostic>,
+}
+/// An editor decoration.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct Decoration {
+    pub range: ide_core::Range,
+    pub style: String,
+    pub hover: Option<String>,
+    pub after: Option<String>,
+}
+/// A tree decoration.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Type)]
+pub struct FileDecoration {
+    pub badge: Option<String>,
+    pub style: String,
+    pub tooltip: Option<String>,
+    /// Text shown after the name (API 1.7 `set-file-note`).
+    #[serde(default)]
+    pub note: Option<String>,
+    /// `[[contributes.fileIcons]]` id for this file or folder (API 1.8 `set-file-icon`).
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+/// Commit metadata, date in Unix seconds.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitInfo {
+    pub id: String,
+    pub short_id: String,
+    pub author: String,
+    pub author_email: String,
+    pub date: i64,
+    pub subject: String,
+    pub body: String,
+    pub parents: Vec<String>,
+}
+/// One zero-based line's attribution, date in Unix seconds.
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
+pub struct BlameLine {
+    pub line: u32,
+    pub commit: String,
+    pub author: String,
+    pub date: i64,
+    pub summary: String,
+}
+
+/// How an occurrence in a build's dependency graph was resolved (API 1.10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DependencyStatus {
+    Resolved,
+    OmittedForConflict,
+    OmittedForDuplicate,
+    VersionManaged,
+}
+
+/// One occurrence in the flat dependency graph of `build.dependencies` (API 1.10);
+/// `parent` indexes the list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DependencyNode {
+    pub group: String,
+    pub artifact: String,
+    pub version: String,
+    pub scope: String,
+    pub status: DependencyStatus,
+    pub requested_version: Option<String>,
+    pub parent: Option<u32>,
+}
+
+/// Non-secret settings of a plugin-owned project database source (API 1.4).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDataSource {
+    pub id: String,
+    pub name: String,
+    pub driver: String,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub database: Option<String>,
+    pub user: Option<String>,
+    pub url: Option<String>,
+    pub options: Vec<(String, String)>,
 }

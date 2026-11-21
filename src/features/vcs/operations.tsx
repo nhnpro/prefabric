@@ -4,14 +4,15 @@ import { commitKey, commitRepo } from "./multiRoot";
  * cherry-pick or revert, and the Git Log commit actions (Cherry-Pick, Revert
  * Commit, Reset Current Branch to Here, New Tag, Compare with Local).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { ChangedFile, Commit, CompareResult, ResetMode, WorkingTreeChange } from "@/bindings";
 import { executeAction } from "@/platform/actions";
 import { call, commands, isTauri, nextRequestId } from "@/platform/ipc";
-import { Button, Checkbox, Dialog, Icon, Input, Spinner, T } from "@/ui";
+import { Button, Checkbox, Dialog, Icon, Input, Radio, Select, Spinner, T, Toolbar } from "@/ui";
+import { useFilePresentation } from "@/ui/filePresentation";
 import { notifications } from "@/workbench/contributions";
 import { windowBackgroundHex } from "@/workbench/theme";
-import { diffInput, openDiff, type DiffData, type DiffSide } from "./diffInput";
+import { diffInput, openVcsDiff, vcsDiffInFront, type DiffData, type DiffSide } from "./diffInput";
 import { openDialog, promptText } from "./dialogs";
 import { KIND_COLOR, fileCount } from "./model";
 import { runGitOperation, runOp } from "./ops";
@@ -21,11 +22,17 @@ import { showLocalChanges } from "./commitUi";
 import { reloadLog, useGitLog } from "./logStore";
 import { conflictedFiles, currentRepo, currentRepoRoot, refreshNow, repoName, repoOf, useVcs } from "./store";
 import styles from "./common.module.css";
+import resetStyles from "./ResetDialog.module.css";
+import tagStyles from "./TagDialog.module.css";
 import { ComparisonTree } from "./ComparisonTree";
+import { showWorktreeComparison } from "./compareTool";
 import { buildFileTree, type FileTreeNode } from "./fileTree";
 import { tx } from "@/platform/i18n";
 import { displayPath } from "./compareData";
 import { repositoryPath } from "./repositoryPaths";
+import { RepoPicker } from "./gitMenuDialogs";
+import { openRevisionFile } from "./revisionInput";
+import { ipcPath } from "@/platform/paths";
 
 // ---------------------------------------------------------------------------
 // Operation in progress
@@ -50,6 +57,17 @@ const IN_PROGRESS: Record<InProgress, string> = {
 
 export function inProgress(op: string | null | undefined = useVcs.getState().branch?.operation): InProgress | null {
   return op === "rebase" || op === "merge" || op === "cherry-pick" || op === "revert" || op === "am" ? op : null;
+}
+
+/**
+ * Expires the conflict notices (key `vcs.conflicts`: Merge conflicts, All conflicts resolved) once
+ * the merge / rebase / cherry-pick they offer to continue or abort is over, however it ended.
+ */
+export function installOperationNoticeExpiry(): () => void {
+  return useVcs.subscribe((s, prev) => {
+    if (inProgress(prev.branch?.operation) && !inProgress(s.branch?.operation))
+      notifications().expire?.("vcs.conflicts");
+  });
 }
 
 /** "Rebasing main", "Merging", "Cherry-picking"… for the branch widget and banner. */
@@ -324,6 +342,13 @@ const RESET_MODES: Array<{ mode: ResetMode; label: string; hint: string }> = [
     hint: "Files will be reverted to the state of the selected commit, but local changes will be kept intact.",
   },
 ];
+const RESET_CHOICES = RESET_MODES.map(({ mode, label }) => ({ value: mode, label }));
+
+function useRepoHead(root: string | null) {
+  return useVcs(
+    (s) => (root ? s.heads[root] : undefined) ?? ((s.repo ?? s.roots[0] ?? s.root) === root ? s.branch : null),
+  );
+}
 
 /** Git Reset dialog: Reset Current Branch to Here… (log) and Git › Reset HEAD… (`commit` omitted). */
 export function showResetDialog(commit?: Commit) {
@@ -331,10 +356,21 @@ export function showResetDialog(commit?: Commit) {
 }
 
 function ResetDialog({ commit, onClose }: { commit?: Commit; onClose: () => void }) {
-  const [repo] = useState(() => (commit && commitRepo(commit)) || currentRepo());
-  const head = useVcs((s) => s.branch?.head ?? "HEAD");
+  const id = useId();
+  const [repo, setRepo] = useState(() => commitRepo(commit) ?? currentRepo());
+  const roots = useVcs((s) => s.roots);
+  const projectRoot = useVcs((s) => s.root);
+  const root = repo ?? roots[0] ?? projectRoot;
+  const head = useRepoHead(root);
+  const branch = head?.head ?? (head?.headCommit ? tx("Detached HEAD") : "—");
   const [mode, setMode] = useState<ResetMode>("mixed");
   const [target, setTarget] = useState(commit?.id ?? "HEAD");
+  const currentMode = RESET_MODES.find((m) => m.mode === mode);
+  const chooseRepo = (next: string) => {
+    if (next === root) return;
+    setRepo(next);
+    setTarget("HEAD");
+  };
   const run = async () => {
     const rev = target.trim();
     if (!rev) return;
@@ -343,7 +379,7 @@ function ResetDialog({ commit, onClose }: { commit?: Commit; onClose: () => void
       { op: "reset", commit: rev, mode },
       {
         progress: "Resetting",
-        success: tx`Reset ${head} to ${commit ? short(commit.id) : rev} (${mode})`,
+        success: tx`Reset ${head?.head ?? "HEAD"} to ${commit ? short(commit.id) : rev} (${mode})`,
         failure: tx("Reset failed"),
       },
       repo,
@@ -360,41 +396,99 @@ function ResetDialog({ commit, onClose }: { commit?: Commit; onClose: () => void
         { label: "Cancel", role: "cancel" },
       ]}
     >
-      <div className={styles.form} role="radiogroup" aria-label={tx("Reset type")}>
+      <div className={resetStyles.form}>
         {commit ? (
-          <div className={styles.hint}>
-            <T>
-              {
-                "This will reset the current branch head to the selected commit, and update the working tree and the index according to the selected mode:"
-              }
-            </T>
-            <div className={styles.mono} style={{ marginTop: 4 }}>
-              {short(commit.id)} {commit.summary}
+          <div className={resetStyles.confirmation}>
+            <div className={resetStyles.summary}>
+              <span className={resetStyles.source}>
+                <strong>{branch}</strong>
+                {root && roots.length > 1 && <span className={resetStyles.repository}>{repoName(root)}</span>}
+              </span>
+              <Icon name="arrow-right" size={14} />
+              <span className={resetStyles.destination} title={commit.id}>
+                <strong>{short(commit.id)}</strong> <span>{commit.summary}</span>
+                {commit.author && (
+                  <>
+                    {" "}
+                    · <span className={resetStyles.repository}>{commit.author}</span>
+                  </>
+                )}
+              </span>
+            </div>
+            <p className={resetStyles.description}>
+              <T>
+                {
+                  "This will reset the current branch head to the selected commit, and update the working tree and the index according to the selected mode:"
+                }
+              </T>
+            </p>
+            <div className={resetStyles.modes} role="radiogroup" aria-label={tx("Reset type")}>
+              {RESET_MODES.map((m) => (
+                <Radio
+                  key={m.mode}
+                  className={resetStyles.choice}
+                  name={`${id}-mode`}
+                  checked={mode === m.mode}
+                  onChange={() => setMode(m.mode)}
+                  label={
+                    <span className={resetStyles.modeText}>
+                      <T>{m.label}</T>
+                      <span className={resetStyles.hint}>
+                        <T>{m.hint}</T>
+                      </span>
+                    </span>
+                  }
+                />
+              ))}
             </div>
           </div>
         ) : (
-          <>
-            <label className={styles.fieldLabel} htmlFor="openidea-reset-to">
+          <div className={resetStyles.fields}>
+            {roots.length > 1 ? (
+              <>
+                <label className={resetStyles.label} htmlFor={`${id}-repo`}>
+                  <T>Repository:</T>
+                </label>
+                <RepoPicker id={`${id}-repo`} repo={repo} onChange={chooseRepo} />
+              </>
+            ) : (
+              <>
+                <span className={resetStyles.label}>
+                  <T>Repository:</T>
+                </span>
+                <span className={resetStyles.fact}>{root ? repoName(root) : "—"}</span>
+              </>
+            )}
+            <span className={resetStyles.label}>
+              <T>Current branch:</T>
+            </span>
+            <span className={resetStyles.fact} title={branch}>
+              {branch}
+            </span>
+            <label className={`${resetStyles.label} ${resetStyles.modeLabel}`} htmlFor={`${id}-mode`}>
+              <T>Reset type:</T>
+            </label>
+            <div className={resetStyles.modeField}>
+              <Select
+                id={`${id}-mode`}
+                className={resetStyles.modePicker}
+                aria-label="Reset type"
+                value={mode}
+                options={RESET_CHOICES}
+                onChange={setMode}
+              />
+              {currentMode && (
+                <span className={resetStyles.hint}>
+                  <T>{currentMode.hint}</T>
+                </span>
+              )}
+            </div>
+            <label className={resetStyles.label} htmlFor={`${id}-target`}>
               <T>To commit:</T>
             </label>
-            <Input
-              id="openidea-reset-to"
-              data-autofocus
-              mono
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-            />
-          </>
+            <Input id={`${id}-target`} data-autofocus value={target} onChange={(e) => setTarget(e.target.value)} />
+          </div>
         )}
-        {RESET_MODES.map((m) => (
-          <label key={m.mode} className={styles.radioRow}>
-            <input type="radio" name="reset" checked={mode === m.mode} onChange={() => setMode(m.mode)} />
-            <span className={styles.radioText}>
-              {m.label}
-              <span className={styles.hint}>{m.hint}</span>
-            </span>
-          </label>
-        ))}
       </div>
     </Dialog>
   );
@@ -436,16 +530,35 @@ export function showTagDialog() {
 }
 
 function TagDialog({ onClose }: { onClose: () => void }) {
-  const [repo] = useState(currentRepo);
+  const id = useId();
+  const [repo, setRepo] = useState(currentRepo);
+  const roots = useVcs((s) => s.roots);
+  const projectRoot = useVcs((s) => s.root);
+  const root = repo ?? roots[0] ?? projectRoot;
+  const head = useRepoHead(root);
+  const branch = head?.head ?? (head?.headCommit ? tx("Detached HEAD") : "—");
   const [name, setName] = useState("");
   const [commit, setCommit] = useState("HEAD");
   const [message, setMessage] = useState("");
   const [force, setForce] = useState(false);
   const [existing, setExisting] = useState<string[]>([]);
   useEffect(() => {
-    void call(commands.vcsTags(repo)).then(setExisting, () => undefined);
-  }, []);
+    let live = true;
+    void call(commands.vcsTags(repo)).then(
+      (tags) => live && setExisting(tags),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [repo]);
+  const chooseRepo = (root: string) => {
+    if (root === repo) return;
+    setRepo(root);
+    setExisting([]);
+  };
   const error = validateTagName(name, force ? [] : existing);
+  const errorId = name && error ? `${id}-error` : undefined;
   const run = async () => {
     if (error) return;
     onClose();
@@ -462,35 +575,62 @@ function TagDialog({ onClose }: { onClose: () => void }) {
       open
       title="Tag"
       onClose={onClose}
-      width={460}
+      width={500}
       buttons={[
         { label: "Create Tag", role: "default", disabled: !!error, onClick: () => void run() },
         { label: "Cancel", role: "cancel" },
       ]}
     >
-      <div className={styles.form}>
-        <label className={styles.fieldLabel} htmlFor="openidea-tag-name">
+      <div className={tagStyles.form}>
+        {roots.length > 1 ? (
+          <>
+            <label className={tagStyles.label} htmlFor={`${id}-repository`}>
+              <T>Repository:</T>
+            </label>
+            <RepoPicker id={`${id}-repository`} repo={repo} onChange={chooseRepo} />
+          </>
+        ) : (
+          <>
+            <span className={tagStyles.label}>
+              <T>Repository:</T>
+            </span>
+            <span className={tagStyles.context}>{root ? repoName(root) : "—"}</span>
+          </>
+        )}
+        <span className={tagStyles.label}>
+          <T>Current branch:</T>
+        </span>
+        <span className={tagStyles.context} title={branch}>
+          {branch}
+        </span>
+        <label className={tagStyles.nameLabel} htmlFor={`${id}-name`}>
           <T>Tag name:</T>
         </label>
-        <Input
-          id="openidea-tag-name"
-          data-autofocus
-          mono
-          value={name}
-          invalid={!!name && !!error}
-          onChange={(e) => setName(e.target.value)}
-        />
-        {name && error && <div className={styles.error}>{error}</div>}
-        <Checkbox checked={force} onChange={setForce} label="Force" />
-        <label className={styles.fieldLabel} htmlFor="openidea-tag-commit">
+        <div className={tagStyles.nameField}>
+          <Input
+            id={`${id}-name`}
+            data-autofocus
+            value={name}
+            invalid={!!errorId}
+            aria-describedby={errorId}
+            onChange={(e) => setName(e.target.value)}
+          />
+          {errorId && (
+            <div className={styles.error} id={errorId}>
+              {error}
+            </div>
+          )}
+        </div>
+        <Checkbox className={tagStyles.force} checked={force} onChange={setForce} label="Force" />
+        <label className={tagStyles.label} htmlFor={`${id}-commit`}>
           <T>Commit:</T>
         </label>
-        <Input id="openidea-tag-commit" mono value={commit} onChange={(e) => setCommit(e.target.value)} />
-        <label className={styles.fieldLabel} htmlFor="openidea-tag-message">
+        <Input id={`${id}-commit`} value={commit} onChange={(e) => setCommit(e.target.value)} />
+        <label className={tagStyles.messageLabel} htmlFor={`${id}-message`}>
           <T>Message:</T>
         </label>
         <textarea
-          id="openidea-tag-message"
+          id={`${id}-message`}
           className={styles.textarea}
           rows={4}
           value={message}
@@ -503,41 +643,73 @@ function TagDialog({ onClose }: { onClose: () => void }) {
 }
 
 /** Compare with Local: files that differ between the commit and the working tree. */
-export function showCompareWithLocal(commit: Commit) {
+export function showCompareWithLocal(commit: Commit, historyTarget?: string | null) {
+  if (historyTarget) {
+    const repo = commitRepo(commit) ?? repoOf(historyTarget) ?? currentRepoRoot();
+    const historicalPath = commit.historyPath && repo ? repositoryPath(repo, commit.historyPath) : historyTarget;
+    void openVcsDiff({
+      path: historyTarget,
+      left: { type: "rev", rev: commit.id, path: historicalPath, label: short(commit.id) },
+      right: { type: "worktree" },
+    });
+    return;
+  }
   showDiffWithWorkingTree(commit.id, short(commit.id));
 }
 
-/** Files that differ between `rev` (a commit or branch) and the working tree. */
+/** Opens the selected File History entry's file exactly as it exists in that commit. */
+export function showFileAtRevision(commit: Commit, target: string, external = false) {
+  const repo = commitRepo(commit) ?? repoOf(target) ?? currentRepoRoot();
+  if (!repo) return;
+  const root = ipcPath(repo).replace(/\/$/, "");
+  const file = ipcPath(target);
+  const relative = file.startsWith(`${root}/`) ? file.slice(root.length + 1) : file;
+  const path = commit.historyPath ?? relative;
+  openRevisionFile(repo, commit.id, path, external);
+}
+
+/** Files that differ between `rev` (a commit or branch) and the working tree, in the Compare tool window. */
 export function showDiffWithWorkingTree(rev: string, label = rev) {
-  showComparison({ rev, label }, null);
+  showWorktreeComparison(rev, label);
 }
 
 /** IDEA's Compare Versions of two Git Log commits: files that differ between them, older first. */
-export function showCompareVersions(older: Commit, newer: Commit) {
+export function showCompareVersions(older: Commit, newer: Commit, historyTarget?: string | null) {
+  if (historyTarget) {
+    const repo = commitRepo(older) ?? commitRepo(newer) ?? repoOf(historyTarget) ?? currentRepoRoot();
+    const olderPath = older.historyPath && repo ? repositoryPath(repo, older.historyPath) : historyTarget;
+    const newerPath = newer.historyPath && repo ? repositoryPath(repo, newer.historyPath) : historyTarget;
+    void openVcsDiff({
+      path: historyTarget,
+      left: { type: "rev", rev: older.id, path: olderPath, label: short(older.id) },
+      right: { type: "rev", rev: newer.id, path: newerPath, label: short(newer.id) },
+    });
+    return;
+  }
   showComparison({ rev: older.id, label: short(older.id) }, { rev: newer.id, label: short(newer.id) });
 }
 
-/** Files that differ between two revisions (e.g. two branches from Compare with Current). */
-export function showCompareRevisions(from: string, to: string, fromLabel = from, toLabel = to) {
-  showComparison({ rev: from, label: fromLabel }, { rev: to, label: toLabel });
+/** Files that differ between two revisions (e.g. two branches from Compare with Current) of `repo`. */
+export function showCompareRevisions(from: string, to: string, fromLabel = from, toLabel = to, repo = currentRepo()) {
+  showComparison({ rev: from, label: fromLabel }, { rev: to, label: toLabel }, undefined, repo);
 }
 
 export function showPathComparison(paths: string[], rev: string, repositories: string[] | null) {
   showComparison({ rev, label: rev }, null, { paths, repositories });
 }
 
-function showComparison(from: Revision, to: Revision | null, scope?: ScopedComparison) {
+function showComparison(from: Revision, to: Revision | null, scope?: ScopedComparison, repo = currentRepo()) {
   if (!isTauri()) {
-    openDialog((close) => <ChangesBetweenDialog from={from} to={to} scope={scope} onClose={close} />);
+    openDialog((close) => <ChangesBetweenDialog from={from} to={to} scope={scope} repo={repo} onClose={close} />);
     return;
   }
-  const comparison = { from, to, scope: scope ?? null, repo: currentRepo() };
+  const comparison = { from, to, scope: scope ?? null, repo };
   void call(commands.windowOpenComparison(comparison, windowBackgroundHex())).catch((error) =>
     notifications().notify({ level: "error", title: "Could not open comparison", body: String(error) }),
   );
 }
 
-interface Revision {
+export interface Revision {
   rev: string;
   label: string;
 }
@@ -547,11 +719,52 @@ interface ScopedComparison {
   repositories: string[] | null;
 }
 
-interface ComparisonFile extends ChangedFile {
+export interface ComparisonFile extends ChangedFile {
   root: string;
   revision: string;
   added?: number;
   removed?: number;
+}
+
+function WorktreeFileIcon({ path }: { path: string }) {
+  const { icon } = useFilePresentation(path);
+  return <Icon name={icon} size={14} />;
+}
+
+/** A working-tree file shows the Project tree's icon (Java and Kotlin declarations, Spring config). */
+function renderWorktreeFileIcon(file: ComparisonFile) {
+  if (!file.root || file.kind === "deleted") return null;
+  return <WorktreeFileIcon path={repositoryPath(file.root, file.path)} />;
+}
+
+/**
+ * Diff content of one comparison file. `swapped` exchanges the two sides
+ * (the Compare tool window's Swap Sides), for worktree and revision diffs alike.
+ */
+export function comparisonDiffData(
+  file: ComparisonFile,
+  from: Revision,
+  to: Revision | null,
+  swapped: boolean,
+): DiffData {
+  const missing = (label: string): DiffSide => ({ type: "text", text: "", label });
+  const path = repositoryPath(file.root, file.path);
+  const left: DiffSide =
+    file.kind === "added" || file.kind === "untracked"
+      ? missing("(does not exist)")
+      : {
+          type: "rev",
+          rev: file.revision,
+          label: from.label,
+          path: file.oldPath ? repositoryPath(file.root, file.oldPath) : undefined,
+        };
+  const right: DiffSide =
+    file.kind === "deleted"
+      ? missing("(deleted)")
+      : !to
+        ? { type: "worktree" }
+        : { type: "rev", rev: to.rev, label: to.label };
+  return swapped ? { path, left: right, right: left } : { path, left, right };
 }
 
 export function comparisonEmpty(revision: string, repositories: number): string {
@@ -565,26 +778,42 @@ export function ChangesBetweenDialog({
   from,
   to,
   scope,
+  repo: givenRepo,
   onClose,
   native = false,
   onCaption,
   onShowDiff,
+  swapped = false,
+  onSelect,
+  listOnly = false,
 }: {
   from: Revision;
   to: Revision | null;
   scope?: ScopedComparison;
+  /** The repository compared (the selected one when omitted). */
+  repo?: string | null;
   onClose: () => void;
   /** Content of the comparison window rather than a dialog: its caption goes to `onCaption`. */
   native?: boolean;
   onCaption?: (caption: string) => void;
   onShowDiff?: (data: DiffData) => void;
+  /** Exchange the two sides (the Compare tool window's Swap Sides). */
+  swapped?: boolean;
+  /** Reports the selected file (the Compare tool window's Jump to Source / Swap Sides). */
+  onSelect?: (file: ComparisonFile | null) => void;
+  /** Files only, each diff opening in the editor (the Compare tool window's narrow sidebar). */
+  listOnly?: boolean;
 }) {
-  const [root] = useState(currentRepoRoot);
-  const [repo] = useState(currentRepo);
+  const [repo] = useState(() => (givenRepo === undefined ? currentRepo() : givenRepo));
+  const [root] = useState(() => repo ?? currentRepoRoot());
   const [files, setFiles] = useState<ComparisonFile[] | null>(null);
   const [result, setResult] = useState<CompareResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [current, setCurrent] = useState<ComparisonFile | null>(null);
+  const [current, setCurrentState] = useState<ComparisonFile | null>(null);
+  const setCurrent = (file: ComparisonFile | null) => {
+    setCurrentState(file);
+    onSelect?.(file);
+  };
   const fromRev = from.rev;
   const toRev = to?.rev ?? null;
   useEffect(() => {
@@ -633,27 +862,7 @@ export function ChangesBetweenDialog({
       };
     });
   }, [files, result, scope]);
-  const diffFor = (f: ComparisonFile): DiffData => {
-    const missing = (label: string): DiffSide => ({ type: "text", text: "", label });
-    return {
-      path: repositoryPath(f.root, f.path),
-      left:
-        f.kind === "added" || f.kind === "untracked"
-          ? missing("(does not exist)")
-          : {
-              type: "rev",
-              rev: f.revision,
-              label: from.label,
-              path: f.oldPath ? repositoryPath(f.root, f.oldPath) : undefined,
-            },
-      right:
-        f.kind === "deleted"
-          ? missing("(deleted)")
-          : !to
-            ? { type: "worktree" }
-            : { type: "rev", rev: to.rev, label: to.label },
-    };
-  };
+  const diffFor = (f: ComparisonFile): DiffData => comparisonDiffData(f, from, to, swapped);
   const input = current ? diffInput(diffFor(current)) : null;
   const title = to
     ? tx`Changes between ${from.label} and ${to.label}`
@@ -672,8 +881,9 @@ export function ChangesBetweenDialog({
     if (!current) return;
     if (onShowDiff) onShowDiff(diffFor(current));
     else {
-      void openDiff(diffFor(current));
-      onClose();
+      void openVcsDiff(diffFor(current));
+      // A diff window opens on top of this list (#1863); an editor tab would sit behind it.
+      if (!vcsDiffInFront()) onClose();
     }
   };
   const contents = (
@@ -717,8 +927,11 @@ export function ChangesBetweenDialog({
           current={current}
           onSelect={setCurrent}
           diffFor={diffFor}
+          renderFileIcon={listOnly && !to ? renderWorktreeFileIcon : undefined}
           getColor={(f) => KIND_COLOR[f.kind === "untracked" ? "added" : f.kind]}
           ariaLabel="Changed files"
+          inlineDiff={!listOnly}
+          openOnActivate={listOnly}
           renderDetails={(n) =>
             n.file ? (
               <>
@@ -734,18 +947,33 @@ export function ChangesBetweenDialog({
       ) : null}
     </>
   );
-  if (native)
+  if (native) {
+    const diffButton = (
+      <Button
+        variant={listOnly ? "primary" : "ghost"}
+        size={listOnly ? "normal" : "small"}
+        icon={listOnly ? undefined : "diff"}
+        disabled={!current}
+        onClick={showDiff}
+      >
+        Show Diff
+      </Button>
+    );
     return (
       <div className={styles.comparisonWindow}>
+        {!listOnly && (
+          <Toolbar className={styles.comparisonWindowToolbar} aria-label="Comparison actions">
+            {diffButton}
+          </Toolbar>
+        )}
         <div className={styles.comparisonWindowBody}>{contents}</div>
         <div className={styles.comparisonWindowFooter}>
           <Button onClick={onClose}>Close</Button>
-          <Button variant="primary" disabled={!current} onClick={showDiff}>
-            Show Diff
-          </Button>
+          {listOnly && diffButton}
         </div>
       </div>
     );
+  }
   return (
     <Dialog
       open

@@ -1,10 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Branch, Commit } from "@/bindings";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const vcsCommitFiles = vi.fn();
 const vcsDiffNumstat = vi.fn();
 const vcsTags = vi.fn();
+const { deleteBranches } = vi.hoisted(() => ({ deleteBranches: vi.fn() }));
+vi.mock("../branchOps", async (original) => ({
+  ...(await original<typeof import("../branchOps")>()),
+  deleteBranches,
+}));
 
 vi.mock("@/platform/ipc", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/platform/ipc")>();
@@ -22,8 +27,13 @@ vi.mock("@/platform/ipc", async (importOriginal) => {
   };
 });
 
+import { LogSettingsPage } from "../LogSettingsPage";
+import { canDeleteBranch } from "../branchOps";
 import { buildBranchTree, filterBranchTree } from "../branches";
 import { buildFileTree } from "../fileTree";
+import { BranchesPanel } from "../log/BranchesPanel";
+import { CommitDetails, changesMenu } from "../log/CommitDetails";
+import { graphOptionsMenu } from "../log/FilterBar";
 import {
   EMPTY_TREE,
   assignLineStats,
@@ -34,11 +44,10 @@ import {
   toLogChanges,
   useLogChanges,
 } from "../logChanges";
-import { canDeleteBranch, canUpdateBranch, useBranchesPane } from "../logPaneActions";
-import { BranchesPanel, CommitDetails, changesMenu, graphOptionsMenu } from "../GitLog";
-import { LogSettingsPage } from "../LogSettingsPage";
 import { DEFAULT_LOG_OPTIONS, useLogOptions } from "../logOptions";
+import { canUpdateBranch, useBranchesPane } from "../logPaneActions";
 import { emptyFilters, useGitLog } from "../logStore";
+import { renameFrom } from "../model";
 import { useVcs } from "../store";
 
 const b = (name: string, opts: Partial<Branch> = {}): Branch => ({
@@ -75,9 +84,19 @@ afterEach(() => {
   vcsCommitFiles.mockReset();
   vcsDiffNumstat.mockReset();
   vcsTags.mockReset();
+  deleteBranches.mockReset();
 });
 
 describe("changed files model", () => {
+  it("carries a symbolic link's target kind from both change shapes", () => {
+    const [one] = toLogChanges([{ path: "link1", kind: "added", oldPath: null, link: "dir" }], commit);
+    const [many] = toLogChanges(
+      [{ path: "link1", kind: "added", oldPath: null, before: null, after: commit.id, link: "unresolved" }],
+      null,
+    );
+    expect([one!.link, many!.link]).toEqual(["dir", "unresolved"]);
+  });
+
   it("keeps the revisions before and after each file's change", () => {
     const [mod, add, del] = toLogChanges(
       [
@@ -139,6 +158,20 @@ describe("changed files model", () => {
   });
 });
 
+describe("rename label", () => {
+  it("names the original directory of a move, relative to the file's new directory (#3529)", () => {
+    // The issue's scenario: `git mv old/original.txt new/moved.txt`.
+    expect(renameFrom("new/moved.txt", "old/original.txt")).toBe("moved from ../old/original.txt");
+    // A rename within one directory stays as written.
+    expect(renameFrom("old/renamed.txt", "old/original.txt")).toBe("renamed from original.txt");
+    expect(renameFrom("b.ts", "a.ts")).toBe("renamed from a.ts");
+    // Moves across the repository root climb with `..` or stay below it.
+    expect(renameFrom("moved.txt", "old/original.txt")).toBe("moved from old/original.txt");
+    expect(renameFrom("new/moved.txt", "original.txt")).toBe("moved from ../original.txt");
+    expect(renameFrom("a/b/c.txt", "a/c.txt")).toBe("moved from ../c.txt");
+  });
+});
+
 describe("changed files pane", () => {
   it("shows the files flat or by directory and shares the selection with its actions", async () => {
     vcsCommitFiles.mockResolvedValue({
@@ -191,6 +224,44 @@ describe("changed files pane", () => {
     useLogOptions.setState({ showLineStats: false });
     await waitFor(() => expect(screen.queryByLabelText("2 lines added")).not.toBeInTheDocument());
   });
+
+  it("shows a moved file's original directory in its rename label", async () => {
+    vcsCommitFiles.mockResolvedValue({
+      status: "ok",
+      data: [
+        // The issue's scenario: `git mv old/original.txt new/moved.txt`.
+        { path: "new/moved.txt", kind: "renamed", oldPath: "old/original.txt" },
+        { path: "old/renamed.txt", kind: "renamed", oldPath: "old/original.txt" },
+      ],
+    });
+    useGitLog.setState({ commits: [commit], selected: commit.id, selection: [commit.id] });
+    render(<CommitDetails commits={[commit]} />);
+    expect(await screen.findByText("moved from ../old/original.txt")).toBeInTheDocument();
+    // A rename within one directory keeps naming just the file.
+    expect(screen.getByText("renamed from original.txt")).toBeInTheDocument();
+  });
+
+  it("marks symbolic links with the target's folder or file icon and the link arrow (#3777)", async () => {
+    vcsCommitFiles.mockResolvedValue({
+      status: "ok",
+      data: [
+        { path: "dir1/example.txt", kind: "added", oldPath: null },
+        { path: "link1", kind: "added", oldPath: null, link: "dir" },
+        { path: "note-link.txt", kind: "added", oldPath: null, link: "file" },
+        { path: "link3", kind: "added", oldPath: null, link: "unresolved" },
+      ],
+    });
+    useGitLog.setState({ commits: [commit], selected: commit.id, selection: [commit.id] });
+    render(<CommitDetails commits={[commit]} />);
+    const row = (name: string) => screen.getByText(name).closest('[role="treeitem"]') as HTMLElement;
+    await screen.findByText("link1");
+    const linkOf = (name: string) => row(name).querySelector("[data-link]")?.getAttribute("data-link") ?? null;
+    expect(["link1", "note-link.txt", "link3", "example.txt"].map(linkOf)).toEqual(["dir", "file", "unresolved", null]);
+    expect(within(row("link1")).getByLabelText("Symbolic link")).toBeInTheDocument();
+    expect(within(row("note-link.txt")).getByLabelText("Symbolic link")).toBeInTheDocument();
+    expect(within(row("link3")).getByLabelText("Symbolic link, target not found in this revision")).toBeInTheDocument();
+    expect(within(row("example.txt")).queryByLabelText(/Symbolic link/)).toBeNull();
+  });
 });
 
 describe("Branches pane", () => {
@@ -213,6 +284,32 @@ describe("Branches pane", () => {
     expect(canUpdateBranch({ ref: "origin/x", branch: b("origin/x", { remote: true }) })).toBe(false);
   });
 
+  it.each([true, false])("context Delete respects membership in the selection (%s)", async (inside) => {
+    vcsTags.mockResolvedValue({ status: "ok", data: ["v1"] });
+    useVcs.setState({
+      root: "/p",
+      repo: "/p",
+      branchesLoaded: true,
+      branches: [b("main", { current: true }), b("one"), b("two"), b("outside")],
+    });
+    render(<BranchesPanel />);
+    fireEvent.doubleClick(await screen.findByText("Tags"));
+    fireEvent.mouseDown(screen.getByText("one"));
+    fireEvent.mouseDown(screen.getByText("two"), { metaKey: true });
+    fireEvent.mouseDown(await screen.findByText("v1"), { metaKey: true });
+    fireEvent.mouseDown(screen.getByText("Local"), { metaKey: true });
+    fireEvent.contextMenu(screen.getByText(inside ? "two" : "outside"));
+    const { useContextMenuStore, hideContextMenu } = await import("@/ui/Menu");
+    const item = useContextMenuStore.getState().menu!.items.find((i) => "label" in i && i.label === "Delete");
+    expect(item).toBeDefined();
+    if (item && "run" in item) item.run?.();
+    await waitFor(() => expect(deleteBranches).toHaveBeenCalledTimes(1));
+    expect(deleteBranches.mock.calls[0]![0].map((t: { ref: string }) => t.ref)).toEqual(
+      inside ? ["one", "two", "v1"] : ["outside"],
+    );
+    hideContextMenu();
+  });
+
   it("has a vertical toolbar acting on the selected branch, and shows tags", async () => {
     vcsTags.mockResolvedValue({ status: "ok", data: ["v1"] });
     useVcs.setState({
@@ -226,6 +323,12 @@ describe("Branches pane", () => {
     expect(screen.getByRole("toolbar", { name: "Branches" })).toHaveAttribute("aria-orientation", "vertical");
     expect(screen.getByPlaceholderText("Branch or tag")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete Branch" })).toBeDisabled();
+    fireEvent.mouseDown(screen.getByText("main"));
+    expect(screen.getByRole("button", { name: "Delete Branch" })).toBeDisabled();
+    fireEvent.contextMenu(screen.getByText("main"));
+    const { useContextMenuStore, hideContextMenu } = await import("@/ui/Menu");
+    expect(useContextMenuStore.getState().menu!.items.some((i) => "label" in i && i.label === "Delete")).toBe(false);
+    hideContextMenu();
     fireEvent.mouseDown(screen.getByText("feature"));
     expect(useBranchesPane.getState().selected.map((t) => t.ref)).toEqual(["feature"]);
     expect(screen.getByRole("button", { name: "Delete Branch" })).toBeEnabled();

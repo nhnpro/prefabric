@@ -5,6 +5,7 @@ import { setContext } from "@/platform/context";
 import type { RunConfig } from "@/platform/ipc";
 import {
   useDebugRunSessions,
+  providePluginTestSelector,
   provideNotificationService,
   provideToolWindowService,
   registerMenuGroup,
@@ -15,7 +16,20 @@ import { ConsoleModel } from "./console";
 import { ConsoleView, type ConsoleInput } from "./ConsoleView";
 import { buildRows, mnemonics } from "./ConfigChooser";
 import { activate } from "./index";
-import { closeSessionTab, resetRuns, runtime, startRun, useRun, type RunSession } from "./store";
+import { launchProduced } from "./contextRun";
+import {
+  onRunExited,
+  closeSessionTab,
+  resetRuns,
+  runtime,
+  startRun,
+  debugSingleInstance,
+  stopRunningInstances,
+  useRun,
+  runSelectedTests,
+  rerunFailed,
+  type RunSession,
+} from "./store";
 
 const confirm = vi.hoisted(() => vi.fn(async () => true));
 const confirmTerminate = vi.hoisted(() => vi.fn(async () => true));
@@ -53,7 +67,7 @@ const running = (id: string, c: RunConfig, runId: number | null = null): RunSess
 
 beforeEach(() => {
   resetRuns();
-  useDebugRunSessions.setState({ sessions: [] });
+  useDebugRunSessions.setState({ sessions: [], serviceSessions: [] });
   confirm.mockClear();
   confirm.mockResolvedValue(true);
   provideToolWindowService({ show: vi.fn(), isVisible: () => true } as unknown as ToolWindowService);
@@ -83,6 +97,87 @@ describe("single-instance runs", () => {
     await startRun(app, "run1");
     expect(confirm).not.toHaveBeenCalled();
     expect(useRun.getState().sessions.map((s) => s.id)).toEqual(["run1"]);
+  });
+
+  const debugging = (c: RunConfig) => {
+    const stop = vi.fn(async () => {});
+    useDebugRunSessions.setState({
+      serviceSessions: [
+        { id: 1, config: c, startedAt: 0, status: "running", processId: null, rerun: null, stop, show: () => {} },
+      ],
+    });
+    return stop;
+  };
+
+  it("Debug on a configuration being debugged or run asks, then stops those instances", async () => {
+    const app = config("app");
+    const stop = debugging(app);
+    useRun.setState({ sessions: [running("run1", app)] });
+    expect(await stopRunningInstances(app)).toBe(true);
+    expect(confirm).toHaveBeenCalledWith("app", 2);
+    expect(stop).toHaveBeenCalled();
+    confirm.mockResolvedValue(false);
+    expect(await stopRunningInstances(app)).toBe(false);
+    expect(await stopRunningInstances(config("other"))).toBe(true);
+    expect(await stopRunningInstances(config("app", { allowParallel: true }))).toBe(true);
+  });
+
+  it("debugs one instance at a time: stops the debugged one first, ignores a Debug while preparing", async () => {
+    const app = config("app");
+    const stop = debugging(app);
+    let finish = () => {};
+    const launch = vi.fn(async () => {});
+    launch.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          expect(stop).toHaveBeenCalled();
+          finish = resolve;
+        }),
+    );
+    const first = debugSingleInstance(app, launch);
+    await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
+    expect(confirm).toHaveBeenCalledWith("app", 1);
+    await debugSingleInstance(app, launch);
+    expect(launch).toHaveBeenCalledTimes(1);
+    finish();
+    await first;
+
+    confirm.mockResolvedValue(false);
+    await debugSingleInstance(app, launch);
+    expect(launch).toHaveBeenCalledTimes(1);
+    await debugSingleInstance(config("app", { allowParallel: true }), launch);
+    expect(launch).toHaveBeenCalledTimes(2);
+  });
+
+  it("Debug on a compiled single file being debugged asks before building it again", async () => {
+    const file = config("context:file:main.rs", { kind: "rustc", debugAdapter: "codelldb" });
+    const stop = debugging(file);
+    const produced = {
+      name: "main.rs",
+      scope: "file" as const,
+      config: file,
+      debug: {
+        build: config("context:build:main.rs", { name: "Build main.rs" }),
+        config: { ...file, kind: "native" },
+      },
+    };
+    confirm.mockResolvedValue(false);
+    await launchProduced(produced, true);
+    expect(confirm).toHaveBeenCalledWith("context:file:main.rs", 1);
+    expect(stop).not.toHaveBeenCalled();
+    expect(useRun.getState().sessions).toEqual([]);
+
+    confirm.mockResolvedValue(true);
+    await launchProduced(produced, true);
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it("Run on a configuration being debugged asks and stops the debug session", async () => {
+    const app = config("app");
+    const stop = debugging(app);
+    await startRun(app);
+    expect(confirm).toHaveBeenCalledWith("app", 1);
+    expect(stop).toHaveBeenCalled();
   });
 
   it("starts another instance when parallel runs are allowed", async () => {
@@ -263,5 +358,73 @@ describe("console input", () => {
     fireEvent.paste(log, { clipboardData: { getData: () => "1\r\n2\n3" } });
     expect(vi.mocked(input.onSubmit).mock.calls).toEqual([["x1"], ["2"]]);
     expect(input.onChange).toHaveBeenLastCalledWith("3");
+  });
+});
+
+describe("plugin test selection launches", () => {
+  it("keeps the owning configuration id, selected argv and original config when running tree tests", async () => {
+    const base = config("plugin:example:tests", {
+      kind: "plugin",
+      detected: true,
+      isTest: true,
+      params: { framework: "plugin" },
+      args: ["all"],
+    });
+    const session = (await startRun(base))!;
+    const tests = runtime(session.id)!.tests!;
+    tests.apply([{ type: "result", path: ["suite", "case"], status: "failed" }]);
+    const selector = vi.fn().mockResolvedValue(["--only", "suite::case"]);
+    const dispose = providePluginTestSelector(selector);
+    try {
+      expect(await runSelectedTests(session.id, ["suite"], false)).toBe(true);
+      const selected = useRun.getState().sessions.find((s) => s.id === session.id)!;
+      expect(selected.config.id).toBe(base.id);
+      expect(selected.config.args).toEqual(["--only", "suite::case"]);
+      expect(selected.baseConfig).toEqual(base);
+      expect(selector).toHaveBeenCalledWith(base.id, [["suite", "case"]]);
+      expect(useRun.getState().temporary).toEqual([]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("does not launch when the plugin cannot filter the selection", async () => {
+    const base = config("plugin:example:tests", {
+      kind: "plugin",
+      detected: true,
+      isTest: true,
+      params: { framework: "plugin" },
+    });
+    const session = (await startRun(base))!;
+    runtime(session.id)!.tests!.apply([{ type: "result", path: ["case"], status: "failed" }]);
+    const dispose = providePluginTestSelector(async () => null);
+    try {
+      expect(await runSelectedTests(session.id, ["case"], false)).toBe(false);
+      expect(await rerunFailed(session.id)).toBe(false);
+      expect(useRun.getState().sessions[0]).toBe(session);
+    } finally {
+      dispose();
+    }
+  });
+});
+
+describe("Go SDK recovery", () => {
+  it.each([
+    ["mise ERROR No version is set for shim: go", "go", 1, true],
+    ["No version is set for shim: go", "shell", 1, false],
+    ["compile error", "go", 1, false],
+    ["No version is set for shim: go", "go", 0, false],
+  ] as const)("offers Go settings for %s (%s, %s)", async (text, kind, code, expected) => {
+    const notify = vi.fn();
+    provideNotificationService({ notify });
+    const session = (await startRun(config("go", { kind })))!;
+    runtime(session.id)!.console.append({ kind: "stderr", text: text.slice(0, 12) });
+    runtime(session.id)!.console.append({ kind: "stderr", text: text.slice(12) + "\n" });
+    const runId = 4321 as NonNullable<RunSession["runId"]>;
+    useRun.setState((s) => ({ sessions: s.sessions.map((x) => ({ ...x, runId })) }));
+    onRunExited(runId, code);
+    await vi.waitFor(() => expect(useRun.getState().sessions[0]!.status).toBe("finished"));
+    expect(notify).toHaveBeenCalledTimes(expected ? 1 : 0);
+    if (expected) expect(notify.mock.calls[0]![0].actions[0].label).toBe("Go Settings…");
   });
 });

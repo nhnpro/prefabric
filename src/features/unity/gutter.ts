@@ -4,7 +4,8 @@
  * a click opens its documentation. The column exists only while a file has such methods.
  */
 import { Compartment, RangeSet, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
-import { EditorView, GutterMarker, ViewPlugin, gutter, type ViewUpdate } from "@codemirror/view";
+import { EditorView, GutterMarker, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { iconAreaSource, mapLineStart } from "@/editor/api";
 import { openExternalUrl } from "@/platform/openUrl";
 import { tx } from "@/platform/i18n";
 import { gutterIconMarkup } from "@/ui";
@@ -53,7 +54,7 @@ const placedField = StateField.define<Placed[]>({
   update(value, tr) {
     for (const e of tr.effects) if (e.is(setPlaced)) return e.value;
     if (!tr.docChanged || !value.length) return value;
-    return value.map((p) => ({ ...p, pos: tr.state.doc.lineAt(tr.changes.mapPos(p.pos, -1)).from }));
+    return value.map((p) => ({ ...p, pos: mapLineStart(tr, p.pos) }));
   },
 });
 
@@ -101,8 +102,9 @@ class EventFunctionMarker extends GutterMarker {
   }
 }
 
-const markerColumn: Extension = gutter({
-  class: `${styles.gutter} cm-openidea-gutter-unityEvents`,
+// In the shared icon area, after the inheritance markers.
+const markerColumn: Extension = iconAreaSource.of({
+  order: 60,
   markers: (view) =>
     RangeSet.of(
       view.state.field(placedField).map((p) => new EventFunctionMarker(p.message).range(p.pos)),

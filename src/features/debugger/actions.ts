@@ -7,6 +7,7 @@ import {
   isTauri,
   nextRequestId,
   type AttachableProcess,
+  type DebugSessionId,
   type LaunchConfig,
   type RunConfig,
   type RunId,
@@ -14,6 +15,8 @@ import {
 import { workflowSettings } from "@/platform/workflowSettings";
 import { downloadJdkActions } from "@/platform/jdk";
 import { useProject } from "@/platform/project";
+import { isRemoteWindow } from "@/platform/remote";
+import { openExternalUrl } from "@/platform/openUrl";
 import { activeEditor } from "@/editor/api";
 import type { EditorView } from "@codemirror/view";
 import { maybeEditorService, notifications, showStatusInfo, toolWindowService } from "@/workbench/contributions";
@@ -29,11 +32,29 @@ import {
   useBreakpoints,
 } from "./breakpoints/store";
 import { removeAllSpecial, specialAt, toggleFieldAt, toggleMethodAt } from "./breakpoints/special";
+import { removeAllExceptionClasses } from "./breakpoints/exceptionClasses";
 import { fieldAt, methodAt } from "./breakpoints/symbols";
 import { toggleBreakpointSmart } from "./breakpoints/toggle";
-import { isJavaAttachTarget, isJavaDebuggable, javaAttachConfig, javaLaunchConfig } from "./java";
-import { reloadChangedClasses } from "./hotswap";
-import { debugUnsupportedReason, launchConfigFor } from "./launch";
+import {
+  isJavaAttachTarget,
+  isJavaDebuggable,
+  javaAttachConfig,
+  javaLaunchConfig,
+  jvmAttachDebuggerReady,
+} from "./java";
+import { cancelHotSwapBuild, reloadChangedClasses } from "./hotswap";
+import { refreshMemory, useMemory } from "./memory/memoryState";
+import { closeInstances, instancesOutdated, showInstances, showReferrers, useInstances } from "./memory/instancesState";
+import { jumpToClass } from "./memory/jumpToClass";
+import { captureHeap } from "./heap/heapState";
+import { stopRecording, traceStreamChain } from "./streams/streamState";
+import { isTracing, useStreamTrace } from "./streams/streamStore";
+import { startPageProfile, stopPageProfile } from "./js/profile";
+import { activeCapturedSnapshot, openHeapDump, saveHeapDump } from "./heap/heapDumpFiles";
+import { browserLaunch, browserLaunchConfig, browserUrl, installedDebugBrowser, isBrowserConfig } from "./browser";
+import { warnPinnedFlutterDevice } from "@/workbench/flutterDevices";
+import { DEVTOOLS_WINDOWS, devToolsUrl, refreshDevTools } from "./flutter/devTools";
+import { debugUnsupportedReason, launchConfigFor, withEnvFiles } from "./launch";
 import {
   isPythonAttachTarget,
   isRemoteConfig,
@@ -47,21 +68,26 @@ import {
   resumeExecution,
   evaluate,
   isLive,
+  justDetached,
+  pausedThread,
   rerunSession,
   revealFrame,
   rootOf,
+  selectedFrame,
   sessionSupports,
   showExecutionPoint,
+  startBrowserSession,
   startSession,
   startPreparedSession,
   stopSession,
   stopAssociatedProcess,
+  stopTarget,
   useDebug,
   type DebugSession,
 } from "./state";
 import { focusedDebugView } from "./ui/focusedView";
 import { browseFocusedConsoleHistory } from "./ui/expressionHistory";
-import { expressionAt, valueHint } from "./editor/valueTooltip";
+import { expressionAt, showQuickValue } from "./editor/valueTooltip";
 import { mouseEvaluateTarget } from "./editor/quickEvaluate";
 import { showHint } from "@/editor/lsp/hint";
 import { pausedLineTargets, startInlineSmartStep } from "./editor/smartStep";
@@ -73,9 +99,18 @@ import {
   useOverlays,
 } from "./ui/popoverStore";
 import { tx } from "@/platform/i18n";
+import { openAttachPopup } from "./attachPopup";
 
 function isRunConfig(arg: unknown): arg is RunConfig {
   return !!arg && typeof arg === "object" && "command" in arg && "args" in arg && "debugAdapter" in arg;
+}
+
+/** `debug.attach`'s argument for a process listed by Attach to Process (a plugin run's child). */
+function isAttachableTarget(
+  arg: unknown,
+): arg is { attachable: AttachableProcess; process?: RunId | null; runConfig?: RunConfig; show?: boolean } {
+  const a = (arg && typeof arg === "object" ? arg : {}) as { attachable?: Partial<AttachableProcess> };
+  return typeof a.attachable?.pid === "number" && typeof a.attachable.kind === "string";
 }
 
 function errorText(e: unknown) {
@@ -96,8 +131,13 @@ async function report(title: string, p: Promise<unknown>) {
 function pausedTarget(): { s: DebugSession; thread: number } | null {
   const s = activeSession();
   if (!s || s.status !== "paused") return null;
-  const thread = s.selectedThread ?? s.stoppedThread ?? s.threads[0]?.id;
+  const thread = pausedThread(s);
   return thread == null ? null : { s, thread };
+}
+
+/** The trace tab passes its own session; from elsewhere, the active session's trace. */
+function traceTarget(arg: unknown): DebugSessionId | undefined {
+  return typeof arg === "number" ? arg : activeSession()?.id;
 }
 
 function breakpointPathAllowed(path: string): boolean {
@@ -124,11 +164,6 @@ function notSupported(what: string, s: DebugSession) {
     key: "debug.unsupported",
     title: `${what} is not supported by ${s.adapter || "this debugger"}`,
   });
-}
-
-/** The selected frame of the paused session (top frame when none is selected). */
-function selectedFrame(s: DebugSession) {
-  return s.frames.find((f) => f.id === s.selectedFrame) ?? s.frames[0] ?? null;
 }
 
 /**
@@ -180,30 +215,6 @@ async function attachUnityEditor(): Promise<boolean> {
   return session != null;
 }
 
-/** Opens the Attach to Process popup and loads the process list. */
-export async function openAttachPopup() {
-  if (!isTauri()) {
-    notifications().notify({ group: "run", level: "warning", title: "Attaching needs the desktop app" });
-    return;
-  }
-  useOverlays.setState({ attach: { processes: null, error: null } });
-  // Unity players announce themselves over UDP about once a second; they join the list later.
-  const players = useProject.getState().project?.unity
-    ? call(commands.debugUnityPlayers()).catch(() => [] as AttachableProcess[])
-    : null;
-  try {
-    const processes = await call(commands.debugAttachableProcesses());
-    if (useOverlays.getState().attach) useOverlays.setState({ attach: { processes, error: null } });
-  } catch (e) {
-    if (useOverlays.getState().attach)
-      useOverlays.setState({ attach: { processes: [], error: errorText(e) || "Cannot list processes" } });
-  }
-  const found = players ? await players : [];
-  const open = useOverlays.getState().attach;
-  if (found.length && open?.processes)
-    useOverlays.setState({ attach: { ...open, processes: [...open.processes, ...found] } });
-}
-
 function cursor(): { path: string; line: number; selection: string } | null {
   const ed = activeEditor();
   if (!ed) return null;
@@ -222,24 +233,37 @@ function evaluateSeed(view: EditorView | undefined = activeEditor()?.view, pos?:
   const { state } = view;
   const sel = state.selection.main;
   if (!sel.empty && (pos == null || (sel.from <= pos && pos <= sel.to))) return state.sliceDoc(sel.from, sel.to);
-  return expressionAt(view, pos ?? sel.head)?.text ?? "";
+  return expressionAt(view, pos ?? sel.head, { calls: true })?.text ?? "";
 }
 
 async function quickEvaluate(arg?: unknown) {
   const target = mouseEvaluateTarget(arg);
   const view = target?.view ?? activeEditor()?.view;
   if (!view) return;
-  const sel = view.state.selection.main;
-  const pos = target?.pos ?? sel.from;
+  const { doc, selection } = view.state;
+  const pos = target?.pos ?? selection.main.from;
   const expression = evaluateSeed(view, target?.pos).trim();
   if (!expression) return showHint(view, "Nothing to evaluate at the caret");
   const session = activeSession();
+  const stop = useDebug.getState().stopSeq;
+  const stillCurrent = () => {
+    const current = activeSession();
+    return (
+      view.dom.isConnected &&
+      view.state.doc === doc &&
+      view.state.selection.eq(selection) &&
+      current?.status === "paused" &&
+      current.id === session?.id &&
+      current.selectedFrame === session?.selectedFrame &&
+      useDebug.getState().stopSeq === stop
+    );
+  };
   try {
-    const value = await evaluate(expression, "hover", session);
-    if (!session) return;
-    showHint(view, () => valueHint(expression, value, session.id), { pos, timeout: 60_000 });
+    // Unlike a plain hover, an explicit Quick Evaluate may call methods (adapters refuse that for "hover").
+    const value = await evaluate(expression, "watch", session);
+    if (session && stillCurrent()) showQuickValue(view, pos, expression, value, session.id);
   } catch (e) {
-    showHint(view, e instanceof Error ? e.message : String(e), { pos, tone: "error" });
+    if (stillCurrent()) showHint(view, e instanceof Error ? e.message : String(e), { pos, tone: "error" });
   }
 }
 
@@ -289,6 +313,48 @@ async function startRemote(config: RunConfig, root: string, show?: boolean) {
   if (launch) await startSession(launch, { runConfig: config, show });
 }
 
+/** The browser opens on this desktop, which a remote project's debugger can't reach. */
+function browserUnavailable(name: string): boolean {
+  if (!isRemoteWindow()) return false;
+  notifications().notify({
+    group: "run",
+    level: "warning",
+    title: `“${name}” can't be debugged`,
+    body: "JavaScript Debug isn't available in a remote project yet.",
+  });
+  return true;
+}
+
+/** The browser opens on this desktop, which can't reach a server on a remote project's machine. */
+async function openDevTools(vmServiceUri: string) {
+  if (isRemoteWindow()) {
+    notifications().notify({
+      group: "run",
+      level: "warning",
+      title: "Flutter DevTools isn't available in a remote project yet",
+    });
+    return;
+  }
+  const server = await call(commands.flutterDevtoolsUrl());
+  await openExternalUrl(devToolsUrl(server, { page: "inspector" }, { uri: vmServiceUri }));
+}
+
+async function startBrowser(config: RunConfig, root: string, show?: boolean) {
+  if (browserUnavailable(config.name)) return;
+  const launch = browserLaunchConfig(config, root);
+  if (launch) await startBrowserSession(launch, { runConfig: config, show });
+}
+
+/** Debugs the page at a URL without a configuration (a link in a console). */
+async function debugInBrowser(arg: unknown) {
+  const root = useProject.getState().project?.root;
+  const url = typeof arg === "string" ? browserUrl(arg) : null;
+  if (!root || !url) return;
+  const name = new URL(url).host || url;
+  if (browserUnavailable(name)) return;
+  await startBrowserSession(browserLaunch(name, url, await installedDebugBrowser(), root));
+}
+
 /** Preparation belongs to a session from the moment the action begins. */
 async function startJavaConfig(config: RunConfig, root: string, origin: RunConfig, show?: boolean) {
   await startPreparedSession(
@@ -300,11 +366,14 @@ async function startJavaConfig(config: RunConfig, root: string, origin: RunConfi
       };
       signal.addEventListener("abort", cancel, { once: true });
       try {
-        await maybeEditorService()
-          ?.saveAll()
-          .catch(() => undefined);
-        signal.throwIfAborted();
-        return await javaLaunchConfig(config, root, { request, signal, report });
+        return await javaLaunchConfig(config, root, {
+          request,
+          signal,
+          report,
+          saveAll: async () => {
+            await maybeEditorService()?.saveAll();
+          },
+        });
       } finally {
         signal.removeEventListener("abort", cancel);
       }
@@ -350,16 +419,21 @@ async function startConfig(arg: unknown) {
     await startRemote(config, root, show);
     return;
   }
+  if (isBrowserConfig(config)) {
+    await startBrowser(config, root, show);
+    return;
+  }
   if (isJavaDebuggable(config)) {
     await startJavaConfig(config, root, origin ?? config, show);
     return;
   }
+  if (config.kind === "plugin") config = await call(commands.pluginPrepareDebugRun(config));
   const dotnet = config.kind === "dotnet" && config.debugAdapter === "netcoredbg";
   const prepared = dotnet ? await call(commands.runDotnetResolve(config, true)) : config;
   // php-debug starts the PHP chosen in Settings unless the command names one.
   const php =
     config.debugAdapter === "php-debug" && isTauri() ? await call(commands.sdkPhpEffective()).catch(() => null) : null;
-  const launch = launchConfigFor(prepared, root, php);
+  const launch = launchConfigFor(await withEnvFiles(prepared, root), root, php);
   if (!launch) {
     notifications().notify({
       group: "run",
@@ -369,6 +443,7 @@ async function startConfig(arg: unknown) {
     });
     return;
   }
+  if (config.debugAdapter === "dart") warnPinnedFlutterDevice(config);
   const xdebugCheck = config.debugAdapter === "php-debug" && isTauri() ? warnWithoutXdebug(launch) : null;
   await maybeEditorService()
     ?.saveAll()
@@ -400,7 +475,8 @@ async function warnWithoutXdebug(launch: LaunchConfig) {
 }
 
 export function registerDebugActions(): () => void {
-  const paused = "debugSessionPaused";
+  // A stream trace runs the program from the paused thread, so nothing may move it until the trace ends.
+  const paused = "debugSessionPaused && !debugStreamTracing";
   const step = (id: string, title: string, kind: "over" | "into" | "out", icon: string): Action => ({
     id,
     title,
@@ -419,6 +495,45 @@ export function registerDebugActions(): () => void {
 
   return registerActions([
     {
+      id: "debug.pluginStart",
+      title: "Debug Plugin Configuration",
+      category: "Debug",
+      hidden: true,
+      when: "projectOpen",
+      run: async ({ arg }) => {
+        const a = arg as { config: RunConfig; onExit: (code: number | null, stopped: boolean) => void };
+        const config = await call(commands.pluginPrepareDebugRun(a.config));
+        const root = useProject.getState().project?.root;
+        if (!root) throw new Error("No project");
+        const launch = launchConfigFor(await withEnvFiles(config, root), root);
+        if (!launch) throw new Error("This configuration has no debugger");
+        let id: number | null = null;
+        let stopped = false;
+        const observe = () => {
+          if (id === null) return;
+          const session = useDebug.getState().sessions[id];
+          if (session?.status === "stopping") stopped = true;
+          if (!session || session.status === "terminated") {
+            off();
+            a.onExit(session?.exitCode ?? null, stopped);
+          }
+        };
+        const off = useDebug.subscribe(observe);
+        try {
+          await maybeEditorService()?.saveAll();
+          id = await startSession(launch, { runConfig: config });
+          if (id === null) {
+            off();
+            throw new Error("Debug session did not start");
+          }
+          observe();
+        } catch (error) {
+          off();
+          throw error;
+        }
+      },
+    },
+    {
       id: "debug.startConfig",
       title: "Debug…",
       category: "Debug",
@@ -433,6 +548,7 @@ export function registerDebugActions(): () => void {
       hidden: true,
       // Also debugpy to a Python program in a run target's container
       // (arg: { name, adapter: "debugpy", hostName, port, remoteRoot, process }).
+      // Also a process from Attach to Process (arg: { attachable, process, runConfig }).
       description:
         "Attach the Java debugger to a JVM listening for JDWP (arg: { name, module, hostName, port, process })",
       run: ({ arg }) =>
@@ -442,17 +558,25 @@ export function registerDebugActions(): () => void {
             const root = useProject.getState().project?.root;
             if (!root) return;
             let launch: LaunchConfig;
-            if (isPythonAttachTarget(arg)) launch = pythonAttachConfig(arg, root);
+            if (isAttachableTarget(arg)) launch = await attachConfig(arg.attachable, root);
+            else if (isPythonAttachTarget(arg)) launch = pythonAttachConfig(arg, root);
             else if (isJavaAttachTarget(arg)) launch = await javaAttachConfig(arg, root);
             else return;
+            const process = (arg.process ?? null) as RunId | null;
+            // Another JVM of the same run (a Gradle test worker, the one just detached) keeps it.
+            const shared =
+              process != null &&
+              (justDetached(process) ||
+                Object.values(useDebug.getState().sessions).some((s) => s.process === process && isLive(s)));
             const session = await startSession(launch, {
-              process: (arg.process ?? null) as RunId | null,
+              process,
               runConfig: arg.runConfig,
               rerunnable: false,
               show: (arg as { show?: boolean }).show,
             });
-            if (session == null && isPythonAttachTarget(arg) && arg.process != null)
-              await stopAssociatedProcess(arg.process);
+            // The process was started for this debugger and waits for it (`suspend=y`): without
+            // the attach it would never go on, and Stop on the finished session can't reach it.
+            if (session == null && process != null && !shared) await stopAssociatedProcess(process);
           })(),
         ),
     },
@@ -503,13 +627,27 @@ export function registerDebugActions(): () => void {
         })(),
     },
     {
+      id: "debug.jvmAttachReady",
+      title: "Check the JVM Debugger",
+      category: "Debug",
+      hidden: true,
+      description:
+        "Whether the debugger for a build tool's JVMs is installed, offering the install when not (arg: { module, retry, done(ready) })",
+      run: ({ arg }) => {
+        const a = arg as { module: string; retry: () => void; done: (ready: boolean) => void };
+        const root = useProject.getState().project?.root;
+        if (!root) return a.done(true);
+        void jvmAttachDebuggerReady(a.module, root, a.retry).then(a.done, () => a.done(true));
+      },
+    },
+    {
       id: "debug.stop",
       title: "Stop",
       category: "Debug",
       icon: "stop",
-      when: "debugSessionActive",
+      when: "debugCanStop",
       run: () => {
-        const s = activeSession() ?? Object.values(useDebug.getState().sessions).find(isLive);
+        const s = stopTarget();
         if (s) void stopSession(s.id);
       },
     },
@@ -528,6 +666,143 @@ export function registerDebugActions(): () => void {
             ? arg.configId
             : undefined,
         ),
+    },
+    {
+      id: "debug.memory.refresh",
+      title: "Refresh Memory View",
+      category: "Debug",
+      icon: "refresh",
+      keywords: ["memory", "heap", "instances", "classes"],
+      when: "debugHasJvmMemory",
+      run: () => {
+        const s = activeSession();
+        if (s && sessionSupports("jvmMemory", s)) void refreshMemory(s.id);
+      },
+    },
+    {
+      id: "debug.heap.capture",
+      title: "Capture Heap Snapshot",
+      category: "Debug",
+      icon: "heap-snapshot",
+      keywords: ["memory", "heap", "dump", "snapshot"],
+      when: "debugHasJvmMemory",
+      run: () => {
+        const s = activeSession();
+        if (s && sessionSupports("jvmHeap", s)) void captureHeap(s.id);
+      },
+    },
+    {
+      id: "debug.startPageProfile",
+      title: "Start CPU Profile",
+      description: "Record where the debugged page spends its time",
+      category: "Debug",
+      icon: "profile",
+      keywords: ["profiler", "performance", "flame graph", "browser"],
+      when: "debugHasJsPage && !debugPageProfiled",
+      run: () => startPageProfile(),
+    },
+    {
+      id: "debug.stopPageProfile",
+      title: "Stop CPU Profile",
+      description: "Stop recording the page and open the profile",
+      category: "Debug",
+      icon: "profile",
+      keywords: ["profiler", "performance", "flame graph", "browser"],
+      when: "debugPageProfiled",
+      run: () => stopPageProfile(),
+    },
+    {
+      // The host opens dumps for a trusted project only (F21).
+      id: "debug.heap.open",
+      title: "Open Heap Dump…",
+      category: "Debug",
+      icon: "heap-snapshot",
+      keywords: ["memory", "heap", "dump", "hprof", "snapshot"],
+      when: "projectOpen",
+      run: () => openHeapDump(),
+    },
+    {
+      id: "debug.heap.saveDump",
+      title: "Save Heap Dump As…",
+      category: "Debug",
+      icon: "export",
+      keywords: ["memory", "heap", "dump", "hprof", "snapshot"],
+      when: "debugHeapSnapshotCaptured",
+      run: () => {
+        const id = activeCapturedSnapshot();
+        if (id !== null) return saveHeapDump(id);
+      },
+    },
+    {
+      // Runs for the class given as `arg`, else the selected row of the Memory view.
+      id: "debug.memory.showInstances",
+      title: "Show Instances",
+      category: "Debug",
+      icon: "list",
+      keywords: ["memory", "heap", "objects", "instances"],
+      when: "debugSessionPaused",
+      run: ({ arg }) => {
+        const s = activeSession();
+        if (!s || !sessionSupports("jvmInstances", s)) return;
+        const name = typeof arg === "string" ? arg : useMemory.getState().bySession[s.id]?.selected;
+        if (name) void showInstances(s.id, name);
+      },
+    },
+    {
+      // Runs for the class given as `arg`, else the open instances list, else the selected Memory row.
+      // Needs only the project's language server, so it also works once the session has ended.
+      id: "debug.memory.jumpToSource",
+      title: "Jump to Source",
+      category: "Debug",
+      icon: "edit-source",
+      keywords: ["memory", "class", "instances"],
+      when: "projectOpen",
+      run: ({ arg }) => {
+        const s = activeSession();
+        const name =
+          typeof arg === "string"
+            ? arg
+            : s &&
+              (useInstances.getState().bySession[s.id]?.className ?? useMemory.getState().bySession[s.id]?.selected);
+        if (name) void jumpToClass(name);
+      },
+    },
+    {
+      // Runs for the lead object row of the open instances list.
+      id: "debug.memory.showReferrers",
+      title: "Show Referrers",
+      category: "Debug",
+      icon: "hierarchy",
+      keywords: ["memory", "instances", "references", "referring objects"],
+      when: "debugSessionPaused",
+      run: () => {
+        const s = activeSession();
+        const entry = s && useInstances.getState().bySession[s.id];
+        if (!s || !entry?.lead || !sessionSupports("jvmInstances", s) || instancesOutdated(entry, s.stops)) return;
+        showReferrers(s.id, entry.lead.key, entry.lead.ref);
+      },
+    },
+    {
+      // Closes the pane of the session given as `arg`, else of the active one. No `when`: the pane stays
+      // after its session ends and must still close.
+      id: "debug.memory.closeInstances",
+      title: "Close Instances",
+      category: "Debug",
+      icon: "close",
+      keywords: ["memory", "instances"],
+      run: ({ arg }) => {
+        const id = typeof arg === "number" ? arg : activeSession()?.id;
+        if (id != null && useInstances.getState().bySession[id]) closeInstances(id);
+      },
+    },
+    {
+      id: "debug.cancelHotSwap",
+      title: "Cancel Hot Swap Build",
+      description: "Stop the compile a Reload Changed Classes action is waiting on",
+      category: "Debug",
+      icon: "stop",
+      when: "debugHotSwapBuilding",
+      run: () => cancelHotSwapBuild(),
     },
     {
       id: "debug.rerun",
@@ -562,7 +837,8 @@ export function registerDebugActions(): () => void {
       title: "Pause Program",
       category: "Debug",
       icon: "pause",
-      when: "debugSessionRunning",
+      // The trace resumes the program itself; a pause would suspend threads under the running trace.
+      when: "debugSessionRunning && !debugStreamTracing",
       run: async () => {
         const s = activeSession();
         if (!s || s.status !== "running") return;
@@ -583,7 +859,7 @@ export function registerDebugActions(): () => void {
       when: "debugSessionRunning && debugSessionDart",
       run: () => {
         const s = activeSession();
-        if (s) void report("Hot Reload failed", call(commands.debugHotReload(s.id)));
+        if (s) void report("Hot Reload failed", call(commands.debugHotReload(s.id, "manual")));
       },
     },
     {
@@ -596,6 +872,31 @@ export function registerDebugActions(): () => void {
       run: () => {
         const s = activeSession();
         if (s) void report("Hot Restart failed", call(commands.debugHotRestart(s.id)));
+      },
+    },
+    {
+      id: "debug.openDevTools",
+      title: "Open Flutter DevTools in Browser",
+      category: "Debug",
+      icon: "external-link",
+      description: "Flutter: inspect the running app in the browser",
+      when: "debugHasVmService",
+      run: () => {
+        const s = activeSession();
+        const uri = s && rootOf(s).vmServiceUri;
+        if (uri) void report("Couldn't open Flutter DevTools", openDevTools(uri));
+      },
+    },
+    {
+      id: "debug.refreshDevTools",
+      title: "Refresh Flutter DevTools",
+      category: "Debug",
+      icon: "refresh",
+      description: "Flutter: load the DevTools page again",
+      when: "flutterDevTools",
+      run: (c) => {
+        const id = c.arg;
+        for (const w of DEVTOOLS_WINDOWS) if (!id || id === w.id) refreshDevTools(w.id);
       },
     },
     step("debug.stepOver", "Step Over", "over", "step-over"),
@@ -648,7 +949,7 @@ export function registerDebugActions(): () => void {
       title: "Show Execution Point",
       category: "Debug",
       icon: "show-execution-point",
-      when: paused,
+      when: "debugSessionPaused",
       run: () => {
         const s = activeSession();
         if (s) void showExecutionPoint(s.id);
@@ -690,7 +991,7 @@ export function registerDebugActions(): () => void {
       title: "Jump to Source",
       category: "Debug",
       keyWhen: "debugFramesFocus || debugVariablesFocus",
-      when: paused,
+      when: "debugSessionPaused",
       run: () => {
         const view = focusedDebugView();
         if (view?.jumpToSource) {
@@ -709,6 +1010,24 @@ export function registerDebugActions(): () => void {
       icon: "attach-to-process",
       description: "Attach the debugger to a running Java, Node.js, Python, Go or native process",
       run: () => void openAttachPopup(),
+    },
+    {
+      id: "debug.attachUnity",
+      title: "Attach to Unity Process",
+      category: "Run",
+      icon: "debug",
+      hidden: true,
+      when: "projectOpen",
+      run: ({ arg }) => openAttachPopup("unity", arg as RunConfig | undefined),
+    },
+    {
+      id: "debug.debugInBrowser",
+      title: "Debug in Browser",
+      category: "Debug",
+      icon: "browser-chrome",
+      description: "Opens a URL in Chrome or Edge with the debugger attached (arg: the URL).",
+      hidden: true,
+      run: ({ arg }) => void debugInBrowser(arg),
     },
     {
       id: "debug.runToCursor",
@@ -857,6 +1176,7 @@ export function registerDebugActions(): () => void {
       run: () => {
         removeAllBreakpoints();
         removeAllSpecial();
+        removeAllExceptionClasses();
       },
     },
     {
@@ -865,6 +1185,49 @@ export function registerDebugActions(): () => void {
       category: "Debug",
       when: "debugSessionActive",
       run: () => openEvaluateDialog(evaluateSeed()),
+    },
+    {
+      id: "debug.traceStreamChain",
+      title: "Trace Stream Chain",
+      category: "Debug",
+      icon: "stream-trace",
+      keywords: ["stream", "chain", "trace", "java"],
+      when: "debugCanTraceStream",
+      run: () => {
+        const t = pausedTarget();
+        if (t) void report(tx("Trace Stream Chain failed"), traceStreamChain(t.s.id));
+      },
+    },
+    {
+      // The trace tab passes its session as `arg`.
+      id: "debug.streamTrace.stopRecording",
+      title: "Stop Recording",
+      category: "Debug",
+      keywords: ["stream", "trace"],
+      when: "debugAnyStreamTracing",
+      enabled: ({ arg }) => {
+        const id = traceTarget(arg);
+        return id != null && isTracing(id) && !useStreamTrace.getState().bySession[id]?.stoppedRecording;
+      },
+      run: ({ arg }) => {
+        const id = traceTarget(arg);
+        if (id != null) stopRecording(id);
+      },
+    },
+    {
+      id: "debug.streamTrace.abort",
+      title: "Abort Operation…",
+      category: "Debug",
+      keywords: ["stream", "trace", "cancel"],
+      when: "debugAnyStreamTracing",
+      enabled: ({ arg }) => {
+        const id = traceTarget(arg);
+        return id != null && isTracing(id);
+      },
+      run: ({ arg }) => {
+        const id = traceTarget(arg);
+        if (id != null) useOverlays.setState({ streamAbort: id });
+      },
     },
     {
       id: "debug.browseConsoleHistory",

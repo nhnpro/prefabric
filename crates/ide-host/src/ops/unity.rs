@@ -3,6 +3,7 @@
 
 use crate::Host;
 use crate::ops::project::{ProjectInfo, info};
+use ide_command::command;
 use ide_core::{CancellationToken, DocId, IdeError, IdeResult, Pos, RequestId, UnityLinkStatus};
 use ide_unity::UnityIndexStatus;
 use ide_unity::hierarchy::Hierarchy;
@@ -28,7 +29,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> IdeResult<T> + Send + '
 /// Merges a conflicted scene, prefab or other YAML asset with UnityYAMLMerge (the user's side is
 /// `ours`, as in the merge editor). `None` outside Unity projects, for other files, when a side
 /// was deleted, and when no Unity is installed.
-pub async fn merge_asset(host: &Host, window: &str, path: PathBuf) -> IdeResult<Option<YamlMerge>> {
+#[command(trust = trusted)]
+pub async fn unity_merge_asset(host: &Host, window: &str, path: PathBuf) -> IdeResult<Option<YamlMerge>> {
     let project = host.project(window)?;
     project.require_trust()?;
     blocking(move || {
@@ -52,7 +54,8 @@ pub async fn merge_asset(host: &Host, window: &str, path: PathBuf) -> IdeResult<
 }
 
 /// Copies the app's package into `Packages/` (Unity reloads it when focused); also updates an older copy.
-pub async fn install_package(host: &Arc<Host>, window: &str) -> IdeResult<ProjectInfo> {
+#[command(trust = trusted)]
+pub async fn unity_install_package(host: &Arc<Host>, window: &str) -> IdeResult<ProjectInfo> {
     let project = host.project(window)?;
     blocking(move || {
         if !unity::is_project(&project.root) {
@@ -68,7 +71,12 @@ pub async fn install_package(host: &Arc<Host>, window: &str) -> IdeResult<Projec
 /// Runs the project's Unity version in batch mode to write the solution and projects. Unity runs
 /// the project's editor code, so only in a trusted project; it fails while Unity has the project open.
 /// Cancellable with `cancel_request(request)`, which stops Unity.
-pub async fn generate_project_files(host: &Arc<Host>, window: &str, request: RequestId) -> IdeResult<ProjectInfo> {
+#[command(trust = trusted)]
+pub async fn unity_generate_project_files(
+    host: &Arc<Host>,
+    window: &str,
+    request: RequestId,
+) -> IdeResult<ProjectInfo> {
     let project = host.project(window)?;
     project.require_trust()?;
     let token = host.begin_project_request(window, request);
@@ -149,23 +157,27 @@ fn failure_message(log: &str) -> String {
 }
 
 /// The project's assembly definitions, for navigation from `.asmdef` references.
-pub async fn assembly_definitions(host: &Arc<Host>, window: &str) -> IdeResult<Vec<AssemblyDefinition>> {
+#[command(trust = always)]
+pub async fn unity_assembly_definitions(host: &Arc<Host>, window: &str) -> IdeResult<Vec<AssemblyDefinition>> {
     let project = host.project(window)?;
     blocking(move || Ok(unity::assemblies::assembly_definitions(&project.root))).await
 }
 
 /// State of the asset index; `None` outside Unity projects.
-pub fn index_status(host: &Host, window: &str) -> IdeResult<Option<UnityIndexStatus>> {
+#[command(trust = always)]
+pub fn unity_index_status(host: &Host, window: &str) -> IdeResult<Option<UnityIndexStatus>> {
     Ok(host.project(window)?.unity.as_ref().map(|u| u.status()))
 }
 
 /// The link to the Unity Editor; `None` outside Unity projects.
-pub fn link_status(host: &Host, window: &str) -> IdeResult<Option<UnityLinkStatus>> {
+#[command(trust = always)]
+pub fn unity_link_status(host: &Host, window: &str) -> IdeResult<Option<UnityLinkStatus>> {
     Ok(host.project(window)?.unity_link.as_ref().map(|l| l.status()))
 }
 
 /// Play, pause, step, stop or refresh assets in the connected Unity Editor.
-pub async fn editor_command(host: &Arc<Host>, window: &str, command: UnityEditorCommand) -> IdeResult<()> {
+#[command(trust = trusted)]
+pub async fn unity_editor_command(host: &Arc<Host>, window: &str, command: UnityEditorCommand) -> IdeResult<()> {
     let project = host.project(window)?;
     blocking(move || {
         let link = project.unity_link.as_ref().ok_or_else(|| IdeError::invalid("Not a Unity project"))?;
@@ -176,7 +188,8 @@ pub async fn editor_command(host: &Arc<Host>, window: &str, command: UnityEditor
 
 /// Selects in the connected Unity Editor what `path` holds at `line` (a GameObject of a scene or
 /// prefab), or the asset; returns whether Unity found it.
-pub async fn show_in_editor(host: &Arc<Host>, window: &str, path: PathBuf, line: Option<u32>) -> IdeResult<bool> {
+#[command(trust = trusted)]
+pub async fn unity_show_in_editor(host: &Arc<Host>, window: &str, path: PathBuf, line: Option<u32>) -> IdeResult<bool> {
     let project = host.project(window)?;
     blocking(move || {
         let link = project.unity_link.as_ref().ok_or_else(|| IdeError::invalid("Not a Unity project"))?;
@@ -196,7 +209,13 @@ pub struct UnityAssetUsages {
 /// Asset usages of the symbol at `pos`, from the asset index alone (it answers in milliseconds, so
 /// Find Usages shows them before the language server's references). `None` outside Unity projects,
 /// C# files, and symbols assets can't use.
-pub async fn asset_usages(host: &Host, window: &str, doc: DocId, pos: Pos) -> IdeResult<Option<UnityAssetUsages>> {
+#[command(trust = always)]
+pub async fn unity_asset_usages(
+    host: &Host,
+    window: &str,
+    doc: DocId,
+    pos: Pos,
+) -> IdeResult<Option<UnityAssetUsages>> {
     let project = host.project(window)?;
     let Some(index) = project.unity.clone() else { return Ok(None) };
     blocking(move || {
@@ -214,7 +233,8 @@ pub async fn asset_usages(host: &Host, window: &str, doc: DocId, pos: Pos) -> Id
 
 /// Code Vision of a C# file: how assets use its script class, methods and serialized fields.
 /// Empty outside Unity projects and C# files.
-pub async fn lenses(host: &Host, window: &str, doc: DocId) -> IdeResult<Vec<UnityLens>> {
+#[command(trust = always)]
+pub async fn unity_lenses(host: &Host, window: &str, doc: DocId) -> IdeResult<Vec<UnityLens>> {
     let project = host.project(window)?;
     let Some(index) = project.unity.clone() else { return Ok(Vec::new()) };
     blocking(move || {
@@ -230,14 +250,16 @@ pub async fn lenses(host: &Host, window: &str, doc: DocId) -> IdeResult<Vec<Unit
 }
 
 /// Search Everywhere's Unity tab: GameObjects, prefab instances and assets matching `query`.
-pub async fn search(host: &Host, window: &str, query: String, limit: u32) -> IdeResult<UnitySearch> {
+#[command(trust = always)]
+pub async fn unity_search(host: &Host, window: &str, query: String, limit: u32) -> IdeResult<UnitySearch> {
     let project = host.project(window)?;
     let Some(index) = project.unity.clone() else { return Ok(UnitySearch::default()) };
     blocking(move || Ok(index.search(&query, limit.min(1_000) as usize))).await
 }
 
 /// The GameObject tree of a scene or prefab of the project, as saved.
-pub async fn hierarchy(host: &Host, window: &str, path: ide_core::IpcPath) -> IdeResult<Hierarchy> {
+#[command(trust = always)]
+pub async fn unity_hierarchy(host: &Host, window: &str, path: ide_core::IpcPath) -> IdeResult<Hierarchy> {
     let project = host.project(window)?;
     let Some(index) = project.unity.clone() else { return Ok(Hierarchy { roots: Vec::new(), unreadable: true }) };
     let path = std::path::PathBuf::from(path);
@@ -257,27 +279,21 @@ pub async fn hierarchy(host: &Host, window: &str, path: ide_core::IpcPath) -> Id
     .await
 }
 
-pub fn register(d: &mut crate::rpc::Dispatcher) {
-    d.add("unity_hierarchy", |c| async move { hierarchy(&c.host, &c.window, c.arg("path")?).await });
-    d.add("unity_search", |c| async move { search(&c.host, &c.window, c.arg("query")?, c.arg("limit")?).await });
-    d.add("unity_lenses", |c| async move { lenses(&c.host, &c.window, c.arg("doc")?).await });
-    d.add(
-        "unity_asset_usages",
-        |c| async move { asset_usages(&c.host, &c.window, c.arg("doc")?, c.arg("pos")?).await },
-    );
-    d.add("unity_index_status", |c| async move { index_status(&c.host, &c.window) });
-    d.add("unity_link_status", |c| async move { link_status(&c.host, &c.window) });
-    d.add("unity_editor_command", |c| async move { editor_command(&c.host, &c.window, c.arg("command")?).await });
-    d.add("unity_show_in_editor", |c| async move {
-        show_in_editor(&c.host, &c.window, c.arg("path")?, c.arg("line")?).await
-    });
-    d.add("unity_assembly_definitions", |c| async move { assembly_definitions(&c.host, &c.window).await });
-    d.add("unity_merge_asset", |c| async move { merge_asset(&c.host, &c.window, c.arg("path")?).await });
-    d.add("unity_install_package", |c| async move { install_package(&c.host, &c.window).await });
-    d.add("unity_generate_project_files", |c| async move {
-        generate_project_files(&c.host, &c.window, c.arg("request")?).await
-    });
-}
+ide_command::domain!(
+    unity:
+    unity_assembly_definitions,
+    unity_asset_usages,
+    unity_editor_command,
+    unity_generate_project_files,
+    unity_hierarchy,
+    unity_index_status,
+    unity_install_package,
+    unity_lenses,
+    unity_link_status,
+    unity_merge_asset,
+    unity_search,
+    unity_show_in_editor,
+);
 
 #[cfg(test)]
 mod tests {

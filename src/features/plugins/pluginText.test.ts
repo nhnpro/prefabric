@@ -26,6 +26,11 @@ describe("localizeContributions", () => {
     decl,
   });
 
+  it("localizes search category titles without changing their identity", () => {
+    const out = localizeContributions([item("a", "searchCategories", { id: "routes", title: "Refresh" })], { a: fr });
+    expect(out[0]).toMatchObject({ key: "routes", decl: { id: "routes", title: "Actualiser" } });
+  });
+
   it("translates titles and setting labels of the plugin's own declarations only", () => {
     const items = [
       item("a", "commands", { id: "x", title: "Refresh", category: "Word Tools" }),
@@ -106,6 +111,14 @@ describe("localizeContributions", () => {
   it("translates a context menu entry's submenu label", () => {
     const items = [item("a", "menus", { id: "m", menu: "editor.context", command: "x", submenu: "Refresh" })];
     expect(localizeContributions(items, { a: fr })[0]!.decl).toMatchObject({ submenu: "Actualiser" });
+  });
+
+  it("translates an indexed marker tooltip without changing its key prefixes", () => {
+    const decl = { id: "m", icon: "icons/m.svg", markers: ["Refresh"], tooltip: "Refresh" };
+    expect(localizeContributions([item("a", "markerIcons", decl)], { a: fr })[0]!.decl).toEqual({
+      ...decl,
+      tooltip: "Actualiser",
+    });
   });
 
   it("gives a tools menu entry the translated title of its command", () => {

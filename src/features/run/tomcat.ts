@@ -1,8 +1,7 @@
-import { tx } from "@/platform/i18n";
 import { call, commands, nextRequestId, type RunConfig } from "@/platform/ipc";
 import type { RunConfigTypeContribution } from "@/workbench/contributions";
 import { updatePolicyDefaults, updatePolicyFields } from "./updatePolicies";
-import { runUpdateBuild } from "./buildUpdate";
+import { runUpdateBuild, updateBuildError } from "./buildUpdate";
 
 const validatePort = (value: string) =>
   /^\d+$/.test(value) && Number(value) > 0 && Number(value) <= 65535 ? null : "Port must be between 1 and 65535";
@@ -11,8 +10,8 @@ const validateOptionalPort = (value: string) => (!value.trim() ? null : validate
 
 export const tomcatType: RunConfigTypeContribution = {
   id: "tomcat",
-  group: "Tomcat Server",
-  label: "Local",
+  group: "Servers",
+  label: "Tomcat Server",
   icon: "tomcat",
   description: "Run a WAR application in a local Tomcat server",
   debugAdapter: "java-debug",
@@ -21,6 +20,7 @@ export const tomcatType: RunConfigTypeContribution = {
     deployment: "artifact",
     httpPort: "8080",
     jmxPort: "1099",
+    // Build before launch (IDEA default); skipped automatically when the built WAR is current.
     buildArtifact: "true",
     openBrowser: "true",
     ...updatePolicyDefaults,
@@ -161,10 +161,12 @@ export async function syncTomcatOutputs(config: RunConfig, resourcesOnly: boolea
   const artifacts = await call(commands.runTomcatArtifacts());
   const artifact = p.artifact ? artifacts.find((a) => a.id === p.artifact) : artifacts[0];
   if (!artifact) return false;
-  const info = await call(commands.javaResolveLaunch(artifact.module, false, true, nextRequestId())).catch(() => null);
+  const info = await call(commands.javaResolveLaunch(artifact.module, false, "make", nextRequestId())).catch(
+    () => null,
+  );
   if (!info) return false;
   if (info.build === "failed" || info.build === "withErrors" || info.build === "cancelled")
-    throw new Error(tx("Application update build failed"));
+    throw updateBuildError(info);
   return call(commands.runTomcatSync(config, artifact.module, info.classPaths, resourcesOnly));
 }
 

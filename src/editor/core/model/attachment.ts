@@ -25,6 +25,7 @@ import {
   type TextEditorHandle,
 } from "@/editor/api";
 import type { DocAttachmentTarget, DocumentManager } from "./document";
+import { saveOnBlur } from "../saveOnBlur";
 
 class AttachedView implements DocAttachmentTarget {
   view: EditorView | null = null;
@@ -62,6 +63,7 @@ export async function attachDocument(
   }
   model.attach(target);
   let released = false;
+  let cancelBlurSave: (() => void) | undefined;
   let detachHistory: (() => void) | null = null;
   const historyTarget = {
     path,
@@ -93,6 +95,7 @@ export async function attachDocument(
     return {
       destroy() {
         destroyed = true;
+        cancelBlurSave?.();
         if (!options.sharedHistory) {
           detachHistory?.();
           detachHistory = null;
@@ -111,14 +114,7 @@ export async function attachDocument(
     if (model.ctx().readOnly || released || model.closed) return false;
     const slot = model.primarySlot();
     if (slot?.view) return command(slot.view);
-    if (slot)
-      return command({
-        state: slot.state,
-        dispatch: (tr) => {
-          slot.state = tr.state;
-          if (tr.docChanged) model.onLocal(tr.changes, slot);
-        },
-      });
+    if (slot) return command({ state: slot.state, dispatch: (tr) => slot.dispatchLocal(tr) });
     return target.view ? command(target.view) : false;
   };
 
@@ -126,7 +122,9 @@ export async function attachDocument(
     path,
     doc: model.doc,
     text: () => model.sync.localText.toString(),
+    lineEnding: () => model.getMeta().lineEnding,
     uiMode: () => model.getMeta().uiMode,
+    context: () => model.ctx(),
     get readOnly() {
       return model.getMeta().readOnly || model.virtual;
     },
@@ -148,6 +146,19 @@ export async function attachDocument(
       }
     },
     extension: [
+      EditorView.domEventHandlers({
+        blur: (_event, view) => {
+          cancelBlurSave?.();
+          if (view.state.readOnly || !view.state.facet(EditorView.editable)) return;
+          cancelBlurSave = saveOnBlur(
+            () => view.hasFocus,
+            () => {
+              if (released || model.closed || manager.settings()?.files?.autoSave === false) return;
+              void model.save("auto").catch((e) => console.warn(`autosave of ${path} failed`, e));
+            },
+          );
+        },
+      }),
       options.sharedHistory ? target.history.of(history()) : [],
       options.sharedHistory
         ? EditorView.domEventHandlers({
@@ -192,6 +203,7 @@ export async function attachDocument(
     release: () => {
       if (released) return;
       released = true;
+      cancelBlurSave?.();
       detachHistory?.();
       detachHistory = null;
       target.view = null;

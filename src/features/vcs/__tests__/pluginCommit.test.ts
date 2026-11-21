@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const commit = vi.hoisted(() => vi.fn());
+const createPatch = vi.hoisted(() => vi.fn());
 
 vi.mock("@/platform/ipc", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/platform/ipc")>();
@@ -9,7 +10,12 @@ vi.mock("@/platform/ipc", async (importOriginal) => {
     ...real,
     isTauri: () => false,
     call: async (p: Promise<{ status: "ok"; data: unknown }>) => (await p).data,
-    commands: { ...real.commands, vcsCommit: commit.mockImplementation(() => ok("commit1")) },
+    commands: {
+      ...real.commands,
+      vcsCommit: commit.mockImplementation(() => ok("commit1")),
+      vcsConfigGet: () => ok("configured"),
+      vcsPendingPatch: createPatch.mockImplementation(() => ok("diff --git a/p b/p\n")),
+    },
   };
 });
 
@@ -33,6 +39,7 @@ let disposers: Array<() => void> = [];
 beforeEach(() => {
   localStorage.clear();
   commit.mockClear();
+  createPatch.mockClear();
   useVcs.setState({
     available: false,
     root: "/p",
@@ -76,10 +83,55 @@ describe("the commit plugins see", () => {
     expect(draftRevision()).toBeGreaterThan(before);
   });
 
+  it("leaves another repository's staged files out of the only repository committed", async () => {
+    const staged: FileStatus = {
+      path: "/w/b/new.yml",
+      relPath: "new.yml",
+      staged: "added",
+      unstaged: null,
+      renamedFrom: null,
+    };
+    const changed: FileStatus = { ...files[0]!, path: "/w/a/Foo.java", relPath: "Foo.java" };
+    useVcs.setState({ root: "/w", repo: "/w/a", roots: ["/w/a", "/w/b"], status: [changed, staged] });
+    useCommit.setState({ checks: new Map([["/w/b/new.yml", "none" as const]]) });
+    const selection = (await maybeCommitService()!.selection())!;
+    expect(selection.repositories).toEqual([
+      { root: "/w/a", options: expect.objectContaining({ stage: ["/w/a/Foo.java"], exclude: [] }) },
+    ]);
+  });
+
   it("is null without a repository", async () => {
     useVcs.setState({ root: null });
     expect(await maybeCommitService()!.selection()).toBeNull();
+    expect(await maybeCommitService()!.changes()).toBeNull();
     expect(maybeCommitService()!.setMessage(draftRevision(), "x")).toBe(false);
+  });
+
+  it("reads the diff of what Commit would commit, at the revision of the draft", async () => {
+    const changes = (await maybeCommitService()!.changes())!;
+    expect(createPatch).toHaveBeenCalledExactlyOnceWith("/p", expect.objectContaining({ stage: ["/p/a.ts"] }));
+    expect(changes).toEqual({ revision: draftRevision(), roots: ["/p"], patch: "diff --git a/p b/p\n" });
+    expect(maybeCommitService()!.setMessage(changes.revision, "generated")).toBe(true);
+  });
+
+  it("reads one diff per repository with included files", async () => {
+    const other: FileStatus = { ...files[0]!, path: "/w/b/Bar.java", relPath: "Bar.java" };
+    const changed: FileStatus = { ...files[0]!, path: "/w/a/Foo.java", relPath: "Foo.java" };
+    useVcs.setState({ root: "/w", repo: "/w/a", roots: ["/w/a", "/w/b"], status: [changed, other] });
+    useCommit.setState({ checks: new Map() });
+    const changes = (await maybeCommitService()!.changes())!;
+    expect(createPatch.mock.calls).toEqual([
+      ["/w/b", expect.objectContaining({ stage: ["/w/b/Bar.java"] })],
+      ["/w/a", expect.objectContaining({ stage: ["/w/a/Foo.java"] })],
+    ]);
+    expect(changes.roots).toEqual(["/w/b", "/w/a"]);
+    expect(changes.patch).toBe("diff --git a/p b/p\n\ndiff --git a/p b/p\n");
+  });
+
+  it("is an empty diff when nothing is included", async () => {
+    useCommit.setState({ checks: new Map(files.map((f) => [f.path, "none" as const])) });
+    expect((await maybeCommitService()!.changes())!.patch).toBe("");
+    expect(createPatch).not.toHaveBeenCalled();
   });
 });
 

@@ -55,7 +55,7 @@ impl Tools {
         let _ = std::fs::remove_dir_all(&staging);
         std::fs::create_dir_all(&staging)?;
         let result = (|| {
-            let archive = fetch_verified(&http, &dl, &staging, cancel, emit)?;
+            let archive = fetch_verified(&self.downloads, &http, &dl, &staging, cancel, emit)?;
             emit(InstallEvent::Line { text: "Extracting…".into() });
             let pkg = staging.join("pkg");
             crate::archive::extract(

@@ -1,3 +1,5 @@
+import { useBuildModel } from "@/platform/buildModel";
+import { useBuildPresentation } from "@/platform/projectPresentation";
 import { useProject } from "@/platform/project";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -89,6 +91,52 @@ it.each([undefined, false])(
 );
 
 describe("configuration types", () => {
+  it("shows the JAR fields, validates the path and edits shared working directory and environment", () => {
+    const type = typeFor("jar-application")!;
+    const config = newConfigOfType(type, []);
+    expect(missingParams(config)).toEqual({ jarPath: "Path to JAR is required" });
+    const edited = withParams(config, { jarPath: "app.jar", vmOptions: "-Xmx1g", programArgs: "hello" });
+    const change = vi.fn();
+    render(
+      <ConfigForm
+        config={{ ...edited, cwd: "server", env: { MODE: "test" } }}
+        all={[]}
+        type={type}
+        errors={{}}
+        onChange={change}
+        modifyRequest={0}
+      />,
+    );
+    expect(screen.getByLabelText("Path to JAR")).toHaveValue("app.jar");
+    expect(screen.getByLabelText("VM options")).toHaveValue("-Xmx1g");
+    expect(screen.getByLabelText("Program arguments")).toHaveValue("hello");
+    expect(screen.getByLabelText("Working directory")).toHaveValue("server");
+    expect(screen.getByLabelText("Environment variables")).toHaveValue("MODE=test");
+    fireEvent.change(screen.getByLabelText("Path to JAR"), { target: { value: "new.jar" } });
+    expect(change.mock.calls.at(-1)?.[0]).toMatchObject({ args: ["-Xmx1g", "-jar", "new.jar", "hello"] });
+  });
+
+  it("inserts a path macro at the caret of the working directory (#4755)", () => {
+    const type = typeFor("jar-application")!;
+    const config = withParams(newConfigOfType(type, []), { jarPath: "app.jar" });
+    const change = vi.fn();
+    render(
+      <ConfigForm
+        config={{ ...config, cwd: "/web" }}
+        all={[]}
+        type={type}
+        errors={{}}
+        onChange={change}
+        modifyRequest={0}
+      />,
+    );
+    const field = screen.getByLabelText<HTMLInputElement>("Working directory");
+    field.setSelectionRange(0, 0);
+    fireEvent.click(screen.getByRole("button", { name: "Insert Macro…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /\$PROJECT_DIR\$/ }));
+    expect(change.mock.calls.at(-1)?.[0]).toMatchObject({ cwd: "$PROJECT_DIR$/web" });
+  });
+
   it("runs an Application with the chosen JRE and the classpath of the chosen module", () => {
     const type = typeFor("application")!;
     const base = withParams(newConfigOfType(type, []), { ...newConfigOfType(type, []).params, mainClass: "a.Main" });
@@ -113,6 +161,22 @@ describe("configuration types", () => {
       module: "",
     });
     expect(formParams(saved)).toMatchObject({ mainClass: "a.Main", module: "." });
+  });
+
+  it("sets the before launch build policy of a Java configuration", async () => {
+    const type = typeFor("application")!;
+    const config = withParams(newConfigOfType(type, []), {
+      ...newConfigOfType(type, []).params,
+      mainClass: "a.Main",
+    });
+    const changed = vi.fn();
+    render(<ConfigForm config={config} all={[config]} type={type} errors={{}} onChange={changed} modifyRequest={0} />);
+    fireEvent.click(screen.getByRole("button", { name: /Modify options/ }));
+    fireEvent.click(await screen.findByText("Build"));
+    expect(screen.getByRole("button", { name: "Build" }).textContent).toContain("Automatic");
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Rebuild" }));
+    expect(changed).toHaveBeenCalledWith(expect.objectContaining({ buildPolicy: "rebuild" }));
   });
 
   it.each(["spring-boot", "tomcat"])("edits shared update policies in the %s form", async (kind) => {
@@ -310,6 +374,47 @@ describe("configuration types", () => {
       task: "test TEST=test/a_test.rb",
     });
     expect(rake(["-T"])).toMatchObject({ options: "-T", task: "" });
+  });
+
+  it("Python runs a script or module and round-trips detected command lines", () => {
+    const python = typeFor("python")!;
+    expect(newConfigOfType(python, [])).toMatchObject({
+      kind: "python",
+      command: "python3",
+      args: [],
+      isTest: false,
+      debugAdapter: "debugpy",
+    });
+    expect(missingParams(newConfigOfType(python, []), python)).toHaveProperty("script");
+    expect(
+      python.commandLine({ mode: "module", module: " uvicorn ", script: "ignored.py", args: "app:app --reload" }),
+    ).toEqual({ command: "python3", args: ["-m", "uvicorn", "app:app", "--reload"] });
+
+    const lines: Array<{ command: string; args: string[]; params: Record<string, string> }> = [
+      {
+        command: ".venv/bin/python",
+        args: ["-u", "src/my app.py", "--port", "8000"],
+        params: { mode: "script", script: "src/my app.py", runnerArgs: "-u", args: "--port 8000" },
+      },
+      {
+        command: "uv",
+        args: ["run", "python", "manage.py", "runserver"],
+        params: { mode: "script", script: "manage.py", runnerArgs: "run python", args: "runserver" },
+      },
+      {
+        command: "python3",
+        args: ["-X", "utf8", "-m", "pkg.cli", "serve"],
+        params: { mode: "module", module: "pkg.cli", runnerArgs: "-X utf8", args: "serve" },
+      },
+    ];
+    for (const { command, args, params } of lines) {
+      const config = { ...newConfigOfType(python, []), command, args, params: undefined };
+      expect(formParams(config, python)).toMatchObject({ command, ...params });
+    }
+    // No script or module to show in the form: it stays a plain command.
+    expect(
+      formParams({ ...newConfigOfType(python, []), args: ["-c", "print(1)"], params: undefined }, python),
+    ).toBeNull();
   });
 
   it("Django tests round-trip commandLine / paramsFrom and always report to the test tree", () => {
@@ -618,6 +723,97 @@ describe("before launch tasks", () => {
       setBeforeLaunchRunner(null);
     }
   });
+
+  it.each([undefined, "", "core"])("validates saved build tasks and module selection (%s)", (module) => {
+    const app = cfg("app", {
+      module,
+      beforeLaunch: [
+        { kind: "buildArtifacts", target: "" },
+        { kind: "buildModule", target: module ?? "" },
+      ],
+    });
+    expect(validateConfig(app).beforeLaunch).toBe(
+      module == null ? "Select a module for the Build Module task" : undefined,
+    );
+    if (module != null) {
+      expect(validateConfig({ ...app, module: "other" }).beforeLaunch).toContain("different module");
+    }
+  });
+
+  it.each([undefined, "", "core"])("offers Build Module only with a selected module (%s)", (module) => {
+    const config = cfg("app", { module, beforeLaunch: [{ kind: "buildArtifacts", target: "" }] });
+    const changed = vi.fn();
+    render(
+      <ConfigForm config={config} all={[config]} type={undefined} errors={{}} onChange={changed} modifyRequest={0} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add task" }));
+    const item = screen.getByRole("menuitem", { name: "Build Module" });
+    expect(item.getAttribute("aria-disabled")).toBe(module == null ? "true" : null);
+    if (module != null) {
+      fireEvent.click(item);
+      expect(changed).toHaveBeenCalledWith(
+        expect.objectContaining({
+          beforeLaunch: [...config.beforeLaunch!, { kind: "buildModule", target: module }],
+        }),
+      );
+    }
+  });
+
+  it("refuses a removed module before dispatching its build", async () => {
+    const run = vi.fn();
+    const dispose = registerActions([{ id: "build.buildModule", title: "Build Module", run }]);
+    useProject.setState({ project: { root: "/p" } as never });
+    useBuildPresentation.setState({ modules: new Map() });
+    try {
+      const app = cfg("app", { module: "removed", beforeLaunch: [{ kind: "buildModule", target: "removed" }] });
+      expect(await runBeforeLaunch(app, [app.id])).toBe(false);
+      expect(run).not.toHaveBeenCalled();
+      expect(notify).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.stringContaining("no longer exists") }),
+      );
+    } finally {
+      dispose();
+      useProject.setState({ project: null });
+    }
+  });
+
+  it("runs Build Module and Build Artifacts before launch", async () => {
+    const buildModule = vi.fn(async () => setContext("build.lastStatus", "success"));
+    const artifacts = vi.fn(async () => setContext("build.lastStatus", "success"));
+    const disposeBuild = registerActions([
+      { id: "build.buildModule", title: "Build Module", run: buildModule },
+      { id: "build.buildArtifacts", title: "Build Artifacts", run: artifacts },
+    ]);
+    useProject.setState({ project: { root: "/p" } as never });
+    useBuildPresentation.setState({ modules: new Map([["core", "maven"]]) });
+    const app = cfg("app", {
+      module: "core",
+      beforeLaunch: [
+        { kind: "buildModule", target: "core" },
+        { kind: "buildArtifacts", target: "" },
+      ],
+    });
+    expect(await runBeforeLaunch(app, [app.id])).toBe(true);
+    expect(buildModule).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ arg: { target: "/p/core", activate: false, wait: true } }),
+    );
+    expect(artifacts).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ arg: { activate: false, wait: true } }),
+    );
+    useProject.setState({ project: null });
+    useBuildPresentation.setState({ modules: new Map() });
+    disposeBuild();
+  });
+
+  it("shows the build policy for a Maven configuration", async () => {
+    const type = typeFor("maven")!;
+    const config = newConfigOfType(type, []);
+    const changed = vi.fn();
+    render(<ConfigForm config={config} all={[config]} type={type} errors={{}} onChange={changed} modifyRequest={0} />);
+    fireEvent.click(screen.getByRole("button", { name: /Modify options/ }));
+    fireEvent.click(await screen.findByText("Build"));
+    expect(screen.getByRole("button", { name: "Build" })).toBeTruthy();
+  });
 });
 
 describe("environment variables", () => {
@@ -759,7 +955,7 @@ describe("debug-only types (Remote JVM Debug)", () => {
 describe("Current File", () => {
   it("is always offered in the chooser", () => {
     expect(buildRows([], "")[0]).toMatchObject({ type: "current" });
-    expect(buildRows([cfg("a")], "cur").map((r) => r.type)).toEqual(["current", "edit"]);
+    expect(buildRows([cfg("a")], "cur").map((r) => r.type)).toEqual(["current", "section", "edit"]);
     selectConfig(CURRENT_FILE);
     expect(useRun.getState().selectedId).toBe(CURRENT_FILE);
   });
@@ -784,3 +980,37 @@ describe("new Gradle wrapper default", () => {
     },
   );
 });
+
+it.each(["maven", "gradle", "delegated", "absolute", "legacy"])(
+  "offers only supported build policies for %s",
+  (tool) => {
+    const kind = tool === "maven" || tool === "gradle" ? tool : "application";
+    const config = cfg("main", { kind, module: tool === "legacy" ? null : "app", buildPolicy: "make" });
+    const previous = useProject.getState();
+    if (kind === "application") {
+      useProject.setState({ project: { root: "/work" } as never, settings: null });
+      useBuildModel.setState({
+        model: { gradle: [{ projects: [{ dir: tool === "absolute" ? "/work/app" : "app" }] }] } as never,
+      });
+    }
+    try {
+      render(
+        <ConfigForm
+          config={config}
+          all={[config]}
+          type={typeFor(kind)}
+          errors={{}}
+          onChange={vi.fn()}
+          modifyRequest={0}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Build" }));
+      expect(screen.queryByRole("option", { name: "No build" })).toBeNull();
+      expect(screen.queryByRole("option", { name: "Build, no error check" }) !== null).toBe(tool === "maven");
+      expect(screen.getByRole("option", { name: "Rebuild" })).toBeTruthy();
+    } finally {
+      useBuildModel.setState({ model: null });
+      useProject.setState(previous);
+    }
+  },
+);

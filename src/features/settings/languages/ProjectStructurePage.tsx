@@ -1,9 +1,9 @@
 /**
- * Settings › Project Structure (File › Project Structure…, ⌘; / Ctrl+Alt+Shift+S):
+ * File › Project Structure… (⌘; / Ctrl+Alt+Shift+S):
  * IntelliJ IDEA-style Project Structure configuration across Project, Modules
  * (Sources, Paths, Dependencies), Libraries, Facets, Artifacts, and SDKs.
  */
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Channel } from "@tauri-apps/api/core";
 import {
@@ -14,8 +14,13 @@ import {
   IconButton,
   Input,
   Select,
+  SplitGroup,
+  SplitHandle,
+  SplitPanel,
+  Toolbar,
   Tree,
   folderIconName,
+  showContextMenu,
   type DialogButton,
   type FolderKind,
   type IconName,
@@ -27,7 +32,7 @@ import { call, commands, isTauri, nextRequestId, type FileEntry } from "@/platfo
 import { mergeLibraryGroups } from "@/platform/libraries";
 import type { BuildModel, LibraryGroup, WebArtifact } from "@/bindings";
 import { relativePath, useProject } from "@/platform/project";
-import { PageContext, useSettingsFormFor } from "../components/context";
+import { PageContext, useSetting, useSettingsFormFor } from "../components/context";
 import {
   applySettings,
   closeProjectStructure,
@@ -54,20 +59,28 @@ import {
   type FacetConfigValid,
   type FolderListKey,
   type FolderRole,
-  type ModuleDependencyValid,
   type ModuleStructureValid,
   type ProjectLibraryValid,
   type ProjectStructureValid,
 } from "@/platform/languageSettings";
 import { initProjectRoots, useDetectedRoots } from "@/platform/projectRoots";
 import { Row, Section } from "../components/Form";
-import { choosePath, detectSdks, useSdks, type SdkKind } from "./api";
+import { detectSdks, forgetSdk, rememberSdk, useSdks, type SdkKind } from "./api";
+import { choosePath } from "@/platform/choosePath";
 import { DownloadJdkDialog } from "./DownloadJdkDialog";
-import { SdkField, tildify, useDetected, useProjectSetting } from "./components";
+import { SdkField, tildify, useDetected, useJdtlsJdk, useProjectSetting } from "./components";
 import styles from "./Sdk.module.css";
+import { executeAction } from "@/platform/actions";
 import { tx } from "@/platform/i18n";
 
-export type ProjectStructureSectionId = "project" | "modules" | "libraries" | "facets" | "artifacts" | "sdks";
+export type ProjectStructureSectionId =
+  | "project"
+  | "modules"
+  | "dependencies"
+  | "libraries"
+  | "facets"
+  | "artifacts"
+  | "sdks";
 
 interface DirNode {
   path: string;
@@ -92,15 +105,6 @@ const ROLES: Array<{ role: FolderRole; label: string; title: string; kind: Folde
     cls: styles.testResourcesTitle!,
   },
   { role: "excluded", label: "Excluded", title: "Excluded Folders", kind: "excluded", cls: styles.excludedTitle! },
-];
-
-const SECTION_TABS: Array<{ id: ProjectStructureSectionId; label: string; icon: IconName }> = [
-  { id: "project", label: "Project", icon: "folder" },
-  { id: "modules", label: "Modules", icon: "module" },
-  { id: "libraries", label: "Libraries", icon: "folder-library" },
-  { id: "facets", label: "Facets", icon: "file-config" },
-  { id: "artifacts", label: "Artifacts", icon: "file-archive" },
-  { id: "sdks", label: "SDKs", icon: "settings" },
 ];
 
 const PROJECT_JAVA_LEVEL_OPTIONS: SelectOption[] = JAVA_LANGUAGE_LEVELS.map((level) =>
@@ -157,6 +161,10 @@ function useStructure(): [ProjectStructureValid, (next: ProjectStructureValid) =
   const [excluded, setExcluded] = useProjectSetting<string[] | undefined>("projectStructure.excluded");
   const [unmarked, setUnmarked] = useProjectSetting<string[] | undefined>("projectStructure.unmarked");
   const [contentRoots] = useProjectSetting<string[] | undefined>("projectStructure.contentRoots");
+  const [dependencies] = useProjectSetting<string[] | undefined>("projectStructure.dependencies");
+  const [memberDependencies] = useProjectSetting<Record<string, string[]> | undefined>(
+    "projectStructure.memberDependencies",
+  );
   const [excludeFiles] = useProjectSetting<string | undefined>("projectStructure.excludeFiles");
   const [compilerOutput] = useProjectSetting<string | undefined>("projectStructure.compilerOutput");
   const [modules] = useProjectSetting<Record<string, ModuleStructureValid> | undefined>("projectStructure.modules");
@@ -174,6 +182,8 @@ function useStructure(): [ProjectStructureValid, (next: ProjectStructureValid) =
         excluded: excluded ?? [],
         unmarked: unmarked ?? [],
         contentRoots: contentRoots ?? [],
+        dependencies: dependencies ?? [],
+        memberDependencies: memberDependencies ?? {},
         excludeFiles: excludeFiles ?? "",
         compilerOutput: compilerOutput ?? "",
         modules: modules ?? {},
@@ -189,6 +199,8 @@ function useStructure(): [ProjectStructureValid, (next: ProjectStructureValid) =
       excluded,
       unmarked,
       contentRoots,
+      dependencies,
+      memberDependencies,
       excludeFiles,
       compilerOutput,
       modules,
@@ -231,7 +243,7 @@ function useBuildModelData(root: string | null): BuildModel | null {
 }
 
 /** "+ Add Content Root" and the content roots, the project folder first (IDEA's module Sources tab). */
-function ContentRoots({ root }: { root: string }) {
+function ContentRoots({ root, children }: { root: string; children: ReactNode }) {
   const [roots, setRoots] = useProjectSetting<string[] | undefined>("projectStructure.contentRoots");
   const list = roots ?? [];
   const add = async () => {
@@ -240,17 +252,22 @@ function ContentRoots({ root }: { root: string }) {
     setRoots([...list, picked]);
   };
   return (
-    <div className={styles.rootGroup}>
-      <Button size="small" variant="ghost" icon="plus" onClick={() => void add()}>
-        <T>Add Content Root</T>
-      </Button>
+    <>
+      <div className={styles.contentRootToolbar}>
+        <Button size="small" variant="ghost" icon="plus" onClick={() => void add()}>
+          <T>Add Content Root</T>
+        </Button>
+      </div>
       <div className={clsx(styles.rootItem, styles.contentRoot)}>
+        <Icon name="module" size={14} />
         <span className={styles.rootPath} title={root}>
           {root}
         </span>
       </div>
+      {children}
       {list.map((r) => (
         <div key={r} className={clsx(styles.rootItem, styles.contentRoot)}>
+          <Icon name="module" size={14} />
           <span className={styles.rootPath} title={r}>
             {r}
           </span>
@@ -263,7 +280,7 @@ function ContentRoots({ root }: { root: string }) {
           />
         </div>
       ))}
-    </div>
+    </>
   );
 }
 
@@ -299,6 +316,10 @@ function ProjectSection() {
   const [languageLevel, setLanguageLevel] = useProjectSetting<string>("languages.java.languageLevel");
   const [compilerOutput, setCompilerOutput] = useProjectSetting<string>("projectStructure.compilerOutput");
   const [jdtlsJdk, setJdtlsJdk] = useProjectSetting<string>("languages.java.jdtlsJdk");
+  const jdtls = useJdtlsJdk(
+    "JDK used to run the Eclipse JDT Language Server, independent of the target Project SDK.",
+    jdtlsJdk ?? "",
+  );
   const outId = useId();
 
   return (
@@ -364,10 +385,7 @@ function ProjectSection() {
         </Row>
       </Section>
       <Section title="Language Server">
-        <Row
-          label="JDK"
-          hint="JDK used to run the Eclipse JDT Language Server (jdtls 21+), independent of the target Project SDK."
-        >
+        <Row label="JDK" hint={jdtls.hint}>
           <SdkField
             kind="jdk"
             value={jdtlsJdk ?? ""}
@@ -377,6 +395,7 @@ function ProjectSection() {
             directory
             browseTitle="Select JDK Home Directory"
             aria-label="Language server JDK"
+            minJava={jdtls.minJava}
           />
         </Row>
       </Section>
@@ -398,6 +417,19 @@ function ModuleSourcesTab({ moduleKey }: { moduleKey: string }) {
   const moduleRoot = root ? (moduleKey === "." ? root : `${root}/${moduleKey}`) : null;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(moduleRoot ? [moduleRoot] : []));
   const [selected, setSelected] = useState<DirNode | null>(null);
+  const container = useRef<HTMLDivElement>(null);
+  const [stacked, setStacked] = useState(false);
+
+  useLayoutEffect(() => {
+    const view = container.current;
+    if (!view) return;
+    const measure = () => setStacked(view.clientWidth < 420);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(view);
+    return () => observer.disconnect();
+  }, [moduleRoot]);
 
   const load = useCallback(
     async (node: DirNode) => {
@@ -466,111 +498,115 @@ function ModuleSourcesTab({ moduleKey }: { moduleKey: string }) {
   const unmarkedDetected = unmarkedRoots(moduleDetected, ps);
   const restore = () => setPs(restoreDetected(ps, moduleDetected));
 
-  return (
-    <div className={styles.structure}>
-      <div className={styles.structureTree}>
-        <div className={styles.markBar} role="toolbar" aria-label={tx("Mark as")}>
-          <span>
-            <T>Mark as:</T>
-          </span>
-          {ROLES.map((r) => (
-            <button
-              key={r.role}
-              type="button"
-              className={styles.markButton}
-              aria-pressed={role === r.role}
-              disabled={markable === null || (!markable && r.role === "excluded")}
-              onClick={() => mark(r.role)}
-            >
-              <Icon name={folderIconName(r.kind)} size={14} />
-              {r.label}
-            </button>
-          ))}
+  const markedFolders = ROLES.map((r) => {
+    const list = roots.filter(
+      (x) => x.kind === r.role && (moduleKey === "." || x.path === moduleKey || x.path.startsWith(moduleKey + "/")),
+    );
+    if (!list.length) return null;
+    return (
+      <div key={r.role} className={styles.rootGroup}>
+        <div className={clsx(styles.rootTitle, r.cls)}>
+          <Icon name={folderIconName(r.kind)} size={14} />
+          {tx(r.title)}
         </div>
-        <div className={styles.treeScroll}>
-          <Tree<DirNode>
-            aria-label="Content root"
-            roots={treeRoots}
-            getKey={(n) => n.path}
-            getLabel={(n) => n.name}
-            getChildren={(n) => children.get(n.path)}
-            isExpandable={() => true}
-            loadChildren={load}
-            expanded={expanded}
-            onExpandedChange={(set) => setExpanded(set)}
-            multiSelect={false}
-            selected={selected ? new Set([selected.path]) : new Set()}
-            onSelectionChange={(_s, lead) => setSelected(lead)}
-            getIcon={(n) => {
-              if (n.rel === null) return n.contentRoot ? "module" : folderIconName("plain");
-              const r = rootRole(roots, n.rel);
-              if (!n.rel && !r) return "module";
-              return folderIconName(r ? ROLES.find((x) => x.role === r)!.kind : "plain");
-            }}
-            getDetail={(n) => (n.rel === "" ? (root ?? undefined) : n.contentRoot ? n.path : undefined)}
-          />
-        </div>
-        {moduleKey === "." && <ExcludeFiles />}
-      </div>
-      <div className={styles.roots} aria-label={tx("Marked folders")}>
-        {moduleKey === "." && <ContentRoots root={rootNode.path} />}
-        {ROLES.map((r) => {
-          const list = roots.filter(
-            (x) =>
-              x.kind === r.role && (moduleKey === "." || x.path === moduleKey || x.path.startsWith(moduleKey + "/")),
-          );
+        {list.map((x) => {
+          const shown = x.path || name || ".";
           return (
-            <div key={r.role} className={styles.rootGroup}>
-              <div className={clsx(styles.rootTitle, r.cls)}>
-                <Icon name={folderIconName(r.kind)} size={14} />
-                {r.title}
-              </div>
-              {list.length === 0 && (
-                <div className={clsx(styles.rootItem, styles.note)}>
-                  <T>None</T>
-                </div>
-              )}
-              {list.map((x) => {
-                const shown = x.path || name || ".";
-                return (
-                  <div key={x.path} className={styles.rootItem}>
-                    <span className={styles.rootPath} title={x.path || root || undefined}>
-                      {shown}
-                      {x.detectedFrom && (
-                        <span className={styles.rootHint}> {tx`detected from ${x.detectedFrom}`}</span>
-                      )}
-                    </span>
-                    <IconButton
-                      icon="close"
-                      size="small"
-                      iconSize={12}
-                      title={tx`Unmark ${shown}`}
-                      onClick={() => setPs(markFolder(ps, x.path, null, detected))}
-                    />
-                  </div>
-                );
-              })}
+            <div key={x.path} className={styles.rootItem}>
+              <span className={styles.rootPath} title={x.path || root || undefined}>
+                {shown}
+                {x.detectedFrom && <span className={styles.rootHint}> {tx`detected from ${x.detectedFrom}`}</span>}
+              </span>
+              <IconButton
+                icon="close"
+                size="small"
+                iconSize={12}
+                title={tx`Unmark ${shown}`}
+                onClick={() => setPs(markFolder(ps, x.path, null, detected))}
+              />
             </div>
           );
         })}
-        {unmarkedDetected.length > 0 && (
-          <div className={styles.note}>
-            {unmarkedDetected.length === 1
-              ? tx("1 detected folder is unmarked.")
-              : tx`${unmarkedDetected.length} detected folders are unmarked.`}{" "}
-            <button type="button" className={styles.linkButton} onClick={restore}>
-              <T>Restore detected roots</T>
-            </button>
-          </div>
-        )}
-        <div className={styles.note}>
-          <T>
-            {
-              "Folders are detected from build files (pom.xml, build.gradle, Cargo.toml, go.mod, pyproject.toml, package.json, composer.json); marking or unmarking a folder overrides detection. Excluded folders are skipped by the Project view, Find in Files and the index (reopen the project to re-index)."
-            }
-          </T>
-        </div>
       </div>
+    );
+  });
+
+  return (
+    <div ref={container} className={clsx(styles.structure, stacked && styles.structureStacked)}>
+      <SplitGroup key={stacked ? "stacked" : "side-by-side"} orientation={stacked ? "vertical" : "horizontal"}>
+        <SplitPanel
+          id="module-source-tree"
+          minSize={stacked ? 212 : 190}
+          defaultSize={stacked ? "52%" : "60%"}
+          className={styles.structureTree}
+        >
+          <div className={styles.markBar} role="toolbar" aria-label={tx("Mark as")}>
+            <span>
+              <T>Mark as:</T>
+            </span>
+            {ROLES.map((r) => (
+              <button
+                key={r.role}
+                type="button"
+                className={styles.markButton}
+                aria-pressed={role === r.role}
+                disabled={markable === null || (!markable && r.role === "excluded")}
+                onClick={() => mark(r.role)}
+              >
+                <Icon name={folderIconName(r.kind)} size={14} />
+                {tx(r.label)}
+              </button>
+            ))}
+          </div>
+          <div className={styles.treeScroll}>
+            <Tree<DirNode>
+              aria-label="Content root"
+              roots={treeRoots}
+              getKey={(n) => n.path}
+              getLabel={(n) => n.name}
+              getChildren={(n) => children.get(n.path)}
+              isExpandable={() => true}
+              loadChildren={load}
+              expanded={expanded}
+              onExpandedChange={(set) => setExpanded(set)}
+              multiSelect={false}
+              selected={selected ? new Set([selected.path]) : new Set()}
+              onSelectionChange={(_s, lead) => setSelected(lead)}
+              getIcon={(n) => {
+                if (n.rel === null) return n.contentRoot ? "module" : folderIconName("plain");
+                const r = rootRole(roots, n.rel);
+                if (!n.rel && !r) return "module";
+                return folderIconName(r ? ROLES.find((x) => x.role === r)!.kind : "plain");
+              }}
+              getDetail={(n) => (n.rel === "" ? (root ?? undefined) : n.contentRoot ? n.path : undefined)}
+            />
+          </div>
+          {moduleKey === "." && <ExcludeFiles />}
+        </SplitPanel>
+        <SplitHandle aria-label={tx("Marked folders")} />
+        <SplitPanel id="module-marked-folders" minSize={stacked ? 160 : 175}>
+          <section className={styles.roots} aria-label={tx("Marked folders")}>
+            {moduleKey === "." ? <ContentRoots root={rootNode.path}>{markedFolders}</ContentRoots> : markedFolders}
+            {unmarkedDetected.length > 0 && (
+              <div className={styles.note}>
+                {unmarkedDetected.length === 1
+                  ? tx("1 detected folder is unmarked.")
+                  : tx`${unmarkedDetected.length} detected folders are unmarked.`}{" "}
+                <button type="button" className={styles.linkButton} onClick={restore}>
+                  <T>Restore detected roots</T>
+                </button>
+              </div>
+            )}
+            <div className={styles.note}>
+              <T>
+                {
+                  "Folders are detected from build files (pom.xml, build.gradle, Cargo.toml, go.mod, pyproject.toml, package.json, composer.json); marking or unmarking a folder overrides detection. Excluded folders are skipped by the Project view, Find in Files and the index (reopen the project to re-index)."
+                }
+              </T>
+            </div>
+          </section>
+        </SplitPanel>
+      </SplitGroup>
     </div>
   );
 }
@@ -581,6 +617,192 @@ interface DiscoveredModule {
   buildTool: "maven" | "gradle" | "custom";
 }
 
+/** One row of the Project Structure › Dependencies checklist. */
+export interface DependencyCandidate {
+  path: string;
+  name: string;
+  checked: boolean;
+  disabled: boolean;
+}
+
+/**
+ * Rows of the "project dependencies" checklist of a single root (the project folder, or a
+ * workspace member): the configured dependencies. A workspace additionally lists the other
+ * roots attached to the window, in MemberDependencies.
+ */
+export function dependencyCandidates(root: string | null, dependencies: readonly string[]): DependencyCandidate[] {
+  const out: DependencyCandidate[] = [];
+  const listed = new Set<string>();
+  const nameOf = (p: string) => p.slice(p.lastIndexOf("/") + 1).replace(/[\\/]+$/, "") || p;
+  const attachable = (p: string) => !!root && p !== root && !p.startsWith(`${root}/`);
+  for (const p of dependencies) {
+    if (listed.has(p) || !attachable(p)) continue;
+    listed.add(p);
+    out.push({ path: p, name: nameOf(p), checked: true, disabled: false });
+  }
+  return out;
+}
+
+/** Project Structure › Dependencies. */
+function ModuleDependenciesTab() {
+  const workspaceProjects = useProject((s) => s.project?.workspace?.projects ?? null);
+  // A workspace: every member is an equal root that picks the roots it depends on.
+  return workspaceProjects ? <MemberDependencies members={workspaceProjects} /> : <ProjectDependencies />;
+}
+
+/** The dependency checklist of a standalone project (no workspace). */
+function ProjectDependencies() {
+  const root = useProject((s) => s.project?.root ?? null);
+  const [deps, setDeps] = useProjectSetting<string[] | undefined>("projectStructure.dependencies");
+  const list = deps ?? [];
+  // Only the configured projects: candidates come from Add Project…, not every recent project.
+  const candidates = useMemo(() => dependencyCandidates(root, deps ?? []), [root, deps]);
+
+  const toggle = (path: string, checked: boolean) =>
+    setDeps(checked ? [...list, path] : list.filter((x) => x !== path));
+  const add = async () => {
+    const picked = await choosePath({
+      directory: true,
+      title: "Add Project Dependency",
+      defaultPath: root ?? undefined,
+    });
+    if (!picked || !root || picked === root || inside(root, picked) || list.includes(picked)) return;
+    setDeps([...list, picked]);
+  };
+
+  return (
+    <Section title="Project Dependencies">
+      <div className={styles.note}>
+        <T>
+          Dependency projects are indexed and navigable together with this project: Go to Declaration, Find Usages and
+          the Project view include them.
+        </T>
+      </div>
+      <div className={styles.entryList} role="group" aria-label={tx("The project depends on these projects")}>
+        {candidates.length === 0 && (
+          <div className={styles.note}>
+            <T>No candidate projects yet. Use Add Project… to pick one.</T>
+          </div>
+        )}
+        {candidates.map((c) => (
+          <div key={c.path} className={styles.entryRow}>
+            <Checkbox
+              checked={c.checked}
+              disabled={c.disabled}
+              label={c.name}
+              onChange={(checked) => toggle(c.path, checked)}
+              aria-label={tx`The project depends on ${c.name}`}
+            />
+            <span className={styles.rootPath} title={c.path}>
+              {tildify(c.path)}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className={styles.entryActions}>
+        <Button size="small" variant="ghost" icon="plus" onClick={() => void add()}>
+          <T>Add Project…</T>
+        </Button>
+      </div>
+    </Section>
+  );
+}
+
+/** The per-root dependency checklist of a workspace: all members are equal roots. */
+function MemberDependencies({ members }: { members: readonly string[] }) {
+  const [memberDeps, setMemberDeps] = useProjectSetting<Record<string, string[]> | undefined>(
+    "projectStructure.memberDependencies",
+  );
+  const [selected, setSelected] = useState(0);
+  const active = members[Math.min(selected, members.length - 1)] ?? "";
+  const activeName = active.slice(active.lastIndexOf("/") + 1);
+  const deps = useMemo(() => memberDeps?.[active] ?? [], [memberDeps, active]);
+  const others = useMemo(() => {
+    const nameOf = (p: string) => p.slice(p.lastIndexOf("/") + 1);
+    const extra = deps.filter((d) => !members.includes(d)).map((path) => ({ path, name: nameOf(path) }));
+    return members
+      .filter((m) => m !== active)
+      .map((path) => ({ path, name: nameOf(path) }))
+      .concat(extra);
+  }, [members, active, deps]);
+  const roots = useMemo(
+    () => members.map((path) => ({ path, name: path.slice(path.lastIndexOf("/") + 1) })),
+    [members],
+  );
+  const setDeps = (next: string[]) => setMemberDeps({ ...(memberDeps ?? {}), [active]: next });
+  const toggle = (path: string, checked: boolean) =>
+    setDeps(checked ? [...deps, path] : deps.filter((x) => x !== path));
+  const add = async () => {
+    const picked = await choosePath({
+      directory: true,
+      title: "Add Project Dependency",
+      defaultPath: active,
+    });
+    if (!picked || picked === active || inside(active, picked) || deps.includes(picked)) return;
+    setDeps([...deps, picked]);
+  };
+
+  return (
+    <div className={styles.page}>
+      <div className={styles.note}>
+        <T>
+          Every root is equal: pick a root on the left, then check the roots it depends on. Go to Declaration in it
+          resolves only into its own code and its dependencies.
+        </T>
+      </div>
+      <div className={styles.splitLayout}>
+        <div className={styles.sideList}>
+          <div className={styles.sideItems} role="listbox" aria-label={tx("Roots")}>
+            {roots.map((m, i) => (
+              <button
+                key={m.path}
+                type="button"
+                role="option"
+                aria-selected={m.path === active}
+                className={clsx(styles.sideItem, m.path === active && styles.sideItemActive)}
+                onClick={() => setSelected(i)}
+                title={m.path}
+              >
+                <Icon name="module" size={14} />
+                <span className={styles.sideItemLabel}>{m.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={styles.detailPane}>
+          <Section title={tx`Dependencies of ${activeName}`}>
+            <div className={styles.entryList} role="group" aria-label={tx("The root depends on these projects")}>
+              {others.length === 0 && (
+                <div className={styles.note}>
+                  <T>No other roots.</T>
+                </div>
+              )}
+              {others.map((c) => (
+                <div key={c.path} className={styles.entryRow}>
+                  <Checkbox
+                    checked={deps.includes(c.path)}
+                    label={c.name}
+                    onChange={(checked) => toggle(c.path, checked)}
+                    aria-label={tx`The root depends on ${c.name}`}
+                  />
+                  <span className={styles.rootPath} title={c.path}>
+                    {tildify(c.path)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className={styles.entryActions}>
+              <Button size="small" variant="ghost" icon="plus" onClick={() => void add()}>
+                <T>Add Project…</T>
+              </Button>
+            </div>
+          </Section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModulesSection() {
   const root = useProject((s) => s.project?.root ?? null);
   const projectName = useProject((s) => s.project?.name ?? "");
@@ -588,10 +810,8 @@ function ModulesSection() {
   const [modulesMap, setModulesMap] = useProjectSetting<Record<string, ModuleStructureValid> | undefined>(
     "projectStructure.modules",
   );
-  const [libraries] = useProjectSetting<ProjectLibraryValid[] | undefined>("projectStructure.libraries");
   const [selectedModule, setSelectedModule] = useState<string>(".");
-  const [subTab, setSubTab] = useState<"sources" | "paths" | "dependencies">("sources");
-  const [selectedDepIdx, setSelectedDepIdx] = useState<number>(-1);
+  const [subTab, setSubTab] = useState<"sources" | "paths">("sources");
   const [moduleError, setModuleError] = useState(false);
   const outId = useId();
   const testOutId = useId();
@@ -664,43 +884,37 @@ function ModulesSection() {
     setSelectedModule(".");
   };
 
-  const addLibraryDependency = () => {
-    const firstLib = libraries?.[0]?.name ?? "project-lib";
-    const dep: ModuleDependencyValid = { kind: "library", target: firstLib, scope: "compile", exported: false };
-    updateModuleCfg({ dependencies: [...currentModuleCfg.dependencies, dep] });
-    setSelectedDepIdx(currentModuleCfg.dependencies.length);
-  };
-
-  const addModuleDependency = () => {
-    const otherMod = modules.find((m) => m.key !== activeKey)?.key ?? "shared";
-    const dep: ModuleDependencyValid = { kind: "module", target: otherMod, scope: "compile", exported: false };
-    updateModuleCfg({ dependencies: [...currentModuleCfg.dependencies, dep] });
-    setSelectedDepIdx(currentModuleCfg.dependencies.length);
-  };
-
-  const removeDependency = () => {
-    if (selectedDepIdx < 0 || selectedDepIdx >= currentModuleCfg.dependencies.length) return;
-    const next = currentModuleCfg.dependencies.filter((_, idx) => idx !== selectedDepIdx);
-    updateModuleCfg({ dependencies: next });
-    setSelectedDepIdx(-1);
-  };
-
   const activeMod = modules.find((m) => m.key === activeKey) ?? modules[0];
 
   return (
     <div className={styles.page}>
       {moduleError && (
         <div role="status" className={styles.note}>
-          <T>Select a module directory inside the project.</T>
+          <T>
+            Module overrides only apply to a directory inside the opened project. To import an existing module from
+            outside it, use Import Module from Existing Sources.
+          </T>
         </div>
       )}
-      <div className={styles.splitLayout}>
+      <div className={clsx(styles.splitLayout, styles.modulesLayout)}>
         <div className={styles.sideList}>
           <div className={styles.tableToolbar}>
-            <Button size="small" variant="ghost" icon="plus" onClick={() => void addModule()}>
-              <T>Add Module Overrides</T>
-            </Button>
-            <span className={styles.spacer} />
+            <IconButton
+              icon="plus"
+              size="small"
+              title="Add"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                showContextMenu({ x: r.left, y: r.bottom + 2 }, [
+                  { label: tx("Add Module Overrides…"), icon: "module", run: () => void addModule() },
+                  {
+                    label: tx("Import Module from Existing Sources…"),
+                    icon: "folder-open",
+                    run: () => void executeAction("maven.importExternal"),
+                  },
+                ]);
+              }}
+            />
             <IconButton
               icon="minus"
               size="small"
@@ -750,15 +964,6 @@ function ModulesSection() {
               onClick={() => setSubTab("paths")}
             >
               <T>Paths</T>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className={styles.sectionTab}
-              aria-selected={subTab === "dependencies"}
-              onClick={() => setSubTab("dependencies")}
-            >
-              <T>Dependencies</T>
             </button>
           </div>
 
@@ -868,108 +1073,6 @@ function ModulesSection() {
               </Row>
             </Section>
           )}
-
-          {subTab === "dependencies" && (
-            <div className={styles.tablePanel}>
-              <div className={styles.note}>
-                <T>Custom module dependencies are not supported yet. Configure dependencies in Maven or Gradle.</T>
-              </div>
-              <fieldset disabled className={styles.pendingFeature}>
-                <div className={styles.tableToolbar}>
-                  <Button size="small" variant="ghost" icon="plus" onClick={addLibraryDependency}>
-                    <T>Add Library</T>
-                  </Button>
-                  <Button size="small" variant="ghost" icon="plus" onClick={addModuleDependency}>
-                    <T>Add Module Dependency</T>
-                  </Button>
-                  <IconButton
-                    icon="minus"
-                    size="small"
-                    title="Remove dependency"
-                    disabled={selectedDepIdx < 0}
-                    onClick={removeDependency}
-                  />
-                </div>
-                <div className={styles.tableScroll}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>
-                          <T>Export</T>
-                        </th>
-                        <th>
-                          <T>Dependency</T>
-                        </th>
-                        <th>
-                          <T>Kind</T>
-                        </th>
-                        <th>
-                          <T>Scope</T>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {currentModuleCfg.dependencies.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className={styles.empty}>
-                            <T>No custom module dependencies configured.</T>
-                          </td>
-                        </tr>
-                      )}
-                      {currentModuleCfg.dependencies.map((dep, idx) => (
-                        <tr
-                          key={`${dep.kind}-${dep.target}-${idx}`}
-                          className={clsx(idx === selectedDepIdx && styles.selected)}
-                          onClick={() => setSelectedDepIdx(idx)}
-                        >
-                          <td>
-                            <Checkbox
-                              checked={dep.exported}
-                              onChange={(exported) => {
-                                const next = [...currentModuleCfg.dependencies];
-                                next[idx] = { ...dep, exported };
-                                updateModuleCfg({ dependencies: next });
-                              }}
-                              aria-label="Export dependency"
-                            />
-                          </td>
-                          <td>
-                            <Input
-                              mono
-                              value={dep.target}
-                              aria-label="Dependency target"
-                              onChange={(e) => {
-                                const next = [...currentModuleCfg.dependencies];
-                                next[idx] = { ...dep, target: e.target.value };
-                                updateModuleCfg({ dependencies: next });
-                              }}
-                            />
-                          </td>
-                          <td>
-                            <span className={styles.badge}>
-                              {dep.kind === "module" ? <T>Module</T> : <T>Library</T>}
-                            </span>
-                          </td>
-                          <td>
-                            <Select
-                              value={dep.scope}
-                              options={SCOPE_OPTIONS}
-                              onChange={(scope) => {
-                                const next = [...currentModuleCfg.dependencies];
-                                next[idx] = { ...dep, scope: scope as DependencyScopeValid };
-                                updateModuleCfg({ dependencies: next });
-                              }}
-                              aria-label="Dependency scope"
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </fieldset>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -978,6 +1081,124 @@ function ModulesSection() {
 
 // ---------------------------------------------------------------------------
 // 3. Libraries Section
+
+type LibraryRootKind = "classes" | "sources";
+
+interface LibraryRootNode {
+  key: string;
+  label: string;
+  icon: IconName;
+  kind: LibraryRootKind;
+  children?: LibraryRootNode[];
+}
+
+function LibraryRoots({
+  library,
+  onAttach,
+  onRemove,
+}: {
+  library: ProjectLibraryValid;
+  onAttach: (kind: LibraryRootKind, directory: boolean, title: string) => Promise<void>;
+  onRemove: (kind: LibraryRootKind, path: string) => void;
+}) {
+  const [selectedRoot, setSelectedRoot] = useState<LibraryRootNode | null>(null);
+  const selected = selectedRoot && library[selectedRoot.kind].includes(selectedRoot.label) ? selectedRoot : null;
+
+  const groups: { kind: LibraryRootKind; label: string; icon: IconName }[] = [
+    { kind: "classes", label: tx("Classes"), icon: "folder-compiled" },
+    { kind: "sources", label: tx("Sources"), icon: "folder-source" },
+  ];
+  const roots = groups
+    .filter(({ kind }) => library[kind].length > 0)
+    .map(({ kind, label, icon }): LibraryRootNode => ({
+      key: kind,
+      kind,
+      label,
+      icon,
+      children: library[kind].map((path) => ({
+        key: `${kind}:${path}`,
+        kind,
+        label: path,
+        icon: /\.(jar|zip)$/i.test(path) ? "file-archive" : "folder",
+      })),
+    }));
+
+  return (
+    <Row label="Library Roots" stacked>
+      <div className={styles.tablePanel}>
+        <Toolbar aria-label="Library Roots" className={styles.tableToolbar}>
+          <IconButton
+            icon="plus"
+            size="small"
+            title="Attach Library Root"
+            aria-haspopup="menu"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              showContextMenu({ x: rect.left, y: rect.bottom + 2 }, [
+                {
+                  label: tx("Add JAR…"),
+                  icon: "file-archive",
+                  run: () => void onAttach("classes", false, "Select Library JAR"),
+                },
+                {
+                  label: tx("Add Folder…"),
+                  icon: "folder-open",
+                  run: () => void onAttach("classes", true, "Select Classes Directory"),
+                },
+                {
+                  label: tx("Attach Sources…"),
+                  icon: "file-archive",
+                  run: () => void onAttach("sources", false, "Select Source Archive"),
+                },
+                {
+                  label: tx("Attach Source Folder…"),
+                  icon: "folder-source",
+                  run: () => void onAttach("sources", true, "Select Source Directory"),
+                },
+              ]);
+            }}
+          />
+          <IconButton
+            icon="minus"
+            size="small"
+            title="Remove Library Root"
+            disabled={!selected}
+            onClick={() => {
+              if (!selected) return;
+              onRemove(selected.kind, selected.label);
+              setSelectedRoot(null);
+            }}
+          />
+        </Toolbar>
+        <Tree
+          roots={roots}
+          getKey={(node) => node.key}
+          getLabel={(node) => node.label}
+          getChildren={(node) => node.children}
+          isExpandable={(node) => !!node.children}
+          getIcon={(node) => node.icon}
+          defaultExpanded={["classes", "sources"]}
+          multiSelect={false}
+          horizontalScroll
+          onSelectionChange={(_, lead) => setSelectedRoot(lead && !lead.children ? lead : null)}
+          aria-label="Library Roots"
+          className={styles.libraryRootsTree}
+          empty={<T>None</T>}
+        />
+      </div>
+      <div className={styles.libraryRootNotes}>
+        <div>
+          <T>
+            Binary JAR archives support Java code assistance and Run/Debug. Class folders are used by Run/Debug only.
+          </T>
+        </div>
+        <div>
+          <T>Source archives (-sources.jar, .zip) or folders used for Go to Declaration.</T>
+        </div>
+      </div>
+    </Row>
+  );
+}
 
 function LibrariesSection() {
   const root = useProject((s) => s.project?.root ?? null);
@@ -1044,6 +1265,17 @@ function LibrariesSection() {
     setSelectedIdx(next.length - 1);
   };
 
+  /** IDEA's Copy: a duplicate named "<name> (copy)", selected for editing. */
+  const copySelectedLibrary = () => {
+    if (!current) return;
+    const names = new Set(libs.map((l) => l.name));
+    let name = tx`${current.name} (copy)`;
+    for (let n = 2; names.has(name); n++) name = tx`${current.name} (copy ${n})`;
+    const next = [...libs, { ...current, name }];
+    setRawLibs(next);
+    setSelectedIdx(next.length - 1);
+  };
+
   const removeSelectedLibrary = () => {
     if (activeIdx < 0) return;
     const next = libs.filter((_, idx) => idx !== activeIdx);
@@ -1051,7 +1283,7 @@ function LibrariesSection() {
     setSelectedIdx(Math.max(0, activeIdx - 1));
   };
 
-  const appendPath = async (field: "classes" | "sources" | "javadocs", directory: boolean, title: string) => {
+  const appendPath = async (field: LibraryRootKind, directory: boolean, title: string) => {
     if (!current) return;
     const picked = await choosePath({ directory, title, defaultPath: root ?? undefined });
     if (!picked) return;
@@ -1063,20 +1295,20 @@ function LibrariesSection() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.splitLayout}>
+      <div className={clsx(styles.splitLayout, styles.librariesLayout)}>
         <div className={styles.sideList}>
           <div className={styles.tableToolbar}>
             <IconButton
               icon="plus"
               size="small"
-              title="Add JAR or Directory…"
-              onClick={() => void addLibraryFromJar(false)}
-            />
-            <IconButton
-              icon="folder-open"
-              size="small"
-              title="Add Classes Folder…"
-              onClick={() => void addLibraryFromJar(true)}
+              title="New Project Library"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                showContextMenu({ x: r.left, y: r.bottom + 2 }, [
+                  { label: tx("JAR or Directory…"), icon: "file-archive", run: () => void addLibraryFromJar(false) },
+                  { label: tx("Classes Folder…"), icon: "folder-open", run: () => void addLibraryFromJar(true) },
+                ]);
+              }}
             />
             <IconButton
               icon="minus"
@@ -1084,6 +1316,13 @@ function LibrariesSection() {
               title="Remove Library"
               disabled={activeIdx < 0}
               onClick={removeSelectedLibrary}
+            />
+            <IconButton
+              icon="copy"
+              size="small"
+              title="Copy Library"
+              disabled={activeIdx < 0}
+              onClick={copySelectedLibrary}
             />
           </div>
           <div className={styles.sideItems}>
@@ -1121,94 +1360,12 @@ function LibrariesSection() {
                   aria-label="Library scope"
                 />
               </Row>
-              <Row
-                label="Classes"
-                stacked
-                hint="Binary JAR archives support Java code assistance and Run/Debug. Class folders are used by Run/Debug only."
-              >
-                <div className={styles.entryList}>
-                  <div className={styles.entryActions}>
-                    <Button
-                      size="small"
-                      variant="ghost"
-                      icon="plus"
-                      onClick={() => void appendPath("classes", false, "Select Library JAR")}
-                    >
-                      <T>Add JAR…</T>
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="ghost"
-                      icon="folder-open"
-                      onClick={() => void appendPath("classes", true, "Select Classes Directory")}
-                    >
-                      <T>Add Folder…</T>
-                    </Button>
-                  </div>
-                  {current.classes.length === 0 && (
-                    <div className={styles.note}>
-                      <T>None</T>
-                    </div>
-                  )}
-                  {current.classes.map((c) => (
-                    <div key={c} className={styles.entryRow}>
-                      <Icon name="file-archive" size={14} />
-                      <span className={styles.rootPath}>{c}</span>
-                      <IconButton
-                        icon="close"
-                        size="small"
-                        iconSize={12}
-                        title={tx`Remove ${c}`}
-                        onClick={() => updateCurrent({ classes: current.classes.filter((x) => x !== c) })}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </Row>
-              <Row
-                label="Sources"
-                stacked
-                hint="Source archives (-sources.jar, .zip) or folders used for Go to Declaration."
-              >
-                <div className={styles.entryList}>
-                  <div className={styles.entryActions}>
-                    <Button
-                      size="small"
-                      variant="ghost"
-                      icon="plus"
-                      onClick={() => void appendPath("sources", false, "Select Source Archive")}
-                    >
-                      <T>Attach Sources…</T>
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="ghost"
-                      icon="folder-open"
-                      onClick={() => void appendPath("sources", true, "Select Source Directory")}
-                    >
-                      <T>Attach Source Folder…</T>
-                    </Button>
-                  </div>
-                  {current.sources.length === 0 && (
-                    <div className={styles.note}>
-                      <T>None</T>
-                    </div>
-                  )}
-                  {current.sources.map((s) => (
-                    <div key={s} className={styles.entryRow}>
-                      <Icon name="folder-source" size={14} />
-                      <span className={styles.rootPath}>{s}</span>
-                      <IconButton
-                        icon="close"
-                        size="small"
-                        iconSize={12}
-                        title={tx`Remove ${s}`}
-                        onClick={() => updateCurrent({ sources: current.sources.filter((x) => x !== s) })}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </Row>
+              <LibraryRoots
+                key={`${libs.length}:${activeIdx}`}
+                library={current}
+                onAttach={appendPath}
+                onRemove={(kind, path) => updateCurrent({ [kind]: current[kind].filter((entry) => entry !== path) })}
+              />
             </Section>
           ) : (
             <Section title="Project Libraries">
@@ -1481,7 +1638,8 @@ function ArtifactsSection() {
     if (!root || !isTauri()) return;
     let live = true;
     call(commands.runTomcatArtifacts())
-      .then((list) => live && setWebArtifacts(list))
+      // Artifacts the IDE builds itself are the ones this page configures.
+      .then((list) => live && setWebArtifacts(list.filter((a) => a.tool !== "project")))
       .catch(() => {});
     return () => {
       live = false;
@@ -1691,10 +1849,34 @@ function ArtifactsSection() {
 
 function SdksSection() {
   const byKind = useSdks((s) => s.byKind);
+  const homeId = useId();
   const [downloading, setDownloading] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [projectJdk, setProjectJdk] = useProjectSetting<string>("languages.java.jdk");
+  const [addedJdks, setAddedJdks] = useSetting<string[] | undefined>("languages.java.addedJdks", "global");
+  const [addError, setAddError] = useState<string | null>(null);
   useDetected("jdk");
+
+  const addJdkFromDisk = async () => {
+    setAddError(null);
+    const picked = await choosePath({ directory: true, title: tx("Select Home Directory for JDK") });
+    if (!picked) return;
+    const sdk = await call(commands.sdkJdkAt(picked)).catch(() => null);
+    if (!sdk) {
+      setAddError(tx`The selected directory is not a valid home for JDK: ${tildify(picked)}`);
+      return;
+    }
+    const added = addedJdks ?? [];
+    if (!added.includes(sdk.path)) setAddedJdks([...added, sdk.path]);
+    rememberSdk("jdk", { ...sdk, source: "added" });
+    setSelectedKey(`jdk:${sdk.path}`);
+  };
+
+  const removeAddedJdk = (path: string) => {
+    setAddedJdks((addedJdks ?? []).filter((p) => p !== path));
+    forgetSdk("jdk", path);
+    setSelectedKey("");
+  };
 
   useEffect(() => {
     for (const { kind } of SDK_KINDS) {
@@ -1709,8 +1891,15 @@ function SdksSection() {
   };
 
   const rows = useMemo(() => {
-    const out: Array<{ key: string; kind: SdkKind; kindLabel: string; name: string; version: string; path: string }> =
-      [];
+    const out: Array<{
+      key: string;
+      kind: SdkKind;
+      kindLabel: string;
+      name: string;
+      version: string;
+      path: string;
+      added: boolean;
+    }> = [];
     for (const { kind, label } of SDK_KINDS) {
       for (const sdk of byKind[kind] ?? []) {
         out.push({
@@ -1720,25 +1909,47 @@ function SdksSection() {
           name: sdk.name,
           version: sdk.version ?? "",
           path: sdk.path,
+          added: kind === "jdk" && (sdk.source === "added" || (addedJdks ?? []).includes(sdk.path)),
         });
       }
     }
     return out;
-  }, [byKind]);
+  }, [byKind, addedJdks]);
 
   const activeSdk = rows.find((r) => r.key === selectedKey) ?? rows[0];
 
   return (
     <div className={styles.page}>
-      <div className={styles.splitLayout}>
+      <div className={clsx(styles.splitLayout, styles.sdkLayout)}>
         <div className={styles.sideList}>
           <div className={styles.tableToolbar}>
-            <Button size="small" variant="ghost" icon="plus" onClick={() => setDownloading(true)}>
-              <T>Download JDK…</T>
-            </Button>
+            <IconButton
+              icon="plus"
+              size="small"
+              title="Add SDK"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                showContextMenu({ x: r.left, y: r.bottom + 2 }, [
+                  { label: tx("Download JDK…"), icon: "download", run: () => setDownloading(true) },
+                  { label: tx("Add JDK from Disk…"), icon: "folder-open", run: () => void addJdkFromDisk() },
+                ]);
+              }}
+            />
+            <IconButton
+              icon="minus"
+              size="small"
+              title="Remove SDK"
+              disabled={!activeSdk?.added}
+              onClick={() => activeSdk && removeAddedJdk(activeSdk.path)}
+            />
             <span className={styles.spacer} />
             <IconButton icon="refresh" size="small" title="Detect again" onClick={refreshAll} />
           </div>
+          {addError && (
+            <div className={styles.error} role="alert">
+              {addError}
+            </div>
+          )}
           <div className={styles.sideItems} role="listbox" aria-label={tx("SDKs")}>
             {rows.length === 0 && (
               <div className={styles.empty}>
@@ -1751,6 +1962,7 @@ function SdksSection() {
                 type="button"
                 role="option"
                 aria-selected={activeSdk?.key === r.key}
+                title={`${r.name}\n${tildify(r.path)}`}
                 className={clsx(styles.sideItem, activeSdk?.key === r.key && styles.sideItemActive)}
                 onClick={() => setSelectedKey(r.key)}
               >
@@ -1763,73 +1975,49 @@ function SdksSection() {
         </div>
 
         <div className={styles.detailPane}>
-          {activeSdk ? (
+          {activeSdk && (
             <Section title="SDK Details">
-              <div className={styles.psModuleHeader}>
-                <span className={styles.badge}>{activeSdk.kindLabel}</span>
-                <span className={styles.psModuleTitle}>{activeSdk.name}</span>
-                {activeSdk.version && <span className={styles.versionCell}>{activeSdk.version}</span>}
-                <span className={styles.spacer} />
-                {activeSdk.kind === "jdk" && (
-                  <Button
-                    size="small"
-                    variant="secondary"
-                    disabled={projectJdk === activeSdk.path}
-                    onClick={() => setProjectJdk(activeSdk.path)}
-                  >
-                    <T>Use as Project SDK</T>
-                  </Button>
-                )}
-              </div>
-              <Row label="SDK home path">
-                <Input readOnly value={tildify(activeSdk.path)} title={activeSdk.path} />
-              </Row>
+              <dl className={styles.sdkProperties}>
+                <dt>
+                  <T>Name</T>
+                </dt>
+                <dd className={styles.sdkName}>{activeSdk.name}</dd>
+                <dt>
+                  <T>Type</T>
+                </dt>
+                <dd>{activeSdk.kindLabel}</dd>
+                <dt>
+                  <T>Version</T>
+                </dt>
+                <dd className={styles.versionCell}>{activeSdk.version || "—"}</dd>
+                <dt>
+                  <label htmlFor={homeId}>
+                    <T>SDK home path</T>
+                  </label>
+                </dt>
+                <dd>
+                  <Input
+                    id={homeId}
+                    className={styles.sdkHome}
+                    readOnly
+                    value={tildify(activeSdk.path)}
+                    title={activeSdk.path}
+                  />
+                </dd>
+              </dl>
+              {activeSdk.kind === "jdk" && (
+                <Button
+                  className={styles.sdkAction}
+                  size="small"
+                  variant="secondary"
+                  disabled={projectJdk === activeSdk.path}
+                  onClick={() => setProjectJdk(activeSdk.path)}
+                >
+                  <T>Use as Project SDK</T>
+                </Button>
+              )}
             </Section>
-          ) : null}
-
-          <div className={styles.tablePanel}>
-            <div className={styles.tableScroll}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>
-                      <T>Type</T>
-                    </th>
-                    <th>
-                      <T>Name</T>
-                    </th>
-                    <th>
-                      <T>Version</T>
-                    </th>
-                    <th>
-                      <T>Home Path</T>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className={styles.empty}>
-                        <T>No SDK installations detected yet.</T>
-                      </td>
-                    </tr>
-                  )}
-                  {rows.map((r) => (
-                    <tr key={r.key} onClick={() => setSelectedKey(r.key)}>
-                      <td>
-                        <span className={styles.badge}>{r.kindLabel}</span>
-                      </td>
-                      <td>{r.name}</td>
-                      <td className={styles.versionCell}>{r.version || "—"}</td>
-                      <td className={styles.path} title={r.path}>
-                        {tildify(r.path)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          )}
         </div>
       </div>
       {downloading && (
@@ -1857,6 +2045,7 @@ const NAV_GROUPS: Array<{
     items: [
       { id: "project", label: "Project", icon: "folder" },
       { id: "modules", label: "Modules", icon: "module" },
+      { id: "dependencies", label: "Dependencies", icon: "build-dependencies" },
       { id: "libraries", label: "Libraries", icon: "folder-library" },
       { id: "facets", label: "Facets", icon: "file-config" },
       { id: "artifacts", label: "Artifacts", icon: "file-archive" },
@@ -1867,6 +2056,8 @@ const NAV_GROUPS: Array<{
     items: [{ id: "sdks", label: "SDKs", icon: "settings" }],
   },
 ];
+
+const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
 
 export function ProjectStructureDialog() {
   const open = useSettingsDialog((s) => s.projectStructureOpen);
@@ -1913,9 +2104,9 @@ function ProjectStructureDialogInner() {
   const onNavKeyDown = (e: React.KeyboardEvent) => {
     if ((e.key !== "ArrowDown" && e.key !== "ArrowUp") || e.altKey || e.metaKey || e.ctrlKey) return;
     e.preventDefault();
-    const idx = SECTION_TABS.findIndex((t) => t.id === section);
-    const nextIdx = e.key === "ArrowDown" ? Math.min(SECTION_TABS.length - 1, idx + 1) : Math.max(0, idx - 1);
-    const next = SECTION_TABS[nextIdx];
+    const idx = NAV_ITEMS.findIndex((t) => t.id === section);
+    const nextIdx = e.key === "ArrowDown" ? Math.min(NAV_ITEMS.length - 1, idx + 1) : Math.max(0, idx - 1);
+    const next = NAV_ITEMS[nextIdx];
     if (next) selectProjectStructureSection(next.id);
   };
 
@@ -1934,32 +2125,43 @@ function ProjectStructureDialogInner() {
     >
       <PageContext.Provider value={ctx}>
         <SettingsFormContext.Provider value={form}>
-          <div className={styles.psDialogLayout}>
-            <nav className={styles.psNavSidebar} aria-label={tx("Project Structure sections")} onKeyDown={onNavKeyDown}>
-              {NAV_GROUPS.map((group) => (
-                <div key={group.title} className={styles.psNavGroup}>
-                  <div className={styles.psNavGroupHeader}>
-                    <T>{group.title}</T>
+          <SplitGroup
+            id="project-structure-layout"
+            orientation="horizontal"
+            className={styles.psDialogLayout}
+            storageKey="openidea.projectStructure.layout"
+          >
+            <SplitPanel id="project-structure-sections" defaultSize="15%" minSize="152px" maxSize="45%">
+              <nav
+                className={styles.psNavSidebar}
+                aria-label={tx("Project Structure sections")}
+                onKeyDown={onNavKeyDown}
+              >
+                {NAV_GROUPS.map((group) => (
+                  <div key={group.title} className={styles.psNavGroup}>
+                    <div className={styles.psNavGroupHeader}>
+                      <T>{group.title}</T>
+                    </div>
+                    {group.items.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={clsx(styles.psNavItem, section === item.id && styles.psNavItemActive)}
+                        aria-current={section === item.id ? "page" : undefined}
+                        onClick={() => selectProjectStructureSection(item.id)}
+                      >
+                        <Icon name={item.icon} size={14} />
+                        <span>
+                          <T>{item.label}</T>
+                        </span>
+                      </button>
+                    ))}
                   </div>
-                  {group.items.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={clsx(styles.psNavItem, section === item.id && styles.psNavItemActive)}
-                      aria-current={section === item.id ? "page" : undefined}
-                      onClick={() => selectProjectStructureSection(item.id)}
-                    >
-                      <Icon name={item.icon} size={14} />
-                      <span>
-                        <T>{item.label}</T>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </nav>
-
-            <div className={styles.psDialogMain}>
+                ))}
+              </nav>
+            </SplitPanel>
+            <SplitHandle aria-label={tx("Project Structure sections")} />
+            <SplitPanel id="project-structure-details" className={styles.psDialogMain}>
               <div className={styles.psDialogHeader}>
                 <div className={styles.psDialogCrumbs}>
                   <span>
@@ -1979,45 +2181,16 @@ function ProjectStructureDialogInner() {
               <div className={styles.psDialogBody}>
                 {section === "project" && <ProjectSection />}
                 {section === "modules" && <ModulesSection />}
+                {section === "dependencies" && <ModuleDependenciesTab />}
                 {section === "libraries" && <LibrariesSection />}
                 {section === "facets" && <FacetsSection />}
                 {section === "artifacts" && <ArtifactsSection />}
                 {section === "sdks" && <SdksSection />}
               </div>
-            </div>
-          </div>
+            </SplitPanel>
+          </SplitGroup>
         </SettingsFormContext.Provider>
       </PageContext.Provider>
     </Dialog>
-  );
-}
-
-export function ProjectStructurePage({ initialSection = "modules" }: { initialSection?: ProjectStructureSectionId }) {
-  const [section, setSection] = useState<ProjectStructureSectionId>(initialSection);
-
-  return (
-    <div className={styles.page}>
-      <div className={styles.sectionTabs} role="tablist" aria-label={tx("Project Structure sections")}>
-        {SECTION_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            className={styles.sectionTab}
-            aria-selected={section === tab.id}
-            onClick={() => setSection(tab.id)}
-          >
-            <Icon name={tab.icon} size={14} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      {section === "project" && <ProjectSection />}
-      {section === "modules" && <ModulesSection />}
-      {section === "libraries" && <LibrariesSection />}
-      {section === "facets" && <FacetsSection />}
-      {section === "artifacts" && <ArtifactsSection />}
-      {section === "sdks" && <SdksSection />}
-    </div>
   );
 }

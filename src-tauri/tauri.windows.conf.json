@@ -8,7 +8,7 @@
         "width": 1440,
         "height": 900,
         "center": true,
-        "minWidth": 800,
+        "minWidth": 400,
         "minHeight": 500,
         "decorations": false,
         "backgroundColor": "#E9EAEE",
@@ -19,6 +19,8 @@
   "bundle": {
     "windows": {
       "nsis": {
+        "installMode": "both",
+        "template": "windows/installer.nsi",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico"
       }

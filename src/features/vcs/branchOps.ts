@@ -1,17 +1,20 @@
 /** Branch operations (checkout, create, merge, rebase, update, delete) with recents and favorites. */
+import { createElement, Fragment } from "react";
 import { create } from "zustand";
-import type { Branch, BranchInfo, CheckoutOptions } from "@/bindings";
+import type { Branch, BranchInfo, BranchUpdateStatus, CheckoutOptions, Worktree } from "@/bindings";
 import { executeAction } from "@/platform/actions";
 import { call, commands } from "@/platform/ipc";
 import { notifications } from "@/workbench/contributions";
+import { openWorktree } from "./openWorktree";
 import { ask } from "@/workbench/messages";
-import { isFavoriteBranch, pushRecent, shortRemoteName } from "./branches";
+import { branchNamePrefixes, isFavoriteBranch, pushRecent, shortRemoteName } from "./branches";
 import { showCommitRange } from "./CompareBranches";
 import { confirmDialog, promptText } from "./dialogs";
 import { cleanUpBranchNameOnTyping } from "@/platform/gitRefName";
-import { runOp, runRemote, saveAll } from "./ops";
+import { errorMessage, runBranchUpdates, runOp, runRemote, saveAll, type RepoBranchUpdate } from "./ops";
 import { conflictedFiles, currentRepo, refreshNow, repoName, useVcs } from "./store";
 import { tx } from "@/platform/i18n";
+import { useProject } from "@/platform/project";
 
 const recentKey = () => `openidea.vcs.recentBranches:${useVcs.getState().root ?? ""}`;
 
@@ -103,11 +106,17 @@ async function performCheckout(
         return true;
       case "untrackedFiles": {
         const files = outcome.files.join("\n");
+        // git refuses untracked files in two ways: they would be overwritten by the
+        // checkout (present in the target), or removed by it (tracked here, absent
+        // from the target); each names its files the way git's own message does.
+        const body = outcome.removed
+          ? tx`The following untracked working tree files would be removed by checkout:\n${files}\nPlease move or remove them before you switch branches.`
+          : tx`The following untracked working tree files would be overwritten by checkout:\n${files}\nPlease move or remove them before you switch branches.`;
         notifications().notify({
           group: "vcs",
           level: "error",
           title: "Untracked files prevent checkout",
-          body: tx`The following untracked working tree files would be overwritten by checkout:\n${files}\nPlease move or remove them before you switch branches.`,
+          body,
         });
         return false;
       }
@@ -130,6 +139,24 @@ async function performCheckout(
         if (r.button !== "rebase" && r.button !== "reset") return false;
         options = { ...options, diverged: r.button };
         continue;
+      }
+      case "checkedOutInWorktree": {
+        const { branch, path } = outcome;
+        const r = await ask({
+          title: "Worktree Conflict",
+          body: tx`Branch '${branch}' is already checked out in a worktree at:\n${path}`,
+          buttons: [
+            { id: "anyway", label: "Checkout Anyway", primary: true },
+            { id: "open", label: "Open Existing Worktree" },
+            { id: "cancel", label: "Cancel" },
+          ],
+        });
+        if (r.button === "anyway") {
+          options = { ...options, ignoreOtherWorktrees: true };
+          continue;
+        }
+        if (r.button === "open") await openWorktree(path);
+        return false;
       }
     }
   }
@@ -172,9 +199,10 @@ export async function newBranch(from?: string, repo = currentRepo()) {
   const r = await promptText({
     title: from ? tx`Create New Branch from ${from}` : "Create New Branch",
     label: "New branch name:",
+    labelPlacement: "inline",
     // Kept even when that branch exists (the current one always does): the user edits it.
     initial: suggestion,
-    mono: true,
+    prefixes: branchNamePrefixes(branches),
     okLabel: "Create",
     sanitize: cleanUpBranchNameOnTyping,
     validate: (name, overwrite) => validateBranchName(name, overwrite, branches),
@@ -254,7 +282,12 @@ export async function rebaseOnto(branch: string, ref = branch) {
   });
 }
 
-export async function renameBranch(name: string) {
+/**
+ * Renames a local branch. `git branch -m` carries the upstream tracking to the new name;
+ * a branch that has one also offers to drop it, since the remote branch keeps its old name.
+ */
+export async function renameBranch(branch: Branch) {
+  const name = branch.name;
   const repo = currentRepo();
   const r = await promptText({
     title: tx`Rename Branch ${name}`,
@@ -264,19 +297,76 @@ export async function renameBranch(name: string) {
     okLabel: "Rename",
     sanitize: cleanUpBranchNameOnTyping,
     validate: (v) => (v.trim() === name ? "Enter a new name" : validateBranchName(v)),
+    checkbox: branch.upstream ? { label: "Unset upstream branch", initial: false } : undefined,
   });
   if (!r) return;
   const to = r.value.trim();
-  const ok = await runOp(tx`Rename branch ${name}`, () => call(commands.vcsRenameBranch(repo, name, to)), {
-    success: tx`Renamed branch ${name} to ${to}`,
-  });
-  if (ok !== undefined) {
-    try {
-      localStorage.setItem(recentKey(), JSON.stringify(recentBranches().map((b) => (b === name ? to : b))));
-    } catch {
-      // Recents are best effort.
-    }
+  const unsetUpstream = !!branch.upstream && r.checked;
+  const ok = await runOp(
+    tx`Rename branch ${name}`,
+    () => call(commands.vcsRenameBranch(repo, name, to, unsetUpstream)),
+    {
+      success: tx`Renamed branch ${name} to ${to}`,
+      onError: (message) => {
+        // Unsetting the upstream can fail after the rename has succeeded.
+        notifications().notify({ group: "vcs", level: "error", title: tx`Rename branch ${name}`, body: message });
+        return true;
+      },
+    },
+  );
+  if (ok !== undefined) renameRecent(name, to);
+}
+
+function renameRecent(from: string, to: string) {
+  try {
+    localStorage.setItem(recentKey(), JSON.stringify(recentBranches().map((b) => (b === from ? to : b))));
+  } catch {
+    // Recents are best effort.
   }
+}
+
+/**
+ * A branch checked out in another worktree cannot be deleted: `git branch -d` refuses.
+ * Offers to delete such a worktree first (its folder goes with it); false when the user
+ * backed out. The main worktree cannot be removed, so it keeps git's own message on the
+ * branch deletion. A worktree containing this window's project cannot be removed either;
+ * worktrees below a project opened on a parent folder can still be offered.
+ */
+async function deleteHoldingWorktree(repo: string | null, name: string): Promise<boolean> {
+  let holding: Worktree | undefined;
+  try {
+    holding = (await call(commands.vcsWorktrees(repo))).find((w) => w.branch === name && !w.main);
+  } catch {
+    return true; // no worktree list: let the branch deletion speak for itself
+  }
+  if (!holding) return true;
+  const root = useProject.getState().project?.root.replace(/\/+$/, "");
+  const path = holding.path.replace(/\/+$/, "");
+  if (root !== undefined && (root === path || root.startsWith(path + "/"))) return true;
+  const ok = await confirmDialog({
+    title: "Delete Branch",
+    message: tx`Branch '${name}' is checked out in the worktree at ${holding.path}.\nDelete the worktree and the branch? Its folder is deleted.`,
+    okLabel: "Delete",
+    danger: true,
+  });
+  if (!ok) return false;
+  try {
+    await call(commands.vcsRemoveWorktree(repo, holding.path, false));
+  } catch (e) {
+    const force = await confirmDialog({
+      title: "Delete Branch",
+      message: tx`${errorMessage(e)}\n\nRemove it anyway, discarding its changes?`,
+      okLabel: "Force Remove",
+      danger: true,
+    });
+    if (!force) return false;
+    const removed = await runOp(tx`Delete branch ${name}`, async () => {
+      await call(commands.vcsRemoveWorktree(repo, holding.path, true));
+      return true;
+    });
+    if (!removed) return false;
+  }
+  return true;
 }
 
 /**
@@ -284,12 +374,14 @@ export async function renameBranch(name: string) {
  * deleted anyway and the notification says so, offering View Commits. Restore recreates
  * the branch (with its upstream); Delete Tracked Branch removes the remote branch too.
  */
-export async function deleteBranch(name: string) {
-  const repo = currentRepo();
+export async function deleteBranch(name: string, repo = currentRepo()) {
+  if (!(await deleteHoldingWorktree(repo, name))) return;
   const deleted = await runOp(tx`Delete branch ${name}`, () => call(commands.vcsDeleteBranch(repo, name)));
   if (!deleted) return;
   const tracked = deleted.upstream;
-  const otherTracking = useVcs.getState().branches.some((b) => !b.remote && b.name !== name && b.upstream === tracked);
+  const branches = await call(commands.vcsBranches(repo)).catch(() => []);
+  if (repo === currentRepo()) useVcs.setState({ branches, branchesLoaded: true });
+  const otherTracking = branches.some((b) => !b.remote && b.name !== name && b.upstream === tracked);
   const key = `vcs.deleted.${name}`;
   const done = () => notifications().expire?.(key);
   notifications().notify({
@@ -309,7 +401,7 @@ export async function deleteBranch(name: string) {
         },
       },
       ...(deleted.unmerged
-        ? [{ label: "View Commits", run: () => showCommitRange(`Commits of ${name}`, "HEAD", deleted.tip) }]
+        ? [{ label: "View Commits", run: () => showCommitRange(`Commits of ${name}`, "HEAD", deleted.tip, repo) }]
         : []),
       ...(tracked && !otherTracking
         ? [
@@ -317,7 +409,7 @@ export async function deleteBranch(name: string) {
               label: "Delete Tracked Branch",
               run: () => {
                 done();
-                void deleteRemoteBranch(tracked);
+                void deleteRemoteBranch(tracked, repo);
               },
             },
           ]
@@ -386,7 +478,7 @@ export async function pushTag(tag: string, remote: string) {
 }
 
 /** Deletes a branch on its remote (`git push <remote> --delete <name>`); `name` is e.g. `origin/feature`. */
-export async function deleteRemoteBranch(name: string) {
+export async function deleteRemoteBranch(name: string, repo = currentRepo()) {
   const ok = await confirmDialog({
     title: "Delete Remote Branch",
     message: tx`Delete branch '${shortRemoteName(name)}' on the remote? The remote-tracking branch '${name}' is removed as well.`,
@@ -394,7 +486,45 @@ export async function deleteRemoteBranch(name: string) {
     danger: true,
   });
   if (!ok) return;
-  await runRemote({ op: "deleteBranch", branch: name }, name);
+  await runRemote({ op: "deleteBranch", branch: name }, name, [repo]);
+}
+
+/** Delete is offered for branches other than the current one in their repository. */
+export function canDeleteBranch(t: { ref?: string; repo?: string; branch?: Branch } | null): boolean {
+  return !!t?.branch && !t.branch.current;
+}
+
+async function confirmRemoteBranches(remote: readonly { branch: Branch }[]): Promise<boolean> {
+  if (remote.length === 1) {
+    const name = remote[0]!.branch.name;
+    return confirmDialog({
+      title: "Delete Remote Branch",
+      message: tx`Delete branch '${shortRemoteName(name)}' on the remote? The remote-tracking branch '${name}' is removed as well.`,
+      okLabel: "Delete",
+      danger: true,
+    });
+  }
+  const names = remote.map((t) => shortRemoteName(t.branch.name)).join("', '");
+  return confirmDialog({
+    title: "Delete Remote Branches",
+    message: tx`Delete the ${remote.length} branches '${names}' on the remote? The remote-tracking branches are removed as well.`,
+    okLabel: "Delete",
+    danger: true,
+  });
+}
+
+/** Deletes selected branches in their repositories without changing focus, skipping current branches. */
+export async function deleteBranches(targets: readonly { ref?: string; repo?: string; branch?: Branch }[]) {
+  const list = targets.filter((t): t is { repo?: string; branch: Branch } => canDeleteBranch(t));
+  if (!list.length) return;
+  const fallback = currentRepo();
+  const remote = list.filter((t) => t.branch.remote);
+  if (remote.length && !(await confirmRemoteBranches(remote))) return;
+  for (const t of list) {
+    const repo = t.repo ?? fallback;
+    if (t.branch.remote) await runRemote({ op: "deleteBranch", branch: t.branch.name }, t.branch.name, [repo]);
+    else await deleteBranch(t.branch.name, repo);
+  }
 }
 
 /** Checkout and Rebase onto Current: checks out `name`, then rebases it onto the branch that was current. */
@@ -409,22 +539,66 @@ export async function checkoutAndRebase(name: string) {
   await rebaseOnto(current, branchRef(current, false));
 }
 
-/** Update for a branch other than the current one: fast-forwards it to its upstream. */
-export async function updateBranch(name: string) {
-  const b = useVcs.getState().branches.find((x) => !x.remote && x.name === name);
-  if (b?.current) return void executeAction("vcs.update");
-  if (!b?.upstream) {
-    notifications().notify({ group: "vcs", level: "warning", title: `Branch '${name}' has no tracked branch` });
-    return;
+/**
+ * Update Selected (IDEA's Git.Update.Selected): the current branch alone updates its
+ * repository like Update Project; otherwise every selected local branch is
+ * fast-forwarded to its tracked branch, with one balloon for the whole selection.
+ */
+type UpdateTarget = { repo?: string; branch?: Pick<Branch, "name" | "remote" | "current"> };
+
+export async function updateBranches(targets: readonly UpdateTarget[]) {
+  const local = targets.flatMap((t) => (t.branch && !t.branch.remote ? [{ repo: t.repo, branch: t.branch }] : []));
+  const fallback = currentRepo();
+  if (local.length === 1 && local[0]!.branch.current)
+    return void executeAction("vcs.update", { repo: local[0]!.repo ?? fallback });
+  const byRepo = new Map<string | null, string[]>();
+  for (const t of local) {
+    const repo = t.repo ?? fallback;
+    byRepo.set(repo, [...(byRepo.get(repo) ?? []), t.branch.name]);
   }
-  await runRemote({ op: "updateBranch", branch: name }, `${name} ← ${b.upstream}`);
+  if (!byRepo.size) return;
+  const results = await runBranchUpdates(byRepo);
+  if (!results) return;
+  const { lines, ...summary } = branchUpdateSummary(results);
+  const body = createElement(Fragment, null, ...lines.map((line) => createElement("div", { key: line }, line)));
+  notifications().notify({ group: "vcs", key: "vcs.remote", ...summary, body });
+}
+
+/** IDEA's "Selected branches updated" balloon: which branches were updated, and why the others were not. */
+export function branchUpdateSummary(results: readonly RepoBranchUpdate[]) {
+  const repos = new Set(results.map((r) => r.repo)).size > 1;
+  const label = (r: RepoBranchUpdate) => (repos && r.repo ? `${repoName(r.repo)}: ${r.branch}` : r.branch);
+  const names = (status: BranchUpdateStatus) =>
+    results
+      .filter((r) => r.status === status)
+      .map(label)
+      .join(", ");
+  const count = (status: BranchUpdateStatus) => results.filter((r) => r.status === status).length;
+  const updated = count("updated");
+  const problems = count("notFastForward") + count("noUpstream") + count("failed");
+  const lines = [
+    updated ? tx`Updated: ${names("updated")}` : null,
+    count("upToDate") ? tx`Already up-to-date: ${names("upToDate")}` : null,
+    count("notFastForward") ? tx`Not updated, cannot be fast-forwarded: ${names("notFastForward")}` : null,
+    count("noUpstream") ? tx`Not updated, no tracked branch: ${names("noUpstream")}` : null,
+    ...results.filter((r) => r.status === "failed").map((r) => tx`Failed to update ${label(r)}: ${r.message ?? ""}`),
+  ].filter((l): l is string => !!l);
+  const title = updated
+    ? updated === 1
+      ? tx`Updated ${updated} branch`
+      : tx`Updated ${updated} branches`
+    : problems
+      ? tx("No branches were updated")
+      : tx("Selected branches are up-to-date");
+  return { level: problems ? ("warning" as const) : ("info" as const), title, lines };
 }
 
 // --- several repositories ----------------------------------------------------
 
 /** "in 3 repositories", or "in 2 of 3 repositories" when some were left out. */
 function inRepos(done: number, total: number): string {
-  return done === total ? `in ${total} repositories` : `in ${done} of ${total} repositories`;
+  if (done === total) return total === 1 ? "in 1 repository" : `in ${total} repositories`;
+  return `in ${done} of ${total} repositories`;
 }
 
 interface Rollback<T> {
@@ -440,13 +614,14 @@ const branchInfo = (root: string) => call(commands.vcsBranchInfo(root)).catch(()
  * error is reported by `step`), then reports how many repositories it was done in.
  * When it failed after succeeding in some repositories, offers to roll those back so
  * the repositories don't diverge (not when the failed one stopped on conflicts).
+ * Returns the number of repositories it stays done in (0 after a rollback).
  */
 async function eachRepo<T>(
   roots: readonly string[],
   step: (root: string) => Promise<T | undefined>,
   title: string,
   rollback?: Rollback<T>,
-) {
+): Promise<number> {
   const done: { root: string; result: T; before: BranchInfo }[] = [];
   let failed: string | null = null;
   for (const root of roots) {
@@ -477,11 +652,18 @@ async function eachRepo<T>(
         await runOp(tx`Rollback (${repo})`, () => rollback.run(d.root, d.result, d.before), { refresh: false });
       }
       await refreshNow();
-      return;
+      return 0;
     }
   }
   if (done.length)
     notifications().notify({ group: "vcs", level: "info", title: `${title} ${inRepos(done.length, roots.length)}` });
+  return done.length;
+}
+
+/** The repositories of `roots` whose current branch is not `name`. */
+function reposNotOn(name: string, roots: readonly string[]): string[] {
+  const { heads } = useVcs.getState();
+  return roots.filter((root) => heads[root]?.head !== name);
 }
 
 /** HEAD as a checkout target: the branch, or the commit on a detached HEAD. */
@@ -497,12 +679,18 @@ async function resetBack(root: string, before: BranchInfo) {
   if (before.headCommit && after) await call(commands.vcsRestoreHead(root, before.headCommit, after));
 }
 
-/** Checks out `name` (local, or remote: its local namesake) in every repository of `roots`. */
+/**
+ * Checks out `name` (local, or remote: its local namesake) in every repository of `roots`
+ * not already on it (with diverged branches, only the others move).
+ */
 export async function checkoutInRepos(name: string, roots: readonly string[]) {
-  const label = useVcs.getState().branches.some((b) => b.remote && b.name === name) ? shortRemoteName(name) : name;
-  const previous = useVcs.getState().branch?.head;
+  const elsewhere = reposNotOn(name, roots);
+  if (!elsewhere.length) return;
+  const { branches, branch } = useVcs.getState();
+  const label = branches.some((b) => b.remote && b.name === name) ? shortRemoteName(name) : name;
+  const previous = branch?.head;
   await eachRepo(
-    roots,
+    elsewhere,
     async (root) => ((await performCheckout(name, () => "", root, true)) ? true : undefined),
     `Checked out ${label}`,
     { undo: tx("check out the previous branch again"), run: (root, _, before) => checkoutBack(root, before) },
@@ -516,8 +704,8 @@ export async function newBranchInRepos(roots: readonly string[], from?: string) 
   const r = await promptText({
     title: from ? tx`Create New Branch from ${from}` : "Create New Branch",
     label: tx`New branch name (in ${roots.length} repositories):`,
+    labelPlacement: "inline",
     initial: from ? (from.includes("/") ? shortRemoteName(from) : "") : (useVcs.getState().branch?.head ?? ""),
-    mono: true,
     okLabel: "Create",
     sanitize: cleanUpBranchNameOnTyping,
     validate: validateBranchName,
@@ -543,6 +731,41 @@ export async function newBranchInRepos(roots: readonly string[], from?: string) 
       run: async (root, _, before) => {
         if (r.checked) await checkoutBack(root, before);
         await call(commands.vcsDeleteBranch(root, name));
+      },
+    },
+  );
+}
+
+/**
+ * Checkout and Rebase onto Current in every repository of `roots`: checks out `name`, then
+ * rebases it onto `current` (the branch they were all on); stops on conflicts.
+ */
+export async function checkoutAndRebaseInRepos(name: string, current: string, roots: readonly string[]) {
+  await saveAll();
+  await eachRepo(
+    roots,
+    async (root) => {
+      const before = await branchInfo(root);
+      if (!before || !(await performCheckout(name, () => "", root, true))) return undefined;
+      const tip = (await branchInfo(root))?.headCommit;
+      if (!tip) return undefined;
+      const done = await runOp(
+        tx`Rebase onto ${current} (${repoName(root)})`,
+        () => call(commands.vcsRebase(root, current)),
+        { refresh: false, errorActions: conflictActions, onError: openConflictsInstead },
+      );
+      if (done !== undefined) return { tip };
+      // A refused rebase leaves this repository on `name`; conflicts stay for the user to resolve.
+      if (!(await branchInfo(root))?.operation) await checkoutBack(root, before);
+      return undefined;
+    },
+    `Checked out ${name} and rebased onto ${current}`,
+    {
+      undo: tx`restore ${name} and check out the previous branch again`,
+      run: async (root, { tip }, before) => {
+        const after = (await branchInfo(root))?.headCommit;
+        if (after) await call(commands.vcsRestoreHead(root, tip, after));
+        await checkoutBack(root, before);
       },
     },
   );
@@ -580,17 +803,22 @@ export async function rebaseInRepos(branch: string, roots: readonly string[]) {
   );
 }
 
-/** Deletes local branch `name` in every repository of `roots`. */
+/**
+ * Deletes local branch `name` in every repository of `roots` where it is not checked out
+ * (git refuses those; with diverged branches it may be current in some of them).
+ */
 export async function deleteInRepos(name: string, roots: readonly string[]) {
+  const deletable = reposNotOn(name, roots);
+  if (!deletable.length) return;
   const ok = await confirmDialog({
     title: "Delete Branch",
-    message: tx`Delete branch '${name}' in ${roots.length} repositories? Unmerged commits are discarded.`,
+    message: tx`Delete branch '${name}' in ${deletable.length} repositories? Unmerged commits are discarded.`,
     okLabel: "Delete",
     danger: true,
   });
   if (!ok) return;
   await eachRepo(
-    roots,
+    deletable,
     (root) =>
       runOp(tx`Delete branch ${name} (${repoName(root)})`, () => call(commands.vcsDeleteBranch(root, name)), {
         refresh: false,
@@ -598,6 +826,41 @@ export async function deleteInRepos(name: string, roots: readonly string[]) {
     `Deleted branch ${name}`,
     { undo: tx`restore branch ${name}`, run: (root, deleted) => call(commands.vcsRestoreBranch(root, deleted)) },
   );
+}
+
+/** Renames local branch `name` in every repository of `roots`; `upstream`: some of them track a remote branch. */
+export async function renameInRepos(name: string, roots: readonly string[], upstream: boolean) {
+  const r = await promptText({
+    title: tx`Rename Branch ${name}`,
+    label: tx`New branch name (in ${roots.length} repositories):`,
+    initial: name,
+    mono: true,
+    okLabel: "Rename",
+    sanitize: cleanUpBranchNameOnTyping,
+    validate: (v) => (v.trim() === name ? "Enter a new name" : validateBranchName(v)),
+    checkbox: upstream ? { label: "Unset upstream branch", initial: false } : undefined,
+  });
+  if (!r) return;
+  const to = r.value.trim();
+  const renamed = await eachRepo(
+    roots,
+    (root) =>
+      runOp(
+        tx`Rename branch ${name} (${repoName(root)})`,
+        () => call(commands.vcsRenameBranch(root, name, to, false)),
+        { refresh: false },
+      ).then((done) => (done === undefined ? undefined : true)),
+    `Renamed branch ${name} to ${to}`,
+    { undo: tx`rename it back to ${name}`, run: (root) => call(commands.vcsRenameBranch(root, to, name, false)) },
+  );
+  if (!renamed) return;
+  renameRecent(name, to);
+  // The upstream goes once the rename is final: a rollback could not restore it.
+  if (upstream && r.checked && renamed === roots.length)
+    for (const root of roots)
+      await runOp(tx`Unset upstream of ${to} (${repoName(root)})`, () =>
+        call(commands.vcsRenameBranch(root, to, to, true)),
+      );
 }
 
 // --- favorites ---------------------------------------------------------------

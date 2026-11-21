@@ -1,5 +1,4 @@
 .frame {
-  --stripe-button-radius: var(--radius-popup);
   flex: 1;
   display: flex;
   min-height: 0;
@@ -42,6 +41,8 @@
 }
 
 .grid {
+  /* Undocked tool windows are positioned against the grid. */
+  position: relative;
   flex: 1;
   display: grid;
   min-width: 0;
@@ -74,6 +75,14 @@
 .editorIsland {
   grid-area: editor;
 }
+.grid[data-maximized] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: none;
+}
+.grid[data-maximized] > [data-anchor] {
+  grid-area: 1 / 1;
+}
 
 /* A side: primary and split areas, each an island; stacked on the left and right, side by side at the bottom. */
 .side {
@@ -85,7 +94,8 @@
 .sideRow {
   flex-direction: row;
 }
-.island[hidden] {
+.island[hidden],
+.side[hidden] {
   display: none;
 }
 .side > .splitGap {
@@ -108,6 +118,81 @@
   overflow: hidden;
   background: var(--bg-island);
   border-radius: var(--island-radius);
+}
+
+/*
+ * Undock: the area leaves its (zero) track and lies over the editor at the side's
+ * edge, --undock-size deep; two undocked areas of a side share its length.
+ */
+.undocked {
+  position: absolute;
+  z-index: calc(var(--z-panel) + 1);
+  max-width: 100%;
+  max-height: 100%;
+  box-shadow: var(--shadow-popup);
+}
+.undocked[data-slot^="left"],
+.undocked[data-slot^="right"] {
+  width: var(--undock-size);
+  height: calc(var(--undock-share) * 100% - var(--undock-gap));
+}
+/* The inner edge keeps the resize handle off the content (a tree's scrollbar). */
+.undocked[data-slot^="left"] {
+  left: 0;
+  padding-right: var(--island-gap);
+}
+.undocked[data-slot^="right"] {
+  right: 0;
+  padding-left: var(--island-gap);
+}
+.undocked[data-slot="left"],
+.undocked[data-slot="right"] {
+  top: 0;
+}
+.undocked[data-slot="left-split"],
+.undocked[data-slot="right-split"] {
+  bottom: 0;
+}
+.undocked[data-slot^="bottom"] {
+  bottom: 0;
+  padding-top: var(--island-gap);
+  height: var(--undock-size);
+  width: calc(var(--undock-share) * 100% - var(--undock-gap));
+}
+.undocked[data-slot="bottom"] {
+  left: 0;
+}
+.undocked[data-slot="bottom-split"] {
+  right: 0;
+}
+.grid[data-maximized] .undocked {
+  inset: 0;
+  width: auto;
+  height: auto;
+}
+/* The inner edge of an undocked window resizes it. */
+.undockEdge {
+  position: absolute;
+  z-index: 1;
+  outline: none;
+}
+.undocked[data-slot^="left"] > .undockEdge {
+  inset: 0 0 0 auto;
+  width: var(--island-gap);
+  cursor: col-resize;
+}
+.undocked[data-slot^="right"] > .undockEdge {
+  inset: 0 auto 0 0;
+  width: var(--island-gap);
+  cursor: col-resize;
+}
+.undocked[data-slot^="bottom"] > .undockEdge {
+  inset: 0 0 auto;
+  height: var(--island-gap);
+  cursor: row-resize;
+}
+.undockEdge:focus-visible {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* Resize handles live in the gaps; a hidden neighbour takes no gap. */
@@ -246,7 +331,7 @@
   align-items: center;
   justify-content: center;
   gap: 3px;
-  border-radius: var(--stripe-button-radius);
+  border-radius: var(--radius-toolbar-button);
   color: var(--fg-muted);
   transition:
     background var(--dur-fast) var(--ease),
@@ -258,6 +343,11 @@
   min-height: 44px;
   padding: 6px 2px 5px;
 }
+/* IDEA compact: StripeToolbar.Button.*IconWithName.padding 4 → 3, text padding 6 → 4. */
+:global(:root[data-compact]) .stripeNamed {
+  min-height: 40px;
+  padding: 4px 2px 3px;
+}
 .stripeMore {
   height: var(--stripe-icon-button);
 }
@@ -267,8 +357,6 @@
 .stripeButton:hover,
 .stripeButton[aria-expanded="true"] {
   color: var(--fg-secondary);
-}
-.stripeButton[aria-expanded="true"] {
   background: var(--bg-stripe-hover);
 }
 .stripeActive,
@@ -278,8 +366,8 @@
 }
 .stripeFocused,
 .stripeFocused:hover {
-  background: var(--bg-button-primary);
-  color: var(--fg-button-primary);
+  background: var(--bg-stripe-selected);
+  color: var(--fg-emphasis);
   --icon-color: currentColor;
 }
 .stripeButton:focus-visible {
@@ -354,9 +442,10 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1-5);
   padding: 0 6px 0 8px;
   color: var(--fg-emphasis);
+  font-size: var(--fs-chrome);
 }
 .headerTabbed {
   border-bottom: 1px solid var(--border);
@@ -376,7 +465,7 @@
   height: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   padding: 0 4px;
   border-radius: var(--radius-small);
   transition: background var(--dur-fast) var(--ease);
@@ -405,7 +494,7 @@
 .headerActions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-0-5);
   opacity: 0;
   transition: opacity var(--dur) var(--ease);
 }
@@ -465,4 +554,10 @@
 /* Settings › Appearance › "Different tool window background". */
 :global(:root[data-tool-window-bg="different"]) .anchor {
   background: var(--bg-elev);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stripeButton {
+    transition: none;
+  }
 }

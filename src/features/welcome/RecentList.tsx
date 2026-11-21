@@ -1,6 +1,8 @@
-import { useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { writeClipboardText } from "@/platform/clipboard";
+import { useMemo, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import clsx from "clsx";
 import { call, commands, type RecentProject, type RecentProjectGroup } from "@/platform/ipc";
+import { revealInFileManager, showInFileManagerLabel } from "@/platform/fileManager";
 import { parseRemoteLocation } from "@/platform/remote";
 import {
   HighlightedText,
@@ -15,7 +17,8 @@ import {
 } from "@/ui";
 import { promptInput } from "@/workbench/inputDialogs";
 import { confirm } from "@/workbench/messages";
-import { projectColorVars, projectInitials } from "@/workbench/projectColor";
+import { projectInitials } from "@/workbench/projectColor";
+import { subscribeTabColors, tabColorOverride, tabColorVars, tabColorsVersion } from "@/workbench/tabColors";
 import {
   createGroup,
   filterRecent,
@@ -47,13 +50,33 @@ export async function askRemoveRecent(project: RecentProject, before?: () => voi
   if (ok) await removeRecent(project.path);
 }
 
-/** Rounded-square project avatar; same colour slot and initials as the title bar's project widget. */
-export function ProjectBadge({ name, className }: { name: string; className?: string }) {
+/** Rounded-square project avatar; same colour and initials as the title bar's project widget. */
+export function ProjectBadge({
+  name,
+  path,
+  className,
+  missing,
+}: {
+  name: string;
+  path: string;
+  className?: string;
+  missing?: boolean;
+}) {
+  useSyncExternalStore(subscribeTabColors, tabColorsVersion);
   return (
-    <span className={clsx(styles.tile, className)} style={projectColorVars(name)} aria-hidden>
+    <span
+      className={clsx(styles.tile, missing && styles.tileMissing, className)}
+      style={tabColorVars(name, tabColorOverride(path))}
+      aria-hidden
+    >
       {projectInitials(name)}
     </span>
   );
+}
+
+/** The tooltip of a recent project whose folder is gone. */
+export function unavailableTitle(project: Pick<RecentProject, "path" | "missing">): string | undefined {
+  return project.missing ? tx`${project.path} (unavailable)` : undefined;
 }
 
 /** New Project Group…: asks for a name; with `path`, that project moves into the new group. */
@@ -136,16 +159,15 @@ export function recentMenu(project: RecentProject, onOpened?: () => void, onRemo
       : { kind: "action", action: "file.openInNewWindow", arg: project.path, label: "Open in New Window" },
     {
       id: "reveal",
-      label: "Show in Finder",
+      label: showInFileManagerLabel(),
       icon: "external-link",
-      run: () =>
-        void import("@tauri-apps/plugin-opener").then((m) => m.revealItemInDir(project.path)).catch(() => undefined),
+      run: () => void revealInFileManager(project.path, null).catch(() => undefined),
     },
     {
       id: "copy",
       label: "Copy Path",
       icon: "copy",
-      run: () => void navigator.clipboard?.writeText(project.path).catch(() => undefined),
+      run: () => void writeClipboardText(project.path).catch(() => undefined),
     },
     { kind: "separator" },
     // Groups hold local projects (remote ones live in this window's own list).
@@ -187,12 +209,12 @@ function RecentRow({
   const opening = useRecent((s) => s.opening === m.project.path);
   const when = relativeTime(m.project.openedAtMs);
   return (
-    <div className={clsx(styles.recent, compact && styles.recentCompact)}>
-      <ProjectBadge name={m.project.name} />
+    <div className={styles.recent} title={unavailableTitle(m.project)}>
+      <ProjectBadge name={m.project.name} path={m.project.path} missing={!!m.project.missing} />
       <span className={styles.recentText}>
         <span className={styles.recentTop}>
           <HighlightedText
-            className={styles.recentName}
+            className={clsx(styles.recentName, m.project.missing && styles.unavailable)}
             text={m.project.name}
             indices={m.nameMatch}
             tone={active ? "accent" : "strong"}
@@ -264,7 +286,11 @@ export function RecentList({ exclude, compact, autoFocus, onOpened, className, t
       open(items[current]);
       return;
     }
-    if ((e.key === "Delete" || (e.key === "Backspace" && e.metaKey)) && items[current]) {
+    // Delete removes the selected project only when it has no text to delete: the caret is at the end
+    // of the query (⌘⌫: the query is empty). Otherwise it edits the query.
+    const field = e.currentTarget;
+    const atEnd = field.selectionStart === field.value.length && field.selectionEnd === field.value.length;
+    if (((e.key === "Delete" && atEnd) || (e.key === "Backspace" && e.metaKey && !field.value)) && items[current]) {
       e.preventDefault();
       void askRemoveRecent(items[current]!.project);
       return;

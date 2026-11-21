@@ -5,10 +5,11 @@ use crate::cli::{self, run};
 use crate::repo::{gx, resolve};
 use crate::text_encoding::{decode, encode, has_bom, is_binary};
 use crate::{
-    BlameLine, CheckoutMode, CheckoutOptions, CheckoutOutcome, CommitOptions, DeletedBranch, DivergedLocal,
-    PushBranchOptions, Repo,
+    BlameLine, BranchUpdate, BranchUpdateStatus, CheckoutMode, CheckoutOptions, CheckoutOutcome, CommitOptions,
+    DeletedBranch, DivergedLocal, PushBranchOptions, Repo,
 };
 use gix::bstr::{BStr, ByteSlice};
+use ide_core::error::ErrorKind;
 use ide_core::{CancellationToken, IdeError, IdeResult};
 use std::path::{Path, PathBuf};
 
@@ -43,6 +44,70 @@ fn run_paths(r: &Repo, args: &[&str], paths: &[String]) -> IdeResult<()> {
     cli::run_paths(r.root(), &base, paths).map(|_| ())
 }
 
+/// The annotate ignore list at the worktree root: git's conventional `blame.ignoreRevsFile`.
+pub const BLAME_IGNORE_REVS_FILE: &str = ".git-blame-ignore-revs";
+
+/// The file `blame.ignoreRevsFile` names, resolved from the worktree root as git does (it may not
+/// exist). The value comes from the gitoxide config snapshot, which Restricted Mode still parses,
+/// so resolving it starts no program.
+fn configured_ignore_revs(r: &Repo) -> Option<PathBuf> {
+    let repo = r.gix().ok()?;
+    let configured = repo.config_snapshot().string("blame.ignoreRevsFile")?;
+    let configured = configured.to_str_lossy();
+    let configured = configured.trim();
+    if configured.is_empty() {
+        return None;
+    }
+    let path = Path::new(configured);
+    Some(if path.is_absolute() { path.to_path_buf() } else { r.root().join(path) })
+}
+
+/// Arguments for the file `blame.ignoreRevsFile` names, which git does not accept as an
+/// absent file: with a value configured but missing from disk, `--no-ignore-revs-file`
+/// clears it so annotate still works.
+fn ignore_revs_args(r: &Repo) -> Vec<String> {
+    match configured_ignore_revs(r) {
+        Some(path) if path.is_file() => vec!["--ignore-revs-file".to_string(), path.to_string_lossy().into_owned()],
+        Some(_) => vec!["--no-ignore-revs-file".to_string()],
+        None => Vec::new(),
+    }
+}
+
+/// `existing` (an ignore list's text) with `commit` appended: lines keep their text and order, a
+/// listed commit isn't repeated, and the result ends with a newline in the list's line ending.
+fn append_revision(existing: &str, commit: &str) -> String {
+    let revision = commit.trim();
+    let newline = if existing.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut lines: Vec<&str> = existing.lines().collect();
+    if !revision.is_empty() && !lines.iter().any(|line| line.trim() == revision) {
+        lines.push(revision);
+    }
+    if lines.is_empty() { String::new() } else { lines.join(newline) + newline }
+}
+
+/// Adds `commit` to the list `blame.ignoreRevsFile` names; with none configured, to
+/// `.git-blame-ignore-revs` at the worktree root, which the local config then names.
+pub(crate) fn ignore_blame_revision(r: &Repo, commit: &str) -> IdeResult<()> {
+    let configured = configured_ignore_revs(r);
+    let path = configured.clone().unwrap_or_else(|| r.root().join(BLAME_IGNORE_REVS_FILE));
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
+    let updated = append_revision(&existing, commit);
+    if updated != existing {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&path, updated)?;
+    }
+    if configured.is_none() {
+        cli::run(r.root(), &["config", "--local", "blame.ignoreRevsFile", BLAME_IGNORE_REVS_FILE], None)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn blame(
     r: &Repo,
     path: &Path,
@@ -61,8 +126,9 @@ pub(crate) fn blame(
         Err(error) => return Err(error.into()),
     };
     let text = current_text.map(str::to_owned).unwrap_or_else(|| decode(&disk, encoding).into_owned());
+    let ignore = ignore_revs_args(r);
     if encoding.has_ascii_conversion() {
-        return converted_blame(r, path, &rel, &text, revision, encoding);
+        return converted_blame(r, path, &rel, &text, revision, encoding, &ignore);
     }
     let contents = match current_text {
         Some(_) if crate::diff::normalize_eol(&text) == crate::diff::normalize_eol(&decode(&disk, encoding)) => disk,
@@ -94,23 +160,32 @@ pub(crate) fn blame(
     // older releases reject the pair (`fatal: cannot use --contents with final
     // commit object name`) and take the same plain path — the edited lines are
     // marked uncommitted below either way (issue #755).
-    let contents_args = ["--literal-pathspecs", "blame", "--porcelain", "--contents", "-", revision, "--", &rel];
-    let plain_args: &[&str] = if crate::execution_allowed() {
-        &["--literal-pathspecs", "blame", "--porcelain", revision, "--", &rel]
-    } else {
-        &["--literal-pathspecs", "blame", "--no-textconv", "--porcelain", revision, "--", &rel]
+    let contents_args = {
+        let mut args = vec!["--literal-pathspecs", "blame", "--porcelain"];
+        args.extend(ignore.iter().map(String::as_str));
+        args.extend(["--contents", "-", revision, "--", &rel]);
+        args
+    };
+    let plain_args: Vec<&str> = {
+        let mut args = vec!["--literal-pathspecs", "blame"];
+        if !crate::execution_allowed() {
+            args.push("--no-textconv");
+        }
+        args.extend(ignore.iter().map(String::as_str));
+        args.extend(["--porcelain", revision, "--", &rel]);
+        args
     };
     let (out, contents_blame) = if crate::execution_allowed() {
         let out = cli::run_raw(r.root(), &contents_args, Some(&contents))?;
         if out.code == Some(0) {
             (out, true)
         } else if String::from_utf8_lossy(&out.stderr).contains("cannot use --contents") {
-            (run(r.root(), plain_args, None)?, false)
+            (run(r.root(), &plain_args, None)?, false)
         } else {
             return Err(cli::failure(&contents_args, &out.stderr, &out.stdout, out.code));
         }
     } else {
-        (run(r.root(), plain_args, None)?, false)
+        (run(r.root(), &plain_args, None)?, false)
     };
     let mut lines = crate::blame::parse_porcelain(&out.stdout_str());
     for line in &mut lines {
@@ -142,11 +217,21 @@ fn converted_blame(
     text: &str,
     revision: &str,
     encoding: TextEncoding,
+    ignore: &[String],
 ) -> IdeResult<Vec<BlameLine>> {
     let current = crate::diff::normalize_eol(text);
     let mut result = uncommitted_lines(current.split_inclusive('\n').count());
     let Some(base) = r.file_bytes_at(path, Some(revision))? else { return Ok(result) };
-    let out = run(r.root(), &["--literal-pathspecs", "blame", "--porcelain", revision, "--", rel], None)?;
+    let args: Vec<&str> = {
+        let mut args = vec!["--literal-pathspecs", "blame"];
+        if !crate::execution_allowed() {
+            args.push("--no-textconv");
+        }
+        args.extend(ignore.iter().map(String::as_str));
+        args.extend(["--porcelain", revision, "--", rel]);
+        args
+    };
+    let out = run(r.root(), &args, None)?;
     let physical = crate::blame::parse_porcelain(&out.stdout_str());
     let raw = crate::text_encoding::decode_raw(&base, encoding);
     let raw = crate::diff::normalize_eol(&raw);
@@ -307,18 +392,24 @@ pub(crate) fn discard(r: &Repo, paths: &[PathBuf]) -> IdeResult<()> {
     let rel = r.rel_paths(paths)?;
     // `git restore --worktree` refuses unmerged paths: roll those back to HEAD first.
     discard_unmerged(r, &rel)?;
-    let (mut tracked, mut untracked) = (Vec::new(), Vec::new());
+    let (mut tracked, mut untracked, mut submodules) = (Vec::new(), Vec::new(), Vec::new());
     {
         let repo = r.gix()?;
         let index = repo.index_or_empty().map_err(gx)?;
         for p in rel {
-            let exact = index.entry_index_by_path(BStr::new(p.as_bytes())).is_ok();
+            let exact = index.entry_index_by_path(BStr::new(p.as_bytes())).ok().map(|i| &index.entries()[i]);
             let dir_prefix = if p == "." { String::new() } else { format!("{}/", p.trim_end_matches('/')) };
-            let has_tracked_children = index.prefixed_entries(BStr::new(dir_prefix.as_bytes())).is_some();
-            if exact {
-                tracked.push(p);
+            let children = index.prefixed_entries(BStr::new(dir_prefix.as_bytes()));
+            if let Some(entry) = exact {
+                if entry.mode.is_submodule() {
+                    submodules.push(p);
+                } else {
+                    tracked.push(p);
+                }
             } else if r.abs_path(&p).is_dir() {
-                if has_tracked_children {
+                if let Some(children) = children {
+                    submodules
+                        .extend(children.iter().filter(|e| e.mode.is_submodule()).map(|e| e.path(&index).to_string()));
                     tracked.push(p.clone());
                 }
                 untracked.push(p);
@@ -328,6 +419,11 @@ pub(crate) fn discard(r: &Repo, paths: &[PathBuf]) -> IdeResult<()> {
         }
     }
     run_paths(r, &["restore", "--worktree"], &tracked)?;
+    // A plain restore leaves a submodule alone. This one checks out the commit the index
+    // records there and restores its tracked files, keeping its untracked ones.
+    if crate::execution_allowed() {
+        run_paths(r, &["restore", "--recurse-submodules", "--worktree"], &submodules)?;
+    }
     if !untracked.is_empty() {
         // `git clean` keeps ignored files and refuses paths outside the worktree.
         run_paths(r, &["clean", "-f", "-d", "-q"], &untracked)?;
@@ -676,9 +772,26 @@ fn overwritten_files(stderr: &str) -> Option<Vec<String>> {
     listed_files(stderr, "local changes to the following files would be overwritten")
 }
 
-/// Untracked files git refuses to overwrite, from its error message.
-fn overwritten_untracked(stderr: &str) -> Option<Vec<String>> {
-    listed_files(stderr, "untracked working tree files would be")
+/// Untracked files git refuses to lose, from its error message: they would be *removed*
+/// by the checkout (tracked here, absent from the target) or *overwritten* by it (present
+/// in the target). Returns the files and whether they would be removed.
+fn refused_untracked(stderr: &str) -> Option<(Vec<String>, bool)> {
+    if let Some(files) = listed_files(stderr, "untracked working tree files would be removed") {
+        return Some((files, true));
+    }
+    Some((listed_files(stderr, "untracked working tree files would be")?, false))
+}
+
+/// The branch git refused to check out or update because another worktree has it, from
+/// its error message: a switch says `'<branch>' is already used by worktree at '<path>'`,
+/// a forced update says `cannot force update the branch '<branch>' used by worktree at
+/// '<path>'`; git before 2.42 says `'<branch>' is already checked out at '<path>'`.
+fn branch_of_other_worktree(stderr: &str) -> Option<(String, String)> {
+    const MARKERS: [&str; 3] =
+        ["' is already used by worktree at '", "' used by worktree at '", "' is already checked out at '"];
+    let (before, path) = stderr.lines().find_map(|l| MARKERS.iter().find_map(|m| l.split_once(m)))?;
+    let branch = before.rsplit('\'').next()?.to_string();
+    Some((branch, path.strip_suffix('\'').unwrap_or(path).to_string()))
 }
 
 fn listed_files(stderr: &str, header: &str) -> Option<Vec<String>> {
@@ -721,14 +834,20 @@ pub(crate) fn checkout_with(
     if options.mode == CheckoutMode::Force {
         args.push("--discard-changes".into());
     }
+    if options.ignore_other_worktrees {
+        args.push("--ignore-other-worktrees".into());
+    }
     let argv: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = cli::run_raw(r.root(), &argv, None)?;
     if out.code == Some(0) {
         return Ok(CheckoutOutcome::Done);
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
-    if let Some(files) = overwritten_untracked(&stderr) {
-        return Ok(CheckoutOutcome::UntrackedFiles { files });
+    if let Some((branch, path)) = branch_of_other_worktree(&stderr) {
+        return Ok(CheckoutOutcome::CheckedOutInWorktree { branch, path: path.into() });
+    }
+    if let Some((files, removed)) = refused_untracked(&stderr) {
+        return Ok(CheckoutOutcome::UntrackedFiles { files, removed });
     }
     let Some(files) = overwritten_files(&stderr) else {
         return Err(cli::failure(&argv, &out.stderr, &out.stdout, out.code));
@@ -795,14 +914,46 @@ pub(crate) fn create_branch(
         let repo = r.gix()?;
         resolve(&repo, s)?;
     }
+    let no_track = start.is_some_and(|s| renamed_remote_start(r, name, s));
     let mut args = match (checkout, overwrite) {
         (true, false) => vec!["switch", "-c", name],
         (true, true) => vec!["switch", "-C", name],
-        (false, false) => vec!["branch", "--", name],
-        (false, true) => vec!["branch", "--force", "--", name],
+        (false, false) => vec!["branch"],
+        (false, true) => vec!["branch", "--force"],
     };
+    if no_track {
+        args.push("--no-track");
+    }
+    if !checkout {
+        args.extend(["--", name]);
+    }
     args.extend(start);
-    run(r.root(), &args, None).map(|_| ())
+    let out = cli::run_raw(r.root(), &args, None)?;
+    if out.code == Some(0) {
+        return Ok(());
+    }
+    if let Some((branch, path)) = branch_of_other_worktree(&String::from_utf8_lossy(&out.stderr)) {
+        return Err(IdeError::invalid(format!("branch '{branch}' is already checked out in worktree at '{path}'")));
+    }
+    Err(cli::failure(&args, &out.stderr, &out.stdout, out.code))
+}
+
+/// Whether `start` is a remote-tracking branch with another name than the new branch
+/// `name`. Git would make it the upstream, so pushing the new branch would go to the
+/// start branch (`feature` from `origin/main` pushes to `main`); such a branch is left
+/// without upstream and gets its own one on the first push. A remote branch under the
+/// same name stays tracked.
+pub(crate) fn renamed_remote_start(r: &Repo, name: &str, start: &str) -> bool {
+    let Ok(out) = cli::run_raw(r.root(), &["rev-parse", "--verify", "--quiet", "--symbolic-full-name", start], None)
+    else {
+        return false;
+    };
+    let full = out.stdout_str().trim().to_string();
+    let Some(rest) = full.strip_prefix("refs/remotes/").filter(|_| out.code == Some(0)) else { return false };
+    let Ok(repo) = r.gix() else { return false };
+    let names = repo.remote_names();
+    let branch = names.iter().find_map(|remote| rest.strip_prefix(&format!("{remote}/")));
+    branch.is_some_and(|b| b != name)
 }
 
 /// Undo Commit: moves the current branch back to the parent of `commit` (which must be
@@ -942,17 +1093,20 @@ pub(crate) fn delete_branch(r: &Repo, branch: &str, force: bool) -> IdeResult<()
     run(r.root(), &["branch", if force { "-D" } else { "-d" }, "--", branch], None).map(|_| ())
 }
 
+/// The short name (`origin/main`) of the branch a local branch tracks, as the branch list shows it.
+fn upstream_name(r: &Repo, branch: &str) -> IdeResult<Option<String>> {
+    let out = run(r.root(), &["for-each-ref", "--format=%(upstream:short)", &format!("refs/heads/{branch}")], None)?;
+    let upstream = out.stdout_str().trim().to_string();
+    Ok((!upstream.is_empty()).then_some(upstream))
+}
+
 pub(crate) fn delete_branch_restorable(r: &Repo, branch: &str) -> IdeResult<DeletedBranch> {
     check_local_branch(r, branch)?;
     let tip = run(r.root(), &["rev-parse", "--verify", "-q", &format!("refs/heads/{branch}^{{commit}}")], None)?
         .stdout_str()
         .trim()
         .to_string();
-    let upstream =
-        cli::run_raw(r.root(), &["for-each-ref", "--format=%(upstream:short)", &format!("refs/heads/{branch}")], None)?
-            .stdout_str()
-            .trim()
-            .to_string();
+    let upstream = upstream_name(r, branch)?;
     let out = cli::run_raw(r.root(), &["branch", "-d", "--", branch], None)?;
     let unmerged = match out.code {
         Some(0) => false,
@@ -962,7 +1116,7 @@ pub(crate) fn delete_branch_restorable(r: &Repo, branch: &str) -> IdeResult<Dele
         }
         code => return Err(cli::failure(&["branch"], &out.stderr, &out.stdout, code)),
     };
-    Ok(DeletedBranch { name: branch.to_string(), tip, upstream: (!upstream.is_empty()).then_some(upstream), unmerged })
+    Ok(DeletedBranch { name: branch.to_string(), tip, upstream, unmerged })
 }
 
 pub(crate) fn restore_branch(r: &Repo, deleted: &DeletedBranch) -> IdeResult<()> {
@@ -975,12 +1129,22 @@ pub(crate) fn restore_branch(r: &Repo, deleted: &DeletedBranch) -> IdeResult<()>
     Ok(())
 }
 
-pub(crate) fn rename_branch(r: &Repo, from: &str, to: &str) -> IdeResult<()> {
+/// `unset_upstream` drops the tracking that `git branch -m` moves to the new name.
+pub(crate) fn rename_branch(r: &Repo, from: &str, to: &str, unset_upstream: bool) -> IdeResult<()> {
     let to = to.trim();
     if to.is_empty() {
         return Err(IdeError::invalid("branch name is empty"));
     }
-    run(r.root(), &["branch", "-m", "--", from, to], None).map(|_| ())
+    let has_upstream = unset_upstream && upstream_name(r, from)?.is_some();
+    run(r.root(), &["branch", "-m", "--", from, to], None)?;
+    if has_upstream {
+        run(r.root(), &["branch", "--unset-upstream", "--", to], None).map_err(|mut error| {
+            error.message =
+                format!("Renamed branch '{from}' to '{to}', but could not unset its upstream: {}", error.message);
+            error
+        })?;
+    }
+    Ok(())
 }
 
 fn check_rev(rev: &str) -> IdeResult<&str> {
@@ -991,23 +1155,48 @@ fn check_rev(rev: &str) -> IdeResult<&str> {
     Ok(rev)
 }
 
+/// The short name of a full branch ref (`refs/heads/x`, `refs/remotes/origin/x`) when it
+/// names that same branch: git writes the name it is given into the merge message and the
+/// reflog. A name a tag shares stays a full ref, the case IDEA also passes in full.
+fn unambiguous_branch_name<'a>(r: &Repo, rev: &'a str) -> &'a str {
+    let Some(short) = rev.strip_prefix("refs/heads/").or_else(|| rev.strip_prefix("refs/remotes/")) else {
+        return rev;
+    };
+    // An ambiguous name prints nothing (git reports it on stderr).
+    let full = cli::run_raw(r.root(), &["rev-parse", "--verify", "-q", "--symbolic-full-name", short], None);
+    match full {
+        Ok(out) if out.code == Some(0) && out.stdout_str().trim() == rev => short,
+        _ => rev,
+    }
+}
+
 /// Local changes are stashed and restored around the merge (IDEA's "save local changes").
 pub(crate) fn merge(r: &Repo, branch: &str) -> IdeResult<()> {
-    let branch = check_rev(branch)?;
+    let branch = unambiguous_branch_name(r, check_rev(branch)?);
     crate::preserve::around(r, "Local changes saved before merge", || {
         run(r.root(), &["merge", "--no-edit", branch], None).map(|_| ())
     })
 }
 
 pub(crate) fn rebase(r: &Repo, onto: &str) -> IdeResult<()> {
-    let onto = check_rev(onto)?;
+    let onto = unambiguous_branch_name(r, check_rev(onto)?);
     crate::preserve::around(r, "Local changes saved before rebase", || {
         run(r.root(), &["rebase", onto], None).map(|_| ())
     })
 }
 
-pub(crate) fn stash_push(r: &Repo, message: Option<&str>, include_untracked: bool, keep_index: bool) -> IdeResult<()> {
-    let mut args = vec!["stash", "push", "-q"];
+pub(crate) fn stash_push(
+    r: &Repo,
+    message: Option<&str>,
+    include_untracked: bool,
+    keep_index: bool,
+    paths: &[PathBuf],
+) -> IdeResult<()> {
+    let rel = r.rel_paths(paths)?;
+    // Literal pathspecs only for the chosen files: git's whole-tree stash passes itself `:/`,
+    // which a literal pathspec turns into a file of that name.
+    let mut args = if rel.is_empty() { vec![] } else { vec!["--literal-pathspecs"] };
+    args.extend(["stash", "push", "-q"]);
     if include_untracked {
         args.push("--include-untracked");
     }
@@ -1016,6 +1205,10 @@ pub(crate) fn stash_push(r: &Repo, message: Option<&str>, include_untracked: boo
     }
     if let Some(m) = message.filter(|m| !m.trim().is_empty()) {
         args.extend(["-m", m]);
+    }
+    if !rel.is_empty() {
+        args.push("--");
+        args.extend(rel.iter().map(String::as_str));
     }
     run(r.root(), &args, None).map(|_| ())
 }
@@ -1215,18 +1408,79 @@ pub(crate) fn push_branch(
     cli::run_streaming(r.root(), &argv, cancel, on_output)
 }
 
-/// Fast-forwards local `branch` (not checked out) to its upstream, fetching it first.
-pub(crate) fn update_branch(
+/// Update Selected (IDEA's Git.Update.Selected): fetches the remote of each branch once,
+/// then fast-forwards the branch to its tracked branch: the checked-out one with
+/// `merge --ff-only`, the others with a local fetch, which refuses branches checked out
+/// in another worktree. Diverged branches are left alone.
+pub(crate) fn update_branches(
     r: &Repo,
-    branch: &str,
+    branches: &[String],
     cancel: &CancellationToken,
     on_output: &dyn Fn(String),
-) -> IdeResult<()> {
-    check_local_branch(r, branch)?;
-    let (remote, name) =
-        branch_upstream(r, branch).ok_or_else(|| IdeError::invalid(format!("'{branch}' has no tracked branch")))?;
-    let refspec = format!("refs/heads/{name}:refs/heads/{branch}");
-    cli::run_streaming(r.root(), &["fetch", "--progress", &remote, &refspec], cancel, on_output)
+) -> IdeResult<Vec<BranchUpdate>> {
+    let head =
+        run(r.root(), &["symbolic-ref", "-q", "--short", "HEAD"], None).ok().map(|o| o.stdout_str().trim().to_string());
+    let mut fetched: Vec<(String, Result<(), String>)> = Vec::new();
+    let mut out = Vec::with_capacity(branches.len());
+    for branch in branches {
+        check_local_branch(r, branch)?;
+        let result = |status, message| BranchUpdate { branch: branch.clone(), status, message };
+        let Some((remote, _)) = branch_upstream(r, branch) else {
+            out.push(result(BranchUpdateStatus::NoUpstream, None));
+            continue;
+        };
+        let fetch = match fetched.iter().find(|(name, _)| *name == remote) {
+            Some((_, done)) => done.clone(),
+            None => {
+                let done = match cli::run_streaming(r.root(), &["fetch", "--progress", &remote], cancel, on_output) {
+                    Err(e) if e.kind == ErrorKind::Cancelled => return Err(e),
+                    done => done.map_err(|e| e.message),
+                };
+                fetched.push((remote, done.clone()));
+                done
+            }
+        };
+        let (status, message) = match fetch {
+            Err(message) => (BranchUpdateStatus::Failed, Some(message)),
+            Ok(()) => fast_forward(r, branch, head.as_deref() == Some(branch.as_str()), cancel, on_output)?,
+        };
+        out.push(result(status, message));
+    }
+    Ok(out)
+}
+
+fn fast_forward(
+    r: &Repo,
+    branch: &str,
+    current: bool,
+    cancel: &CancellationToken,
+    on_output: &dyn Fn(String),
+) -> IdeResult<(BranchUpdateStatus, Option<String>)> {
+    let rev = |args: &[&str]| run(r.root(), args, None).ok().map(|o| o.stdout_str().trim().to_string());
+    let ancestor = |a: &str, b: &str| {
+        cli::run_raw(r.root(), &["merge-base", "--is-ancestor", a, b], None).is_ok_and(|o| o.code == Some(0))
+    };
+    let local = format!("refs/heads/{branch}");
+    let tracked =
+        rev(&["rev-parse", "--symbolic-full-name", &format!("{branch}@{{upstream}}")]).filter(|t| !t.is_empty());
+    let target = tracked.as_deref().and_then(|t| rev(&["rev-parse", "-q", "--verify", &format!("{t}^{{commit}}")]));
+    let (Some(tracked), Some(target), Some(tip)) = (tracked, target, rev(&["rev-parse", "-q", "--verify", &local]))
+    else {
+        return Ok((BranchUpdateStatus::Failed, Some(format!("the tracked branch of '{branch}' was not found"))));
+    };
+    if tip == target || ancestor(&target, &tip) {
+        return Ok((BranchUpdateStatus::UpToDate, None));
+    }
+    if !ancestor(&tip, &target) {
+        return Ok((BranchUpdateStatus::NotFastForward, None));
+    }
+    let refspec = format!("{tracked}:{local}");
+    let args: &[&str] = if current { &["merge", "--ff-only", &tracked] } else { &["fetch", ".", &refspec] };
+    match cli::run_streaming(r.root(), args, cancel, on_output) {
+        Ok(()) => Ok((BranchUpdateStatus::Updated, None)),
+        Err(e) if e.kind == ErrorKind::Cancelled => Err(e),
+        Err(e) => Ok((BranchUpdateStatus::Failed, Some(e.message))),
+    }
 }
 
 /// Update Project › Reset to the Remote Branch: fetches the current branch's tracked
@@ -1339,4 +1593,35 @@ fn decode_diff(bytes: &[u8], encoding: TextEncoding) -> String {
         }
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{append_revision, branch_of_other_worktree};
+
+    #[test]
+    fn the_worktree_holding_a_branch_is_read_from_each_git_wording() {
+        let held = |b: &str, p: &str| Some((b.to_string(), p.to_string()));
+        assert_eq!(
+            branch_of_other_worktree("fatal: 'topic' is already used by worktree at '/w/t'\n"),
+            held("topic", "/w/t")
+        );
+        assert_eq!(
+            branch_of_other_worktree("fatal: cannot force update the branch 'topic' used by worktree at '/w/t'"),
+            held("topic", "/w/t")
+        );
+        assert_eq!(branch_of_other_worktree("fatal: 'a/b' is already checked out at '/w/t'"), held("a/b", "/w/t"));
+        assert_eq!(branch_of_other_worktree("fatal: invalid reference: x"), None);
+    }
+
+    #[test]
+    fn a_revision_is_appended_once_keeping_the_list() {
+        let (a, b) = ("a".repeat(40), "b".repeat(40));
+        assert_eq!(append_revision("", &b), format!("{b}\n"));
+        assert_eq!(append_revision(&format!("{a}\n# comment\n"), &b), format!("{a}\n# comment\n{b}\n"));
+        assert_eq!(append_revision(&a, &b), format!("{a}\n{b}\n"));
+        let listed = format!("# reformat\n  {b}  \n{a}\n");
+        assert_eq!(append_revision(&listed, &b), listed);
+        assert_eq!(append_revision(&format!("{a}\r\n"), &b), format!("{a}\r\n{b}\r\n"));
+    }
 }

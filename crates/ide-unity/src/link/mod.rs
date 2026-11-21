@@ -87,7 +87,7 @@ pub fn link_file(root: &Path) -> PathBuf {
 /// The link file, if an Editor that is still running wrote it.
 fn read_link_file(path: &Path) -> Option<LinkFile> {
     let file: LinkFile = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    ide_core::process::is_running(file.pid).then_some(file)
+    ide_core::process::process_alive(file.pid).then_some(file)
 }
 
 type Reply = mpsc::Sender<IdeResult<Value>>;

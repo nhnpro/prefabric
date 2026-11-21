@@ -47,7 +47,10 @@ vi.mock("@/platform/javaLaunch", async (original) => ({
   ...(await original<typeof import("@/platform/javaLaunch")>()),
   resolveJavaModule: async () => "app",
 }));
-vi.mock("./buildUpdate", () => ({ runUpdateBuild: mocks.runBuild }));
+vi.mock("./buildUpdate", async (original) => ({
+  ...(await original<typeof import("./buildUpdate")>()),
+  runUpdateBuild: mocks.runBuild,
+}));
 vi.mock("./tomcat", () => ({ buildTomcatArtifact: mocks.build, syncTomcatOutputs: mocks.sync }));
 vi.mock("./store", () => ({
   rerunConfig: (s: Pick<RunSession, "config">) => mocks.state.configs.find((c) => c.id === s.config.id) ?? s.config,
@@ -131,7 +134,7 @@ const boot = {
 describe("Spring Boot application updates", () => {
   it("processes resources and publishes them to the resolved runtime output", async () => {
     await updateTomcat(boot, "resources");
-    expect(mocks.resolve).toHaveBeenCalledWith("app", false, false, 1);
+    expect(mocks.resolve).toHaveBeenCalledWith("app", false, "noBuild", 1);
     expect(mocks.runBuild).toHaveBeenCalledWith({ id: "build" });
     expect(mocks.publish).toHaveBeenCalledWith(boot.config, ["/p/app/bin/main"], "a.Main");
     expect(mocks.update).not.toHaveBeenCalled();
@@ -139,7 +142,7 @@ describe("Spring Boot application updates", () => {
   });
   it("compiles and invokes the existing scoped HotSwap action in debug", async () => {
     await updateTomcat(boot, "classes");
-    expect(mocks.resolve).toHaveBeenCalledWith("app", false, true, 1);
+    expect(mocks.resolve).toHaveBeenCalledWith("app", false, "make", 1);
     expect(mocks.action).toHaveBeenCalledWith("debug.reloadChangedClasses", { configId: "boot" });
   });
   it("explains compiled classes require restart without a debugger", async () => {
@@ -155,6 +158,27 @@ describe("Spring Boot application updates", () => {
     await updateTomcat(boot, "classes");
     expect(mocks.notify).toHaveBeenCalledWith(
       expect.objectContaining({ body: expect.stringContaining("Restart the application") }),
+    );
+  });
+  it("names the compile errors when the update's Java build fails", async () => {
+    mocks.resolve.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        build: "withErrors",
+        classPaths: [],
+        pathListSeparator: ":",
+        errors: [{ path: "/p/app/src/A.java", line: 1, column: 1, message: "illegal character: '\\ufeff'" }],
+        errorCount: 1,
+        hints: [],
+      },
+    } as never);
+    await updateTomcat(boot, "classes");
+    expect(mocks.runBuild).not.toHaveBeenCalled();
+    expect(mocks.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: "error",
+        body: "Application update build failed\n/p/app/src/A.java:1:1: error: illegal character: '\\ufeff'",
+      }),
     );
   });
   it("never publishes resources after a failed build", async () => {

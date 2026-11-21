@@ -135,6 +135,18 @@ describe("Tabs interactions", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  // Regression: "Close button position: None" hides the × but must not disable
+  // middle click (or the other close gestures). closable used to be bound to
+  // showCloseButton, so hiding the button made the tab unclosable.
+  it("a hidden close button keeps the middle-click gesture", () => {
+    const onClose = vi.fn();
+    const hidden = items.map((it) => ({ ...it, showCloseButton: false }));
+    render(<Tabs items={hidden} activeId="a" onSelect={() => {}} onClose={onClose} />);
+    expect(screen.queryByRole("button", { name: "Close Tab" })).toBeNull();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "B" }), { button: 1 });
+    expect(onClose).toHaveBeenCalledWith("b");
+  });
+
   it("keeps Shift+click selection where the strip does not opt in", () => {
     const onClose = vi.fn();
     const onSelect = vi.fn();
@@ -169,6 +181,22 @@ describe("Tabs interactions", () => {
     expect(handles[0]!.closeSelected()).toBe(false);
     unmount();
     expect(handles).toHaveLength(0);
+  });
+
+  it("lets a container pin the selected tab when the strip supports pinning", () => {
+    const handles: TabStripHandle[] = [];
+    const register = (h: TabStripHandle) => (handles.push(h), () => void handles.splice(handles.indexOf(h), 1));
+    const onTogglePin = vi.fn();
+    const ui = (pin?: (id: string) => void) => (
+      <TabStripRegistry.Provider value={register}>
+        <Tabs items={items} activeId="b" onSelect={() => {}} onTogglePin={pin} />
+      </TabStripRegistry.Provider>
+    );
+    const { rerender } = render(ui(onTogglePin));
+    expect(handles[0]!.togglePinSelected()).toBe(true);
+    expect(onTogglePin).toHaveBeenCalledWith("b");
+    rerender(ui());
+    expect(handles[0]!.togglePinSelected()).toBe(false);
   });
 
   it("a vertical strip moves with ↑/↓, shows actions above the tabs and has no overflow dropdown", () => {
@@ -330,7 +358,10 @@ describe("Tabs drag & drop", () => {
     hit = strip("Terminal sessions");
     pointer(window, "pointermove", 60);
     expect(dragged).toHaveClass(styles.dragging!);
-    const ghost = document.body.lastElementChild as HTMLElement;
+    // The ghost sits in a copy of the strip's classes, so the strip's tab rules still lay it out.
+    const context = document.body.lastElementChild as HTMLElement;
+    expect(context.className).toBe(strip("Terminal sessions").parentElement!.className);
+    const ghost = context.firstElementChild as HTMLElement;
     expect(ghost).toHaveAttribute("aria-hidden", "true");
     expect(ghost.style.position).toBe("fixed");
     expect(shown("Terminal sessions")).toEqual(["Local", "Local (2)", "Local (3)"]);
@@ -350,7 +381,7 @@ describe("Tabs drag & drop", () => {
         .map((b) => b.textContent),
     ).toEqual(["Local (2)", "Local", "Local (3)"]);
     expect(tab("Terminal sessions", "Local")).not.toHaveClass(styles.dragging!);
-    expect(document.body.lastElementChild).not.toBe(ghost);
+    expect(context.isConnected).toBe(false);
   });
 
   it("puts the slot back when the pointer leaves the strip and drops nothing on Escape", () => {

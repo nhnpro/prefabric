@@ -1,9 +1,11 @@
-import { onEndpointsChanged } from "@/workbench/contributions";
-import { useFilePresentation } from "@/platform/filePresentation";
+import { writeClipboardText } from "@/platform/clipboard";
+import { onSearchCategoriesChanged, onEndpointsChanged } from "@/workbench/contributions";
+import { useFilePresentation } from "@/ui/filePresentation";
+import { useRowHeight } from "@/ui/density";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import clsx from "clsx";
 import { actionToggled, executeAction, executeActionFrom, getAction } from "@/platform/actions";
-import type { ProjectFileSet } from "@/platform/ipc";
+import { onIdeEvent, type ProjectFileSet } from "@/platform/ipc";
 import { tx as translate, useTx } from "@/platform/i18n";
 import { formatBinding, hasPrimaryModifier, hostBinding, registerKeyClaim, shortcutLabel } from "@/platform/keymap";
 import {
@@ -15,6 +17,9 @@ import {
   List,
   Menu,
   Spinner,
+  SplitGroup,
+  SplitPanel,
+  SplitHandle,
   SymbolBadge,
   Select,
   Toggle,
@@ -26,7 +31,7 @@ import {
   type MenuItem,
   T,
 } from "@/ui";
-import { useFileDecoration, useSearchEverywhereTabs } from "@/workbench/contributions";
+import { useFileDecoration } from "@/workbench/contributions";
 import { highlightTokens, languageForPath, type CodeToken } from "@/editor/lsp/markdown";
 import { badgeKind, basename, openInListOrder, openLocation, relDir } from "../common/open";
 import { parseLocationQuery } from "../common/query";
@@ -38,12 +43,13 @@ import { FilterPopup } from "./FilterPopup";
 import {
   MORE_STEP_ALL,
   MORE_STEP_TAB,
+  sectionTitle,
+  searchTabs,
+  isCustomTab,
   buildRows,
   groupJump,
   isSectionRow,
   parseCommand,
-  sectionTitle,
-  seTabs,
   stableIndex,
   topResultSettled,
   type SeRow,
@@ -82,10 +88,7 @@ export function claimSearchKeys(input: () => HTMLElement | null): () => void {
   return registerKeyClaim((e) => e.target === input() && SEARCH_KEYS.has(e.key));
 }
 const ROW = 24;
-const MAX_LIST = 672;
-const MIN_LIST = 10 * ROW;
-/** List cap while the preview pane takes the lower part of the popup. */
-const MAX_LIST_PREVIEW = 312;
+const MIN_LIST_ROWS = 10;
 const DEBOUNCE_MS = 60;
 
 export function SearchEverywhereOverlay() {
@@ -98,12 +101,11 @@ const INITIAL_SELECTION: Selection = { key: null, anchorKey: null, lead: -1, anc
 
 function SearchEverywhereDialog() {
   const tx = useTx();
-  const registered = useSearchEverywhereTabs((s) => s.tabs);
-  const tabs = useMemo(() => seTabs(registered), [registered]);
-  const chosenTab = useSearchEverywhere((s) => s.tab);
-  // A contributed tab that is gone (another project) falls back to All.
-  const tab = tabs.some((t) => t.id === chosenTab) ? chosenTab : "all";
+  const rowHeight = useRowHeight(ROW);
+  const tab = useSearchEverywhere((s) => s.tab);
   const hint = hintFor(tab, tx);
+  const [tabs, setTabs] = useState(searchTabs);
+  const custom = isCustomTab(tab);
   const query = useSearchEverywhere((s) => s.query);
   const includeNonProject = useSearchEverywhere((s) => s.includeNonProject);
   const fileSet = useSearchEverywhere((s) => s.fileSet);
@@ -114,6 +116,15 @@ function SearchEverywhereDialog() {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const tabs = tabsRef.current;
+    const selected = tabs?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!tabs || !selected) return;
+    if (selected.offsetLeft < tabs.scrollLeft) tabs.scrollLeft = selected.offsetLeft;
+    else if (selected.offsetLeft + selected.offsetWidth > tabs.scrollLeft + tabs.clientWidth)
+      tabs.scrollLeft = selected.offsetLeft + selected.offsetWidth - tabs.clientWidth;
+  }, [tab]);
   const [debounced, setDebounced] = useState(query);
   const [extra, setExtra] = useState<Partial<Record<SectionId, number>>>({});
   const [snap, setSnap] = useState<SeSnapshot | null>(null);
@@ -145,7 +156,28 @@ function SearchEverywhereDialog() {
   const bumpToggles = () => setToggleTick((t) => t + 1);
 
   useEffect(() => () => controller.dispose(), [controller]);
+  useEffect(
+    () =>
+      onSearchCategoriesChanged(() => {
+        controller.invalidateCategories();
+        setTabs(searchTabs());
+      }),
+    [controller],
+  );
+  useEffect(() => {
+    if (custom && !tabs.some((t) => t.id === tab)) selectSearchEverywhereTab("all");
+  }, [custom, tab, tabs]);
   const [endpointVersion, setEndpointVersion] = useState(0);
+  const [filesVersion, setFilesVersion] = useState(0);
+  useEffect(
+    () =>
+      onIdeEvent("indexState", (e) => {
+        if (e.indexing) return;
+        controller.invalidateFiles();
+        setFilesVersion((v) => v + 1);
+      }),
+    [controller],
+  );
   useEffect(
     () =>
       onEndpointsChanged(() => {
@@ -178,12 +210,16 @@ function SearchEverywhereDialog() {
 
   // "/fi" lists scope commands instead of searching.
   const listing = useMemo(() => {
-    const c = parseCommand(query);
+    const c = custom ? null : parseCommand(query);
     return c?.kind === "list" ? c.rows : null;
-  }, [query]);
-  const searchQuery = parseCommand(debounced)?.kind === "list" ? "" : debounced;
+  }, [query, custom]);
+  const searchQuery = !custom && parseCommand(debounced)?.kind === "list" ? "" : debounced;
 
   useEffect(() => {
+    if (custom && query !== debounced) {
+      controller.dispose();
+      return;
+    }
     // A language filter waits for the language list (nothing would be filtered yet).
     if (filter?.excludedLanguages?.length && !filter.languageOf) return;
     controller.run({
@@ -196,7 +232,21 @@ function SearchEverywhereDialog() {
       includeDisabled: tab === "actions" ? includeNonProject : undefined,
       extra,
     });
-  }, [controller, searchQuery, tab, includeNonProject, fileSet, filter, extra, endpointVersion]);
+  }, [
+    controller,
+    query,
+    debounced,
+    custom,
+    searchQuery,
+    tab,
+    includeNonProject,
+    fileSet,
+    filter,
+    extra,
+    endpointVersion,
+    filesVersion,
+    tabs,
+  ]);
 
   useEffect(() => {
     inputRef.current?.select();
@@ -204,12 +254,19 @@ function SearchEverywhereDialog() {
 
   useEffect(() => onSearchEverywhereQuery(query), [query]);
 
-  const parsed = useMemo(() => parseLocationQuery(searchQuery), [searchQuery]);
+  const parsed = useMemo(
+    () => (custom ? { text: searchQuery, line: null, col: null } : parseLocationQuery(searchQuery)),
+    [searchQuery, custom],
+  );
   // The All tab interleaves its sources by relevance once there is a query.
   const mix = tab === "all" ? parsed.text : undefined;
   const rows = useMemo(
-    () => listing ?? (snap ? buildRows(snap.sections, { headers: !parsed.text.trim(), mix }) : []),
-    [listing, snap, parsed.text, mix],
+    () =>
+      listing ??
+      (snap && (!custom || (snap.tab === tab && snap.query === query))
+        ? buildRows(snap.sections, { headers: !parsed.text.trim() && !custom, mix })
+        : []),
+    [listing, snap, parsed.text, mix, custom, tab, query],
   );
   const active = stableIndex(rows, sel.key, sel.lead, sel.moved);
   const activeRow = active >= 0 ? rows[active] : undefined;
@@ -238,7 +295,7 @@ function SearchEverywhereDialog() {
   /** Typed or picked query; "/files foo" switches to Files with "foo". */
   const setQuery = (value: string) => {
     history.current.pos = -1;
-    const c = parseCommand(value);
+    const c = custom ? null : parseCommand(value);
     if (c?.kind === "run") selectSearchEverywhereTab(c.tab, { query: c.rest });
     else useSearchEverywhere.setState({ query: value });
   };
@@ -296,11 +353,14 @@ function SearchEverywhereDialog() {
         return;
       }
       case "file":
+        if (row.folder) return closeThen(() => void executeAction("navigate.selectInProjectView", row.path));
+        return closeThen(() => void openResult(row, { side }));
       case "symbol":
       case "text":
         return closeThen(() => void openResult(row, { side }));
       case "action":
         if (!row.enabled) return;
+        if (row.run) return closeThen(() => void row.run!(ctx));
         pushRecentAction(row.id);
         if (getAction(row.id)?.toggled) {
           void executeActionFrom("search", row.id).then(() => bumpToggles());
@@ -309,9 +369,6 @@ function SearchEverywhereDialog() {
         return closeThen(() => void executeActionFrom("search", row.id));
       case "setting":
         return closeThen(() => void executeAction("file.settings", row.pageId));
-      case "provided":
-        if (isNavigationRow(row)) return closeThen(() => void openResult(row, { side }));
-        return closeThen(() => void row.open?.());
     }
   };
 
@@ -348,44 +405,29 @@ function SearchEverywhereDialog() {
   const openIntentions = () => {
     const row = activeRow;
     if (!row || row.kind === "section" || row.kind === "more" || row.kind === "command") return;
-    if (row.kind === "action") return assignShortcut(row.id);
+    if (row.kind === "action") return row.run ? undefined : assignShortcut(row.id);
     const anchor = listRef.current?.querySelector('[data-lead="true"]') ?? inputRef.current;
     if (!anchor) return;
-    const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
+    const copy = (text: string) => void writeClipboardText(text).catch(() => {});
     const items: MenuItem[] =
       row.kind === "setting"
         ? [{ label: "Open Settings Page", run: () => activate(row) }]
-        : row.kind === "provided"
-          ? [
-              { label: "Open", run: () => activate(row) },
-              ...(row.path
-                ? [
-                    {
-                      label: "Open to the Side",
-                      shortcut: formatBinding("Shift+Enter"),
-                      run: () => activate(row, true),
-                    },
-                    { kind: "separator" as const },
-                    { label: "Copy Path", run: () => copy(row.path!) },
-                  ]
-                : []),
-            ]
-          : [
-              { label: "Open", run: () => activate(row) },
-              { label: "Open to the Side", shortcut: formatBinding("Shift+Enter"), run: () => activate(row, true) },
-              { kind: "separator" },
-              { label: "Copy Path", run: () => copy(row.path) },
-              { label: "Copy Path from Project Root", run: () => copy(row.rel) },
-              ...(row.kind === "symbol" ? [{ label: "Copy Name", run: () => copy(row.name) }] : []),
-              ...(row.kind === "file" || row.kind === "text"
-                ? [
-                    {
-                      label: "Find in Directory…",
-                      run: () => closeThen(() => void executeAction("find.inPath", { directory: dirOf(row.path) })),
-                    },
-                  ]
-                : []),
-            ];
+        : [
+            { label: "Open", run: () => activate(row) },
+            { label: "Open to the Side", shortcut: formatBinding("Shift+Enter"), run: () => activate(row, true) },
+            { kind: "separator" },
+            { label: "Copy Path", run: () => copy(row.path) },
+            { label: "Copy Path from Project Root", run: () => copy(row.rel) },
+            ...(row.kind === "symbol" ? [{ label: "Copy Name", run: () => copy(row.name) }] : []),
+            ...(row.kind === "file" || row.kind === "text"
+              ? [
+                  {
+                    label: "Find in Directory…",
+                    run: () => closeThen(() => void executeAction("find.inPath", { directory: dirOf(row.path) })),
+                  },
+                ]
+              : []),
+          ];
     setMenu({ anchor, items, placement: "right-start" });
   };
 
@@ -401,7 +443,7 @@ function SearchEverywhereDialog() {
       e.preventDefault();
       if (e.altKey) openIntentions();
       else if (hasPrimaryModifier(e) && tab === "text")
-        closeThen(() => void executeAction("find.inPath", { query: parsed.text }));
+        closeThen(() => void executeAction("find.inPath", { query: searchQuery.trim() }));
       else if (listing) activate(activeRow);
       else if (!settled && !sel.moved) pendingEnter.current = { side: e.shiftKey };
       else activateSelection(e.shiftKey);
@@ -431,16 +473,17 @@ function SearchEverywhereDialog() {
     select(next, e);
   };
 
-  const maxList = preview ? MAX_LIST_PREVIEW : MAX_LIST;
   // While a query is typed the list keeps a minimum height so the popup doesn't jump with every keystroke.
-  const minList = parsed.text.trim() && !listing ? MIN_LIST : 0;
-  const listHeight = Math.min(maxList, Math.max(minList, rows.length * ROW));
+  const minList = parsed.text.trim() && !listing ? MIN_LIST_ROWS * rowHeight : 0;
+  const listHeight = Math.max(minList, rows.length * rowHeight);
   const previewTarget = previewOf(activeRow);
   const emptyQuery = !parsed.text.trim();
   const showEmpty = !rows.length && snap && !snap.loading && (!emptyQuery || tab !== "all");
   // Nothing in the project: retry everywhere (IDEA), unless the user picked the scope.
   const nothingInProject =
+    !custom &&
     !!showEmpty &&
+    tab !== "actions" &&
     !emptyQuery &&
     !listing &&
     !includeNonProject &&
@@ -450,25 +493,77 @@ function SearchEverywhereDialog() {
   useEffect(() => {
     if (nothingInProject) widenSearchEverywhere(searchQuery);
   }, [nothingInProject, searchQuery]);
-  const canSplit = !!activeRow && isNavigationRow(activeRow);
+  const canSplit =
+    (activeRow?.kind === "file" && !activeRow.folder) || activeRow?.kind === "symbol" || activeRow?.kind === "text";
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     e.preventDefault();
     cycleTab(e.key === "ArrowRight" ? 1 : -1);
   };
 
+  const results = (
+    <div
+      ref={listRef}
+      className={styles.results}
+      style={{ height: rows.length && !preview ? listHeight + 8 : undefined }}
+    >
+      {rows.length > 0 && (
+        <List<SeRow>
+          id="se-results"
+          items={rows}
+          getKey={(r) => r.key}
+          isSection={isSectionRow}
+          renderSection={(r) => (
+            <span className={styles.section}>
+              {r.kind === "section" ? isCustomTab(r.section) ? r.title : <T>{r.title}</T> : ""}
+            </span>
+          )}
+          activeIndex={active}
+          onSelect={select}
+          isSelected={(r) => !!sel.keys?.has(r.key)}
+          onActivate={(r, _i, e) => activate(r, (e as MouseEvent).shiftKey)}
+          focusable={false}
+          rowHeight={rowHeight}
+          sectionHeight={rowHeight}
+          className={styles.list}
+          aria-label={tx("Results")}
+          renderItem={(r, state) => (
+            <ResultRow
+              row={r}
+              active={state.active}
+              repeat={sameFile(rows[state.index - 1], r)}
+              toggleTick={toggleTick}
+              onToggled={bumpToggles}
+            />
+          )}
+        />
+      )}
+      {showEmpty && (
+        <div className={styles.empty}>
+          {tx(
+            emptyQuery
+              ? "Type to search"
+              : custom || includeNonProject || tab === "actions"
+                ? "Nothing found"
+                : "Nothing found in project files",
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <Dialog
       open
       onClose={close}
-      width={760}
+      width={700}
       position="top"
       transparentBackdrop
       aria-label={tx("Search Everywhere")}
       className={styles.dialog}
     >
       <div className={styles.header} data-dialog-drag="">
-        <div role="tablist" aria-label={tx("Search scope")} className={styles.tabs} onKeyDown={onTabKey}>
+        <div ref={tabsRef} role="tablist" aria-label={tx("Search scope")} className={styles.tabs} onKeyDown={onTabKey}>
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -480,65 +575,69 @@ function SearchEverywhereDialog() {
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setTab(t.id)}
             >
-              <T>{t.label}</T>
+              {isCustomTab(t.id) ? t.label : <T>{t.label}</T>}
             </button>
           ))}
         </div>
-        {tab === "all" || tab === "actions" ? (
-          <Checkbox
-            className={styles.include}
-            checked={includeNonProject}
-            onChange={(v) => {
-              setIncludeNonProject(v);
-              inputRef.current?.focus();
-            }}
-            label={tab === "actions" ? "Include disabled actions" : "Include non-project items"}
-          />
-        ) : (
-          // IDEA's scope chooser of the Classes / Files / Symbols / Text tabs.
-          <Select<SeScope>
-            variant="ghost"
-            className={clsx(styles.include, styles.scope)}
-            value={includeNonProject ? "allPlaces" : fileSet}
-            options={SE_SCOPES}
-            onChange={(v) => {
-              if (v === "allPlaces") setIncludeNonProject(true);
-              else setIncludeNonProject(false, { fileSet: v });
-              inputRef.current?.focus();
-            }}
-            aria-label="Search scope"
-          />
-        )}
-        <IconButton
-          icon="list"
-          size="small"
-          className={styles.headerButton}
-          title={tx("Preview")}
-          pressed={preview}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setSearchEverywherePreview(!preview)}
-        />
-        {isFilterTab(tab) && (
+        <div className={styles.tools}>
+          {tab === "all" || tab === "actions" ? (
+            <Checkbox
+              className={styles.include}
+              checked={includeNonProject}
+              onChange={(v) => {
+                setIncludeNonProject(v);
+                inputRef.current?.focus();
+              }}
+              label={tab === "actions" ? "Include disabled actions" : "Include non-project items"}
+            />
+          ) : (
+            !custom && (
+              // IDEA's scope chooser of the Classes / Files / Symbols / Text tabs.
+              <Select<SeScope>
+                variant="ghost"
+                className={clsx(styles.include, styles.scope)}
+                value={includeNonProject ? "allPlaces" : fileSet}
+                options={SE_SCOPES}
+                onChange={(v) => {
+                  if (v === "allPlaces") setIncludeNonProject(true);
+                  else setIncludeNonProject(false, { fileSet: v });
+                  inputRef.current?.focus();
+                }}
+                aria-label="Search scope"
+              />
+            )
+          )}
           <IconButton
-            icon="filter"
+            icon="list"
             size="small"
             className={styles.headerButton}
-            title={tx("Filter")}
-            pressed={filterActive(filters, tab)}
-            aria-haspopup="dialog"
-            aria-expanded={!!filterAnchor}
+            title={tx("Preview")}
+            pressed={preview}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={(e) => setFilterAnchor(filterAnchor ? null : e.currentTarget)}
+            onClick={() => setSearchEverywherePreview(!preview)}
           />
-        )}
-        <IconButton
-          icon="open-in-tool-window"
-          size="small"
-          className={styles.headerButton}
-          title={tx("Open in Find Tool Window")}
-          shortcut={tab === "text" ? formatBinding(hostBinding("Meta+Enter")) : undefined}
-          onClick={() => closeThen(() => void executeAction("find.inPath", { query: parsed.text }))}
-        />
+          {isFilterTab(tab) && (
+            <IconButton
+              icon="filter"
+              size="small"
+              className={styles.headerButton}
+              title={tx("Filter")}
+              pressed={filterActive(filters, tab)}
+              aria-haspopup="dialog"
+              aria-expanded={!!filterAnchor}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => setFilterAnchor(filterAnchor ? null : e.currentTarget)}
+            />
+          )}
+          <IconButton
+            icon="open-in-tool-window"
+            size="small"
+            className={styles.headerButton}
+            title={tx("Open in Find Tool Window")}
+            shortcut={tab === "text" ? formatBinding(hostBinding("Meta+Enter")) : undefined}
+            onClick={() => closeThen(() => void executeAction("find.inPath", { query: searchQuery.trim() }))}
+          />
+        </div>
       </div>
       <div className={styles.queryRow}>
         <div className={styles.field}>
@@ -567,6 +666,7 @@ function SearchEverywhereDialog() {
             aria-expanded
             aria-controls="se-results"
             aria-autocomplete="list"
+            aria-activedescendant={active >= 0 ? `se-results-${active}` : undefined}
             aria-label={tx("Search query")}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
@@ -579,60 +679,33 @@ function SearchEverywhereDialog() {
           )}
         </div>
       </div>
-      {(rows.length > 0 || showEmpty) && (
-        <div
-          ref={listRef}
-          id="se-results"
-          className={styles.results}
-          style={{ height: rows.length ? listHeight + 8 : undefined }}
-        >
-          {rows.length > 0 && (
-            <List<SeRow>
-              items={rows}
-              getKey={(r) => r.key}
-              isSection={isSectionRow}
-              renderSection={(r) => (
-                <span className={styles.section}>{r.kind === "section" ? <T>{r.title}</T> : ""}</span>
-              )}
-              activeIndex={active}
-              onSelect={select}
-              isSelected={(r) => !!sel.keys?.has(r.key)}
-              onActivate={(r, _i, e) => activate(r, (e as MouseEvent).shiftKey)}
-              focusable={false}
-              rowHeight={ROW}
-              sectionHeight={ROW}
-              className={styles.list}
-              aria-label={tx("Results")}
-              renderItem={(r, state) => (
-                <ResultRow
-                  row={r}
-                  active={state.active}
-                  repeat={sameFile(rows[state.index - 1], r)}
-                  toggleTick={toggleTick}
-                  onToggled={bumpToggles}
-                />
-              )}
+      <div className={clsx(styles.content, preview && rows.length > 0 && styles.withPreview)}>
+        {preview && rows.length > 0 ? (
+          <SplitGroup
+            orientation="vertical"
+            storageKey="openidea.search.everywhere.layout"
+            defaultLayout={{ results: 33, preview: 67 }}
+          >
+            <SplitPanel id="results" minSize="20%">
+              {results}
+            </SplitPanel>
+            <SplitHandle
+              aria-label={tx("Preview")}
+              onPointerDown={() => inputRef.current?.focus({ preventScroll: true })}
             />
-          )}
-          {showEmpty && (
-            <div className={styles.empty}>
-              {tx(
-                emptyQuery ? "Type to search" : includeNonProject ? "Nothing found" : "Nothing found in project files",
-              )}
-            </div>
-          )}
-        </div>
-      )}
-      {!rows.length && !showEmpty && <div id="se-results" ref={listRef} hidden />}
-      {preview && rows.length > 0 && (
-        <div className={styles.preview}>
-          <CodePreview
-            path={previewTarget?.path ?? null}
-            line={previewTarget?.line ?? 0}
-            highlights={previewTarget?.highlights ?? []}
-          />
-        </div>
-      )}
+            <SplitPanel id="preview" minSize="20%" className={styles.preview}>
+              <CodePreview
+                path={previewTarget?.path ?? null}
+                line={previewTarget?.line ?? 0}
+                highlights={previewTarget?.highlights ?? []}
+              />
+            </SplitPanel>
+          </SplitGroup>
+        ) : rows.length > 0 || showEmpty ? (
+          results
+        ) : null}
+        {!rows.length && <div id="se-results" hidden />}
+      </div>
       {rows.length > 0 && (
         <footer className={styles.footer}>
           <span className={styles.footerInfo}>{describe(activeRow)}</span>
@@ -676,6 +749,7 @@ function describe(row: SeRow | undefined): string {
     case "command":
       return "";
     case "action": {
+      if (isCustomTab(row.section)) return row.description ?? row.title;
       const a = getAction(row.id);
       const text = a?.description ?? (row.category ? `${row.category} | ${row.title}` : row.title);
       return `${text}  ·  ${translate`${formatBinding("Alt+Enter")} to assign a shortcut`}`;
@@ -687,15 +761,13 @@ function describe(row: SeRow | undefined): string {
     case "symbol":
     case "text":
       return `${row.rel}:${row.line + 1}`;
-    case "provided":
-      return row.detail ?? row.location ?? "";
   }
 }
 
 function previewOf(row: SeRow | undefined): { path: string; line: number; highlights: PreviewHighlight[] } | null {
   switch (row?.kind) {
     case "file":
-      return { path: row.path, line: row.line ?? 0, highlights: [] };
+      return row.folder ? null : { path: row.path, line: row.line ?? 0, highlights: [] };
     case "symbol":
       return {
         path: row.path,
@@ -704,8 +776,6 @@ function previewOf(row: SeRow | undefined): { path: string; line: number; highli
       };
     case "text":
       return { path: row.path, line: row.line, highlights: [{ line: row.line, ranges: [[row.col, row.endCol]] }] };
-    case "provided":
-      return row.path ? { path: row.path, line: row.line ?? 0, highlights: [] } : null;
     default:
       return null;
   }
@@ -765,11 +835,21 @@ function ResultRow({
     case "more":
       return (
         <span className={clsx(styles.name, styles.more)}>
-          … {tx("more")} {tx(sectionTitle(row.section)).toLowerCase()}
+          … {tx("more")}{" "}
+          {isCustomTab(row.section) ? sectionTitle(row.section) : tx(sectionTitle(row.section)).toLowerCase()}
         </span>
       );
     case "file":
-      return <FileRow path={row.path} name={row.name} dir={row.dir} indices={row.nameIndices} line={row.line} />;
+      return (
+        <FileRow
+          path={row.path}
+          name={row.name}
+          dir={row.dir}
+          indices={row.nameIndices}
+          line={row.line}
+          folder={row.folder}
+        />
+      );
     case "symbol":
       return (
         <>
@@ -784,8 +864,8 @@ function ResultRow({
         </>
       );
     case "action": {
-      const shortcut = shortcutLabel(row.id);
-      const toggled = actionToggled(getAction(row.id));
+      const shortcut = row.run ? "" : shortcutLabel(row.id);
+      const toggled = row.run ? undefined : actionToggled(getAction(row.id));
       return (
         <span
           className={clsx(styles.actionRow, !row.enabled && styles.disabled)}
@@ -794,7 +874,7 @@ function ResultRow({
           <span className={styles.icon}>{row.icon ? <Icon name={row.icon} size={16} /> : null}</span>
           <span className={styles.main}>
             <HighlightedText className={styles.name} text={row.title} indices={row.indices} tone={tone} />
-            {shortcut && <span className={clsx(styles.location, styles.shortcut)}>{shortcut}</span>}
+            {shortcut && <span className={styles.shortcut}>{shortcut}</span>}
           </span>
           {toggled !== undefined ? (
             <span
@@ -846,17 +926,6 @@ function ResultRow({
           <span className={clsx(styles.right, active && styles.rightActive)}>
             <span className={clsx(repeat && !active && styles.repeat)}>{basename(row.rel)}</span> {row.line + 1}
           </span>
-        </>
-      );
-    case "provided":
-      return (
-        <>
-          <span className={styles.icon}>{row.icon ? <Icon name={row.icon} size={16} /> : null}</span>
-          <span className={styles.main}>
-            <HighlightedText className={styles.name} text={row.title} indices={row.indices} tone={tone} />
-            {row.detail && <span className={styles.location}>{row.detail}</span>}
-          </span>
-          {row.location && <span className={styles.right}>{row.location}</span>}
         </>
       );
   }
@@ -911,18 +980,20 @@ function FileRow({
   dir,
   indices,
   line,
+  folder,
 }: {
   path: string;
   name: string;
   dir: string;
   indices: number[];
   line: number | null;
+  folder?: boolean;
 }) {
   const deco = useFileDecoration(path);
   const { icon } = useFilePresentation(path);
   return (
     <>
-      <Icon name={icon} size={16} className={styles.icon} />
+      <Icon name={folder ? "folder" : icon} size={16} className={styles.icon} />
       <span className={styles.main}>
         <span className={styles.name} style={deco.color ? { color: deco.color } : undefined}>
           <HighlightedText text={name} indices={indices} tone="strong" />
@@ -934,15 +1005,12 @@ function FileRow({
   );
 }
 
-type NavigationRow =
-  | Extract<SeRow, { kind: "file" | "symbol" | "text" }>
-  | (Extract<SeRow, { kind: "provided" }> & { path: string });
+type NavigationRow = Extract<SeRow, { kind: "file" | "symbol" | "text" }>;
+/** A row that opens in an editor (a directory selects in the Project view instead). */
 function isNavigationRow(row: SeRow): row is NavigationRow {
-  return row.kind === "file" || row.kind === "symbol" || row.kind === "text" || (row.kind === "provided" && !!row.path);
+  return (row.kind === "file" && !row.folder) || row.kind === "symbol" || row.kind === "text";
 }
 function openResult(row: NavigationRow, options: Parameters<typeof openLocation>[2]): Promise<void> {
-  if (row.kind === "provided")
-    return openLocation(row.path, row.line !== undefined ? { line: row.line, col: row.col ?? 0 } : null, options);
   if (row.kind === "file")
     return openLocation(row.path, row.line !== null ? { line: row.line, col: row.col ?? 0 } : null, options);
   return openLocation(

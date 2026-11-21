@@ -2,17 +2,18 @@
 //!
 //! Two strategies: the platform's native recursive watch (FSEvents on macOS,
 //! ReadDirectoryChangesW on Windows), or one non-recursive watch per directory
-//! that skips excluded / git-ignored directories (Linux, where a recursive
-//! inotify watch would register every directory of `node_modules` and
-//! `target` and exhaust `max_user_watches`).
+//! that skips explicitly excluded directories (Linux, where a recursive
+//! inotify watch would register every excluded dependency/build directory and
+//! exhaust `max_user_watches`). Ignored directories remain watched for filenames.
 //!
-//! When the OS watcher cannot start (inotify limits used up, a file system
-//! without change notifications), the same directories are polled instead.
+//! When the OS watcher cannot start or runs out of watches (inotify limits
+//! used up, a file system without change notifications), the same directories
+//! are polled instead.
 
 use crate::FsBatch;
 use crate::rules::{ExcludeMatcher, GitignoreStack};
 use ide_core::{IdeError, IdeEvent, IdeResult, SharedSink};
-use notify::event::{ModifyKind, RenameMode};
+use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind, RenameMode};
 use notify::{ErrorKind, Event, EventKind, PollWatcher, RecommendedWatcher, RecursiveMode, WatcherKind};
 use parking_lot::{Condvar, Mutex, RwLock};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -36,8 +37,8 @@ const SYNC_WATCH_BUDGET: usize = 256;
 pub enum WatchMode {
     /// One recursive watch on the root.
     Recursive,
-    /// One non-recursive watch per directory, skipping excluded and ignored
-    /// directories; new directories are picked up as they appear.
+    /// One non-recursive watch per directory, skipping explicit exclusions;
+    /// new directories are picked up as they appear.
     PerDirectory,
     /// The root's own entries only (loose files edited outside a project).
     Flat,
@@ -89,11 +90,16 @@ impl Watcher {
             // VCS-metadata-only batches (`batch.vcs`) carry no worktree paths:
             // consumers that refresh on any `fsChanged` would reschedule purely
             // from the backend's own `.git/index` write.
-            if !(batch.created.is_empty() && batch.modified.is_empty() && batch.removed.is_empty()) {
+            if !(batch.created.is_empty()
+                && batch.modified.is_empty()
+                && batch.removed.is_empty()
+                && batch.ignore_rules.is_empty())
+            {
                 sink.emit(IdeEvent::FsChanged {
                     created: batch.created.iter().map(Into::into).collect(),
                     modified: batch.modified.iter().map(Into::into).collect(),
                     removed: batch.removed.iter().map(Into::into).collect(),
+                    ignore_rules: batch.ignore_rules.iter().map(Into::into).collect(),
                 });
             }
             if !batch.excluded_dirs.is_empty() {
@@ -117,9 +123,9 @@ impl Watcher {
         self.polling.as_deref()
     }
 
-    /// A watch failure past startup (the OS watch limit ran out mid-tree):
-    /// directories past the limit never sync (issue #1915). `None` while every
-    /// directory has a live watch.
+    /// A watch failure past startup (the OS watch limit ran out mid-tree): the
+    /// whole tree is polled from then on, as directories past the limit would
+    /// never sync (issue #1915). `None` while every directory has a live watch.
     pub fn unwatched_reason(&self) -> Option<String> {
         self.inner.state.exhausted.lock().clone()
     }
@@ -172,22 +178,8 @@ impl Watcher {
             stop: AtomicBool::new(false),
             exhausted: Mutex::new(None),
         });
-        let weak: Weak<DirState> = Arc::downgrade(&state);
-        let watcher = W::new(
-            move |event: notify::Result<notify::Event>| {
-                let Some(state) = weak.upgrade() else { return };
-                match event {
-                    Ok(event) if polled && is_dir_touch(&event) => {}
-                    Ok(event) => {
-                        state.queue.lock().push((event, Instant::now()));
-                        state.wake.notify_one();
-                    }
-                    Err(e) => tracing::warn!("file watcher: {e}"),
-                }
-            },
-            config,
-        )
-        .map_err(|e| watcher_error("cannot start file watcher", e))?;
+        let watcher = W::new(event_handler(Arc::downgrade(&state), polled), config)
+            .map_err(|e| watcher_error("cannot start file watcher", e))?;
         *state.watcher.lock() = Some(Box::new(watcher));
         let deferred = if mode == WatchMode::PerDirectory {
             state.watch_tree_bounded(root, SYNC_WATCH_BUDGET)
@@ -195,6 +187,11 @@ impl Watcher {
             state.add_watch(root);
             Vec::new()
         };
+        // A partly watched tree would never report changes in the rest of it:
+        // the caller polls instead. A poller has nothing to fall back to.
+        if !polled && let Some(reason) = state.exhausted.lock().clone() {
+            return Err(io_error(reason));
+        }
         if state.watched.lock().is_empty() {
             return Err(io_error(format!("cannot watch {}", root.display())));
         }
@@ -202,7 +199,7 @@ impl Watcher {
             let state = state.clone();
             std::thread::Builder::new()
                 .name("openidea-fs-watch".into())
-                .spawn(move || state.run(deferred, &*emit))
+                .spawn(move || state.run(deferred, polled, &*emit))
                 .map_err(|e| io_error(format!("cannot start file watcher: {e}")))?
         };
         Ok(Inner { state, thread: Some(thread) })
@@ -225,12 +222,129 @@ impl Drop for Inner {
     }
 }
 
+// Reads include our own ignore-rule loads and directory scans, so must never
+// schedule another reload or resync. Writes are reported as Modify events.
+fn is_change_event(event: &Event) -> bool {
+    !matches!(event.kind, EventKind::Access(_))
+}
+
 fn io_error(msg: String) -> IdeError {
     IdeError::new(ide_core::error::ErrorKind::Io, msg)
 }
 
-/// A directory's own mtime moving as entries come and go: polling sees it, the
-/// OS watchers report only the entries (also seen, through that directory's watch).
+fn event_handler(state: Weak<DirState>, polled: bool) -> impl FnMut(notify::Result<Event>) + Send + 'static {
+    move |event| {
+        let Some(state) = state.upgrade() else { return };
+        match event {
+            Ok(event) if !is_change_event(&event) => {}
+            Ok(event) if polled && is_dir_touch(&event) => {}
+            Ok(event) => state.enqueue(event),
+            Err(e) => tracing::warn!("file watcher: {e}"),
+        }
+    }
+}
+
+/// One queued change for a path. A rename without a peer stays a rename so the batch
+/// resolves its existence after the quiet window, as it always did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PathChange {
+    Change(Change),
+    Rename,
+}
+
+/// The per-path result of one raw event, in arrival order. `merge` in the batch is
+/// order-sensitive (create+remove ≠ remove+create), so a path keeps its sequence of
+/// distinct changes, with repetitions collapsed. A storm repeating the same change
+/// still leaves one entry per path; the order of real transitions is preserved.
+#[derive(Default)]
+struct QueuedChanges {
+    paths: BTreeMap<PathBuf, Vec<PathChange>>,
+}
+
+impl QueuedChanges {
+    fn push(&mut self, path: PathBuf, change: PathChange) {
+        let changes = self.paths.entry(path).or_default();
+        if changes.last() != Some(&change) {
+            changes.push(change);
+        }
+    }
+}
+
+/// The per-path changes one raw event contributes, classified exactly as `batch_detailed`
+/// classifies it. A rename with both paths keeps from/removal and to/creation apart; one
+/// without a peer is left for the batch to resolve by the path's existence.
+fn queue_changes(filter: &EventFilter, event: &Event, out: &mut QueuedChanges) {
+    // `classify` drops `.git/info/exclude` as VCS noise (the index handles it), but
+    // `batch_detailed` needs the event to reload repo-level ignore rules. Keep it queued;
+    // classification at batch time still drops it from the reported paths.
+    let mut classify = |path: &Path, change: Change| {
+        if path.ends_with(".git/info/exclude") {
+            out.push(path.to_path_buf(), PathChange::Change(change));
+        } else {
+            // `classify` applies the VCS/atomic-temp filters and merges; we only need to
+            // know the resulting single change for this one event at this path.
+            let mut one = BTreeMap::new();
+            filter.classify(path, change, &mut one);
+            for (_, merged) in one {
+                out.push(path.to_path_buf(), PathChange::Change(merged));
+            }
+        }
+    };
+    // A rename without a peer keeps the same resolution the batch applies to its
+    // `Modify(Name(_))` arm (created if the path exists, removed otherwise).
+    let renamed = |path: &Path| {
+        if path.symlink_metadata().is_ok() { Change::Created } else { Change::Removed }
+    };
+    match event.kind {
+        EventKind::Create(_) => {
+            for path in &event.paths {
+                classify(path, Change::Created);
+            }
+        }
+        EventKind::Remove(_) => {
+            for path in &event.paths {
+                classify(path, Change::Removed);
+            }
+        }
+        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
+            if let [from, to] = event.paths.as_slice() {
+                classify(from, Change::Removed);
+                classify(to, Change::Created);
+            } else {
+                // Some backends emit a `Both` rename with a missing endpoint.
+                for path in &event.paths {
+                    classify(path, renamed(path));
+                }
+            }
+        }
+        EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+            for path in &event.paths {
+                classify(path, Change::Removed);
+            }
+        }
+        EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
+            for path in &event.paths {
+                classify(path, Change::Created);
+            }
+        }
+        EventKind::Modify(ModifyKind::Name(_)) => {
+            // Defer resolution: the batch checks existence after the quiet window, so a
+            // file created and removed within one window is not reported as created.
+            for path in &event.paths {
+                out.push(path.clone(), PathChange::Rename);
+            }
+        }
+        EventKind::Modify(_) | EventKind::Any | EventKind::Other => {
+            for path in &event.paths {
+                classify(path, Change::Modified);
+            }
+        }
+        EventKind::Access(_) => {}
+    }
+}
+
+/// A directory's own mtime moving as entries come and go. Polling also reports
+/// each changed entry through that directory's watch.
 fn is_dir_touch(event: &notify::Event) -> bool {
     matches!(event.kind, EventKind::Modify(_)) && event.paths.iter().all(|p| p.is_dir())
 }
@@ -262,18 +376,89 @@ fn watcher_error(what: &str, error: notify::Error) -> IdeError {
     }
 }
 
+/// Events waiting for the debounce window, coalesced by path: each path keeps its distinct
+/// changes in arrival order, so a storm repeating one change collapses to a single entry
+/// while the batch still sees the exact sequence it would have received. Memory is bounded
+/// by the number of paths and real transitions touched in the window, not by raw events.
+#[derive(Default)]
+struct PendingEvents {
+    changes: BTreeMap<PathBuf, Vec<PathChange>>,
+    first: Option<Instant>,
+    last: Option<Instant>,
+    received: usize,
+}
+
+impl PendingEvents {
+    fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
+
+    fn add(&mut self, changes: QueuedChanges, now: Instant) {
+        self.first.get_or_insert(now);
+        self.last = Some(now);
+        self.received += 1;
+        for (path, kinds) in changes.paths {
+            let queued = self.changes.entry(path).or_default();
+            for kind in kinds {
+                if queued.last() != Some(&kind) {
+                    queued.push(kind);
+                }
+            }
+        }
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        Some((self.last? + DEBOUNCE).min(self.first? + MAX_DELAY))
+    }
+
+    /// Rebuild the events for `batch_detailed`, in the order each path received them.
+    /// `merge` is order-sensitive, so this preserves the exact transition sequence with
+    /// repetitions removed. A rename is emitted as `Modify(Name(Any))` so its existence
+    /// check stays in the batch, and a transient path stays a create+remove pair.
+    fn into_events(self) -> Vec<Event> {
+        self.changes
+            .into_iter()
+            .flat_map(|(path, changes)| {
+                changes
+                    .into_iter()
+                    .flat_map(|kind| {
+                        let event = match kind {
+                            PathChange::Rename => Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Any))),
+                            PathChange::Change(Change::Created) => Event::new(EventKind::Create(CreateKind::File)),
+                            PathChange::Change(Change::Removed) => Event::new(EventKind::Remove(RemoveKind::File)),
+                            PathChange::Change(Change::Modified) => {
+                                Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)))
+                            }
+                            // Any kind classifies a VCS path as `Vcs` again, except a modified
+                            // directory, which the batch drops as a lock-file touch.
+                            PathChange::Change(Change::Vcs) => Event::new(EventKind::Create(CreateKind::Any)),
+                            PathChange::Change(Change::Transient) => {
+                                return vec![
+                                    Event::new(EventKind::Create(CreateKind::File)).add_path(path.clone()),
+                                    Event::new(EventKind::Remove(RemoveKind::File)).add_path(path.clone()),
+                                ];
+                            }
+                        };
+                        vec![event.add_path(path.clone())]
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+}
+
 /// Shared with the notify callback (weakly) and the debounce thread.
 struct DirState {
     filter: EventFilter,
     mode: WatchMode,
     watcher: Mutex<Option<Box<dyn notify::Watcher + Send>>>,
     watched: Mutex<HashSet<PathBuf>>,
-    queue: Mutex<Vec<(notify::Event, Instant)>>,
+    queue: Mutex<PendingEvents>,
     wake: Condvar,
     stop: AtomicBool,
     /// Set when a `watch()` call reports the OS watch limit (inotify
-    /// `ENOSPC`/`EMFILE`): later directories are never seen, so the project is
-    /// silently stale past that point — surfaced via [`Watcher::unwatched_reason`].
+    /// `ENOSPC`/`EMFILE`): later directories are never seen, so the tree is
+    /// polled instead — surfaced via [`Watcher::unwatched_reason`].
     exhausted: Mutex<Option<String>>,
 }
 
@@ -282,11 +467,26 @@ impl DirState {
         self.stop.load(Ordering::SeqCst)
     }
 
+    /// Coalesces one raw event into the pending batch. Everything `batch_detailed` does to
+    /// a path (VCS metadata, atomic-save temps, `merge` of repeated changes) is applied here
+    /// through `classify`, so the batch gets the same final state per path it always did.
+    fn enqueue(&self, event: Event) {
+        let mut changes = QueuedChanges::default();
+        queue_changes(&self.filter, &event, &mut changes);
+        if changes.paths.is_empty() {
+            return;
+        }
+        self.queue.lock().add(changes, Instant::now());
+        self.wake.notify_one();
+    }
+
     /// Debounce loop: finishes any deferred startup watches, then waits for a
-    /// quiet period and processes each batch.
-    fn run(&self, deferred: Vec<(PathBuf, bool)>, emit: impl Fn(&FsBatch)) {
+    /// quiet period and processes each batch. `polled` is whether the watcher
+    /// already polls.
+    fn run(self: &Arc<Self>, deferred: Vec<(PathBuf, bool)>, mut polled: bool, emit: impl Fn(&FsBatch)) {
         if !deferred.is_empty() {
-            self.watch_stack(deferred, false, &mut Vec::new(), None);
+            self.watch_stack(deferred, false, &mut FsBatch::default(), None);
+            polled = polled || self.poll_if_exhausted(|| ());
         }
         loop {
             let events = {
@@ -297,37 +497,56 @@ impl DirState {
                 if self.stopped() {
                     return;
                 }
-                let first = q[0].1;
+
                 loop {
-                    let last = q.last().map_or(first, |e| e.1);
+                    let deadline = q.deadline().expect("nonempty event queue");
                     let now = Instant::now();
                     if self.stopped() {
                         return;
                     }
-                    if now >= last + DEBOUNCE || now >= first + MAX_DELAY {
+                    if now >= deadline {
                         break;
                     }
-                    let wait = (last + DEBOUNCE).min(first + MAX_DELAY) - now;
+                    let wait = deadline - now;
                     self.wake.wait_for(&mut q, wait);
                 }
                 std::mem::take(&mut *q)
             };
-            // A scan may publish a path before its create event is delivered:
-            // keep create + remove pairs so the consumer still sees the removal.
-            let events: Vec<Event> = events.into_iter().map(|(e, _)| e).collect();
+            let processing = Instant::now();
+            let queue_age_ms = processing.duration_since(events.first.expect("nonempty event queue")).as_millis();
+            let received = events.received;
+            // One event can contribute two path changes (a `Both` rename), so the queued
+            // count can exceed the raw event count; never let the log arithmetic underflow.
+            let queued = events.changes.values().map(Vec::len).sum::<usize>();
+            let coalesced = received.saturating_sub(queued);
+            let events = events.into_events();
             let (mut batch, rule_dirs) = self.filter.batch_detailed(&events);
             if self.mode == WatchMode::PerDirectory {
                 self.update_watches(&mut batch, &rule_dirs);
+                // Again once polling: a refused directory was not read, and
+                // the poller won't report what is already in it.
+                polled = polled || self.poll_if_exhausted(|| self.update_watches(&mut batch, &rule_dirs));
             }
+            let processing_ms = processing.elapsed().as_millis();
+            let callback = Instant::now();
             if !batch.is_empty() && !self.stopped() {
                 emit(&batch);
             }
+            tracing::debug!(
+                received,
+                queued,
+                coalesced,
+                queue_age_ms,
+                processing_ms,
+                callback_ms = callback.elapsed().as_millis(),
+                "file watcher batch"
+            );
         }
     }
 
     /// Follows directory creation / removal and ignore-rule changes.
     fn update_watches(&self, batch: &mut FsBatch, rule_dirs: &[PathBuf]) {
-        let mut discovered = Vec::new();
+        let mut discovered = FsBatch::default();
         for path in &batch.created {
             if path.symlink_metadata().is_ok_and(|m| m.is_dir()) {
                 self.watch_tree(path, true, &mut discovered);
@@ -337,6 +556,21 @@ impl DirState {
         for path in &batch.modified {
             if !self.watched.lock().contains(path) && path.symlink_metadata().is_ok_and(|m| m.is_dir()) {
                 self.watch_tree(path, true, &mut discovered);
+            }
+        }
+        // Ignored paths are index-only, but their directories still need watches
+        // and scans for files that arrived before registration.
+        for path in &batch.ignored {
+            match path.symlink_metadata() {
+                Ok(meta) if meta.is_dir() => {
+                    if !self.watched.lock().contains(path) {
+                        self.watch_tree(path, true, &mut discovered);
+                    }
+                }
+                Err(_) if self.watched.lock().contains(path) => {
+                    self.unwatch_tree(path);
+                }
+                _ => {}
             }
         }
         // VCS metadata directories (`.git`, `.git/worktrees/<name>`) need
@@ -355,12 +589,17 @@ impl DirState {
         for dir in rule_dirs {
             self.resync(dir);
         }
-        if !discovered.is_empty() {
+        if !discovered.created.is_empty() {
             let known: HashSet<&PathBuf> = batch.created.iter().chain(&batch.modified).collect();
-            let fresh: Vec<PathBuf> = discovered.into_iter().filter(|p| !known.contains(p)).collect();
+            let fresh = discovered.created.into_iter().filter(|p| !known.contains(p)).collect::<Vec<_>>();
             batch.created.extend(fresh);
             batch.created.sort();
             batch.created.dedup();
+        }
+        if !discovered.ignored.is_empty() {
+            batch.ignored.extend(discovered.ignored);
+            batch.ignored.sort();
+            batch.ignored.dedup();
         }
     }
 
@@ -392,6 +631,37 @@ impl DirState {
         }
     }
 
+    /// Once the OS refused a watch for its limit, the directories left without
+    /// one would never report changes: polls the whole tree instead, running
+    /// `rewatch` before the rest of the tree. Returns whether the limit was
+    /// hit, so the caller stops asking.
+    fn poll_if_exhausted(self: &Arc<Self>, rewatch: impl FnOnce()) -> bool {
+        let Some(reason) = self.exhausted.lock().clone() else { return false };
+        let config = notify::Config::default().with_poll_interval(POLL_INTERVAL);
+        let poller = match PollWatcher::new(event_handler(Arc::downgrade(self), true), config) {
+            Ok(poller) => poller,
+            Err(e) => {
+                tracing::warn!("{reason}; cannot poll for changes instead: {e}");
+                return true;
+            }
+        };
+        // The OS watcher keeps reporting until the poller has seen the whole
+        // tree: a change in between would be neither reported nor polled.
+        let _os_watcher = {
+            let mut watcher = self.watcher.lock();
+            // `None` once the watcher is being dropped.
+            if watcher.is_none() {
+                return true;
+            }
+            self.watched.lock().clear();
+            watcher.replace(Box::new(poller))
+        };
+        tracing::warn!("{reason}; polling {} for changes instead", self.filter.root.display());
+        rewatch();
+        self.watch_tree(&self.filter.root, false, &mut FsBatch::default());
+        true
+    }
+
     fn remove_watch(&self, dir: &Path) {
         if self.watched.lock().remove(dir)
             && let Some(w) = self.watcher.lock().as_mut()
@@ -404,21 +674,21 @@ impl DirState {
     /// Watches `dir` and every watchable directory below it. With `report`,
     /// files and directories found inside (created before the watch was in
     /// place) are appended to `found`.
-    fn watch_tree(&self, dir: &Path, report: bool, found: &mut Vec<PathBuf>) {
+    fn watch_tree(&self, dir: &Path, report: bool, found: &mut FsBatch) {
         self.watch_stack(vec![(dir.to_path_buf(), false)], report, found, None);
     }
 
     /// Watches up to `budget` directories synchronously and returns any
     /// remaining `(dir, parent_verified)` entries for background registration.
     fn watch_tree_bounded(&self, dir: &Path, budget: usize) -> Vec<(PathBuf, bool)> {
-        self.watch_stack(vec![(dir.to_path_buf(), false)], false, &mut Vec::new(), Some(budget))
+        self.watch_stack(vec![(dir.to_path_buf(), false)], false, &mut FsBatch::default(), Some(budget))
     }
 
     fn watch_stack(
         &self,
         mut stack: Vec<(PathBuf, bool)>,
         report: bool,
-        found: &mut Vec<PathBuf>,
+        found: &mut FsBatch,
         budget: Option<usize>,
     ) -> Vec<(PathBuf, bool)> {
         let mut watched_now = 0;
@@ -436,8 +706,8 @@ impl DirState {
             for entry in entries.flatten() {
                 let path = entry.path();
                 let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-                if report && self.filter.is_reported(&path, is_dir) {
-                    found.push(path.clone());
+                if report {
+                    self.filter.report_discovered(&path, is_dir, found);
                 }
                 if is_dir {
                     stack.push((path, true));
@@ -465,8 +735,7 @@ impl DirState {
                 self.unwatch_tree(&p);
             }
         }
-        let mut ignored = Vec::new();
-        self.watch_tree(dir, false, &mut ignored);
+        self.watch_tree(dir, false, &mut FsBatch::default());
     }
 }
 
@@ -547,9 +816,8 @@ impl EventFilter {
     }
 
     /// Whether a directory deserves its own watch in per-directory mode: not
-    /// excluded or git-ignored; inside `.git` the directory itself, `refs/`
-    /// and `worktrees/` (HEAD, index, refs and worktree metadata are what VCS
-    /// refresh needs).
+    /// explicitly excluded; inside `.git` only metadata needed by VCS and
+    /// repository-level ignore rules is watched.
     pub fn should_watch_dir(&self, dir: &Path) -> bool {
         self.should_watch_dir_inner(dir, false)
     }
@@ -575,26 +843,24 @@ impl EventFilter {
                 _ => false,
             };
         }
-        if parent_ok {
-            !self.excludes.read().is_match(rel) && !self.gitignore.is_ignored_self(dir, true)
-        } else {
-            !self.excludes.read().is_excluded(rel) && !self.gitignore.is_ignored(dir, true)
+        if parent_ok { !self.excludes.read().is_match(rel) } else { !self.excludes.read().is_excluded(rel) }
+    }
+
+    /// Files found before a new directory gained its watch need the same
+    /// index-only routing as ignored paths reported by the OS.
+    fn report_discovered(&self, path: &Path, is_dir: bool, found: &mut FsBatch) {
+        let Ok(rel) = path.strip_prefix(&self.root) else { return };
+        if Self::git_internal(rel).is_some()
+            || self.excludes.read().is_excluded(rel)
+            || crate::encoding::is_atomic_temp(path)
+        {
+            return;
         }
-    }
-
-    /// Whether a path found by scanning a new directory would be reported.
-    fn is_reported(&self, path: &Path, is_dir: bool) -> bool {
-        let Ok(rel) = path.strip_prefix(&self.root) else { return false };
-        Self::git_internal(rel).is_none()
-            && !self.excludes.read().is_excluded(rel)
-            && !self.gitignore.is_ignored(path, is_dir)
-    }
-
-    /// Whether a filtered-out file is ignored by a rule on the file itself, in a folder
-    /// that is neither excluded nor ignored.
-    fn is_ignored_file(&self, path: &Path, rel: &Path) -> bool {
-        !self.excludes.read().is_excluded(rel)
-            && path.parent().is_some_and(|dir| dir == self.root || !self.gitignore.is_ignored(dir, true))
+        if self.gitignore.is_ignored(path, is_dir) {
+            found.ignored.push(path.to_path_buf());
+        } else {
+            found.created.push(path.to_path_buf());
+        }
     }
 
     fn classify(&self, path: &Path, change: Change, out: &mut BTreeMap<PathBuf, Change>) {
@@ -604,6 +870,9 @@ impl EventFilter {
             Err(_) => None,
         };
         let change = match rel.and_then(Self::git_internal) {
+            // Windows also reports a directory modification when Git creates or removes a lock.
+            // The entries carry the actual changes, including edits to a linked worktree's gitfile.
+            Some(true) if change == Change::Modified && path.is_dir() => return,
             Some(true) => Change::Vcs,
             Some(false) => return,
             None if crate::encoding::is_atomic_temp(path) => return,
@@ -621,8 +890,9 @@ impl EventFilter {
     /// The coalesced, filtered batch plus the directories whose ignore rules
     /// changed (their cached matchers have been rebuilt already).
     pub fn batch_detailed(&self, events: &[Event]) -> (FsBatch, Vec<PathBuf>) {
+        let events = events.iter().filter(|event| is_change_event(event));
         let mut changes: BTreeMap<PathBuf, Change> = BTreeMap::new();
-        for ev in events {
+        for ev in events.clone() {
             let paths = &ev.paths;
             match ev.kind {
                 EventKind::Access(_) => {}
@@ -651,7 +921,10 @@ impl EventFilter {
         // Rebuild ignore rules first, so files in the same batch are filtered
         // by the new rules regardless of path order.
         let mut rule_dirs: BTreeSet<PathBuf> = BTreeSet::new();
-        for path in changes.keys() {
+        let rule_events = events
+            .clone()
+            .filter(|e| matches!(e.kind, EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)));
+        for path in rule_events.clone().flat_map(|e| &e.paths) {
             let name = path.file_name().and_then(|n| n.to_str());
             if matches!(name, Some(".gitignore" | ".ignore"))
                 && let Some(dir) = path.parent()
@@ -660,7 +933,7 @@ impl EventFilter {
                 rule_dirs.insert(dir.to_path_buf());
             }
         }
-        if events.iter().flat_map(|e| &e.paths).any(|p| p.ends_with(".git/info/exclude")) {
+        if rule_events.flat_map(|e| &e.paths).any(|p| p.ends_with(".git/info/exclude")) {
             self.gitignore.reload_repo_level();
             rule_dirs.insert(self.root.clone());
         }
@@ -692,6 +965,8 @@ impl EventFilter {
             };
             if let Ok(rel) = path.strip_prefix(&self.root) {
                 let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+                let excluded = self.excludes.read().is_excluded(rel);
+                let ignored = !excluded && self.gitignore.is_ignored(&path, is_dir || change == Change::Removed);
                 // Directories that match an exclude / gitignore rule themselves
                 // still report their own create / remove / modify — the tree
                 // needs to see `target/` or `node_modules/` appear (marked
@@ -702,16 +977,19 @@ impl EventFilter {
                 // itself — reporting one extra file removal is harmless.
                 let self_excluded = (is_dir || change == Change::Removed)
                     && (self.excludes.read().is_match(rel) || self.gitignore.is_ignored_self(&path, true));
-                if !self_excluded && (self.excludes.read().is_excluded(rel) || self.gitignore.is_ignored(&path, is_dir))
-                {
+                if !self_excluded && (excluded || ignored) {
                     // Only a file appearing or going changes what the folder lists.
                     if change != Change::Modified {
                         excluded_dirs.extend(path.parent().map(Path::to_path_buf));
                     }
-                    if !is_dir && self.is_ignored_file(&path, rel) {
+                    if ignored {
                         batch.ignored.push(path);
                     }
                     continue;
+                }
+                if ignored {
+                    // Also report the directory itself for subtree arrivals/removals.
+                    batch.ignored.push(path.clone());
                 }
             }
             match change {
@@ -721,17 +999,235 @@ impl EventFilter {
             }
         }
         batch.excluded_dirs = excluded_dirs.into_iter().collect();
-        (batch, rule_dirs.into_iter().collect())
+        batch.ignore_rules = rule_dirs.into_iter().collect();
+        let rule_dirs = batch.ignore_rules.clone();
+        (batch, rule_dirs)
     }
 }
 
 #[cfg(test)]
+#[path = "watch_pipeline_tests.rs"]
+mod pipeline_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use notify::event::{CreateKind, DataChange, MetadataKind, RemoveKind};
+    use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, MetadataKind, RemoveKind};
 
     fn ev(kind: EventKind, paths: Vec<PathBuf>) -> Event {
         Event { kind, paths, attrs: Default::default() }
+    }
+
+    fn push_event(pending: &mut PendingEvents, filter: &EventFilter, event: &Event) {
+        let mut changes = QueuedChanges::default();
+        queue_changes(filter, event, &mut changes);
+        pending.add(changes, Instant::now());
+    }
+
+    /// Evidence for the bounded queue (issue #3936): 100,000 notifications over 1,000
+    /// distinct paths, measured before (one raw event each) and after (one change per path).
+    /// `cargo test -p ide-vfs --release --lib -- --ignored --nocapture storm_coalescing_numbers`
+    #[test]
+    #[ignore = "prints queued entries for a storm; see issue #3936"]
+    fn storm_coalescing_numbers() {
+        let root = PathBuf::from("/proj");
+        let filter = EventFilter::new(root.clone(), &[]);
+        let mut pending = PendingEvents::default();
+        for i in 0..100_000 {
+            let event = ev(
+                EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+                vec![root.join(format!("src/{}.zig", i % 1_000))],
+            );
+            push_event(&mut pending, &filter, &event);
+        }
+        let queued = pending.changes.values().map(Vec::len).sum::<usize>();
+        // One entry per path: a repeat of the same change never grows the queue.
+        assert_eq!(queued, 1_000);
+        println!("100,000 raw events over 1,000 paths -> {queued} queued changes (lossless final states)");
+    }
+
+    #[test]
+    fn pending_modifications_keep_the_original_debounce_window() {
+        let start = Instant::now();
+        // ReadDirectoryChangesW reports ordinary Windows writes as Modify(Any).
+        let mut pending = PendingEvents::default();
+        assert_eq!(pending.deadline(), None);
+        for n in 0..10_000 {
+            let mut changes = QueuedChanges::default();
+            changes.push("file.rs".into(), PathChange::Change(Change::Modified));
+            pending.add(changes, start + Duration::from_micros(n * 95));
+        }
+        assert_eq!(pending.received, 10_000);
+        assert_eq!(pending.changes.len(), 1);
+        assert_eq!(pending.first, Some(start));
+        assert_eq!(pending.last, Some(start + Duration::from_micros(9_999 * 95)));
+        assert_eq!(pending.deadline(), Some(start + MAX_DELAY));
+        let drained = std::mem::take(&mut pending);
+        assert_eq!(drained.into_events().len(), 1);
+        assert!(pending.is_empty());
+        assert_eq!(pending.deadline(), None);
+        let mut changes = QueuedChanges::default();
+        changes.push("file.rs".into(), PathChange::Change(Change::Modified));
+        pending.add(changes, start + MAX_DELAY);
+        assert_eq!(pending.received, 1);
+        assert_eq!(pending.deadline(), Some(start + MAX_DELAY + DEBOUNCE));
+    }
+
+    #[test]
+    fn pending_coalesces_a_storm_into_one_change_per_path() {
+        let root = PathBuf::from("/proj");
+        let filter = EventFilter::new(root.clone(), &[]);
+        let mut pending = PendingEvents::default();
+        // create → modify → modify → remove resolves to the final state of the path;
+        // the event stream is lossless for every consumer that sees that final state.
+        for kind in [
+            EventKind::Create(CreateKind::File),
+            EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+        ] {
+            push_event(&mut pending, &filter, &ev(kind, vec![root.join("a.zig")]));
+        }
+        assert_eq!(
+            pending.changes[&root.join("a.zig")],
+            vec![PathChange::Change(Change::Created), PathChange::Change(Change::Modified)]
+        );
+        push_event(&mut pending, &filter, &ev(EventKind::Remove(RemoveKind::File), vec![root.join("a.zig")]));
+        assert_eq!(
+            pending.changes[&root.join("a.zig")],
+            vec![
+                PathChange::Change(Change::Created),
+                PathChange::Change(Change::Modified),
+                PathChange::Change(Change::Removed)
+            ]
+        );
+        push_event(&mut pending, &filter, &ev(EventKind::Create(CreateKind::File), vec![root.join("b.zig")]));
+        assert_eq!(pending.changes.len(), 2);
+        assert_eq!(pending.received, 5);
+    }
+
+    #[test]
+    fn pending_keeps_different_spellings_of_the_same_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "x").unwrap();
+        let paths = [root.join("src/a.rs"), root.join("src/./a.rs"), root.join("src//a.rs")];
+        assert_eq!(paths[0], paths[1]);
+        assert_ne!(paths[0].as_os_str(), paths[1].as_os_str());
+        let events: Vec<_> =
+            paths.into_iter().map(|path| Event::new(EventKind::Modify(ModifyKind::Any)).add_path(path)).collect();
+        let filter = EventFilter::new(root.clone(), &[]);
+        let mut pending = PendingEvents::default();
+        for event in &events {
+            let mut changes = QueuedChanges::default();
+            queue_changes(&filter, event, &mut changes);
+            pending.add(changes, Instant::now());
+        }
+        // Path equality merges the spellings; one final state is all any consumer can see.
+        assert_eq!(pending.changes.len(), 1);
+        assert_same_batch(&filter.batch(&events), &EventFilter::new(root, &[]).batch(&pending.into_events()));
+    }
+
+    fn assert_same_batch(left: &FsBatch, right: &FsBatch) {
+        assert_eq!(left.created, right.created);
+        assert_eq!(left.modified, right.modified);
+        assert_eq!(left.removed, right.removed);
+        assert_eq!(left.vcs, right.vcs);
+        assert_eq!(left.excluded_dirs, right.excluded_dirs);
+        assert_eq!(left.ignored, right.ignored);
+        assert_eq!(left.ignore_rules, right.ignore_rules);
+    }
+
+    #[test]
+    fn pending_compaction_matches_uncompressed_change_sequences() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::create_dir(root.join("excluded")).unwrap();
+        std::fs::write(root.join(".gitignore"), "*.ignored\n").unwrap();
+        let excludes = vec!["excluded".to_owned()];
+        let kinds = [
+            EventKind::Create(CreateKind::File),
+            EventKind::Remove(RemoveKind::File),
+            EventKind::Modify(ModifyKind::Any),
+            EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            EventKind::Modify(ModifyKind::Metadata(MetadataKind::WriteTime)),
+            EventKind::Modify(ModifyKind::Name(RenameMode::From)),
+            EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+            // The macOS FSEvents rename (no peer), and whole-event kinds the batch handles.
+            EventKind::Modify(ModifyKind::Name(RenameMode::Any)),
+            EventKind::Modify(ModifyKind::Name(RenameMode::Other)),
+            EventKind::Any,
+            EventKind::Other,
+            // A `Both` rename missing its second endpoint (some inotify backends).
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+        ];
+        // All three-event histories, with both present and absent final state.
+        for rel in ["source.rs", "file.ignored", "excluded/source.rs", ".git/HEAD"] {
+            let path = root.join(rel);
+            for exists in [false, true] {
+                if exists {
+                    std::fs::write(&path, "x").unwrap();
+                }
+                for code in 0..kinds.len().pow(3) {
+                    let mut code = code;
+                    let mut events = Vec::new();
+                    let mut pending = PendingEvents::default();
+                    let filter = EventFilter::new(root.clone(), &excludes);
+                    for _ in 0..3 {
+                        let event = ev(kinds[code % kinds.len()], vec![path.clone()]);
+                        code /= kinds.len();
+                        // Each event is repeated to exercise coalescing after transitions.
+                        for _ in 0..2 {
+                            events.push(event.clone());
+                            push_event(&mut pending, &filter, &event);
+                        }
+                    }
+                    let plain = EventFilter::new(root.clone(), &excludes).batch(&events);
+                    let compact = EventFilter::new(root.clone(), &excludes).batch(&pending.into_events());
+                    assert_same_batch(&plain, &compact);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pending_compaction_keeps_rule_reload_and_rename_endpoints() {
+        let excludes = vec!["excluded".to_owned()];
+        for rule in [".gitignore", ".ignore", ".git/info/exclude"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = dunce::canonicalize(tmp.path()).unwrap();
+            std::fs::create_dir_all(root.join(".git/info")).unwrap();
+            std::fs::create_dir(root.join("excluded")).unwrap();
+            std::fs::write(root.join(rule), "").unwrap();
+            std::fs::write(root.join("file.ignored"), "x").unwrap();
+            let plain = EventFilter::new(root.clone(), &excludes);
+            let compact = EventFilter::new(root.clone(), &excludes);
+            let touch = ev(EventKind::Modify(ModifyKind::Data(DataChange::Content)), vec![root.join("file.ignored")]);
+            for filter in [&plain, &compact] {
+                assert_eq!(filter.batch(std::slice::from_ref(&touch)).modified, vec![root.join("file.ignored")]);
+            }
+            std::fs::write(root.join(rule), "*.ignored\n").unwrap();
+            let mut events = Vec::new();
+            for path in ["file.ignored", rule] {
+                let event = ev(EventKind::Modify(ModifyKind::Data(DataChange::Content)), vec![root.join(path)]);
+                events.extend([event.clone(), event]);
+            }
+            events.push(ev(
+                EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+                vec![root.join("excluded/old.rs"), root.join("new.rs")],
+            ));
+            std::fs::write(root.join("new.rs"), "x").unwrap();
+            let mut pending = PendingEvents::default();
+            for event in &events {
+                push_event(&mut pending, &plain, event);
+            }
+            let expected = plain.batch(&events);
+            assert_eq!(expected.ignore_rules, vec![root.clone()]);
+            assert_eq!(expected.ignored, vec![root.join("file.ignored")]);
+            assert!(!expected.modified.contains(&root.join("file.ignored")));
+            assert_same_batch(&expected, &compact.batch(&pending.into_events()));
+        }
     }
 
     const TRANSIENT_PATHS: &[&str] = &["fresh.txt", "src/fresh.rs", "src/tasks/fresh.py"];
@@ -921,11 +1417,9 @@ mod tests {
         assert!(batch.removed.is_empty());
     }
 
-    /// `client install` produces an excluded / ignored directory wholesale:
-    /// the directory's own create passes through so the tree shows it appear
-    /// (marked excluded/ignored), while everything inside stays filtered out.
+    /// Excluded contents remain pruned; ignored contents go only to the index.
     #[test]
-    fn excluded_and_ignored_directories_report_themselves_but_not_contents() {
+    fn excluded_directories_are_pruned_and_ignored_contents_are_index_only() {
         let tmp = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(tmp.path()).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();
@@ -944,8 +1438,8 @@ mod tests {
         let batch = filter.batch(&[ev(create_dir, vec![root.join("target")]), ev(create_dir, vec![root.join("dist")])]);
         assert_eq!(batch.created, vec![root.join("dist"), root.join("target")]);
 
-        // Everything inside the ignored / excluded directories stays filtered,
-        // as do files matching ignore patterns at the project root.
+        // Ignored contents, including files below ignored folders, stay apart
+        // from normal worktree events. Explicitly excluded contents stay absent.
         let batch = filter.batch(&[
             ev(create_file, vec![root.join("target/debug/out.o")]),
             ev(create_file, vec![root.join("dist/app.js")]),
@@ -953,7 +1447,7 @@ mod tests {
         ]);
         assert!(batch.created.is_empty() && batch.modified.is_empty() && batch.removed.is_empty(), "{batch:?}");
         assert_eq!(batch.excluded_dirs, vec![root.clone(), root.join("dist"), root.join("target/debug")]);
-        assert_eq!(batch.ignored, vec![root.join("debug.log")], "only the ignored file outside ignored folders");
+        assert_eq!(batch.ignored, vec![root.join("debug.log"), root.join("dist/app.js")]);
 
         // An ignored file's edit and removal reach the index too (nothing else changes).
         let modify = EventKind::Modify(ModifyKind::Data(DataChange::Content));
@@ -961,12 +1455,14 @@ mod tests {
         assert_eq!(batch.ignored, vec![root.join("debug.log")]);
         assert!(!batch.is_empty() && batch.excluded_dirs.is_empty());
         std::fs::remove_file(root.join("debug.log")).unwrap();
+        std::fs::remove_file(root.join("dist/app.js")).unwrap();
         let batch = filter.batch(&[
             ev(EventKind::Remove(RemoveKind::File), vec![root.join("debug.log")]),
             ev(EventKind::Remove(RemoveKind::File), vec![root.join("dist/app.js")]),
         ]);
         // A removed path can't tell file from folder: it goes out as a removal, as before.
         assert_eq!(batch.removed, vec![root.join("debug.log")]);
+        assert_eq!(batch.ignored, vec![root.join("debug.log"), root.join("dist/app.js")]);
 
         // Sibling files in unignored directories still come through.
         let batch = filter.batch(&[ev(create_file, vec![root.join("src/main.rs")])]);
@@ -1002,6 +1498,43 @@ mod tests {
     }
 
     #[test]
+    fn git_metadata_directory_touches_do_not_refresh_vcs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        let filter = EventFilter::new(root.clone(), &[]);
+        let modify = EventKind::Modify(ModifyKind::Any);
+        for (dir, lock) in
+            [(".git", "index.lock"), (".git/refs/heads", "main.lock"), (".git/worktrees/wt", "index.lock")]
+        {
+            let dir = root.join(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let lock = dir.join(lock);
+            let batch = filter.batch(&[
+                ev(EventKind::Create(CreateKind::File), vec![lock.clone()]),
+                ev(EventKind::Remove(RemoveKind::File), vec![lock]),
+                ev(modify, vec![dir.clone()]),
+            ]);
+            assert!(batch.is_empty(), "{}: {batch:?}", dir.display());
+            for kind in [EventKind::Create(CreateKind::Folder), EventKind::Remove(RemoveKind::Folder)] {
+                let batch = filter.batch(&[ev(kind, vec![dir.clone()])]);
+                assert_eq!(batch.vcs, vec![dir.clone()]);
+            }
+        }
+
+        let gitfile = root.join("wt/.git");
+        std::fs::create_dir_all(root.join("wt")).unwrap();
+        std::fs::write(&gitfile, "gitdir: ../.git/worktrees/wt\n").unwrap();
+        let index = root.join(".git/index");
+        let head = root.join(".git/refs/heads/main");
+        std::fs::write(&index, b"index data").unwrap();
+        std::fs::write(&head, b"commit id").unwrap();
+        for path in [gitfile, index, head] {
+            let batch = filter.batch(&[ev(modify, vec![path.clone()])]);
+            assert_eq!(batch.vcs, vec![path]);
+        }
+    }
+
+    #[test]
     fn nested_gitignore_and_rule_changes_in_one_batch() {
         let tmp = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(tmp.path()).unwrap();
@@ -1016,9 +1549,9 @@ mod tests {
         let touch = |paths: &[&str]| -> Vec<Event> { paths.iter().map(|p| ev(modify, vec![root.join(p)])).collect() };
         let (batch, rules) = filter.batch_detailed(&touch(&["pkg/a.tmp", "pkg/gen/x.rs", "pkg/keep.rs", "b.tmp"]));
         assert_eq!(batch.modified, vec![root.join("b.tmp"), root.join("pkg/keep.rs")]);
-        assert_eq!(batch.ignored, vec![root.join("pkg/a.tmp")], "nested rules, but not inside ignored folders");
+        assert_eq!(batch.ignored, vec![root.join("pkg/a.tmp"), root.join("pkg/gen/x.rs")]);
         assert!(rules.is_empty());
-        assert!(!filter.should_watch_dir(&root.join("pkg/gen")));
+        assert!(filter.should_watch_dir(&root.join("pkg/gen")));
 
         // The nested .gitignore changes in the same batch as files it governs;
         // `pkg/.gitignore` sorts after `pkg/-x.tmp`, so order must not matter.
@@ -1040,6 +1573,95 @@ mod tests {
     }
 
     #[test]
+    fn only_rule_file_mutations_invalidate_subtrees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        std::fs::create_dir_all(root.join(".git/info")).unwrap();
+        std::fs::create_dir(root.join("pkg")).unwrap();
+        let filter = EventFilter::new(root.clone(), &[]);
+        for (rel, dir) in [
+            (".git/info/exclude", root.clone()),
+            ("pkg/.gitignore", root.join("pkg")),
+            ("pkg/.ignore", root.join("pkg")),
+        ] {
+            let path = root.join(rel);
+            std::fs::write(&path, "").unwrap();
+            for kind in [EventKind::Any, EventKind::Other] {
+                assert!(filter.batch(&[ev(kind, vec![path.clone()])]).ignore_rules.is_empty());
+            }
+            for kind in [
+                EventKind::Create(CreateKind::File),
+                EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+                EventKind::Remove(RemoveKind::File),
+                EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            ] {
+                let paths = if matches!(kind, EventKind::Modify(ModifyKind::Name(_))) {
+                    vec![path.clone(), path.with_extension("bak")]
+                } else {
+                    vec![path.clone()]
+                };
+                let batch = filter.batch(&[ev(kind, paths)]);
+                assert_eq!(batch.ignore_rules.as_slice(), std::slice::from_ref(&dir), "{kind:?} on {rel}");
+                assert!(!batch.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn access_events_do_not_reload_rules_or_report_changes() {
+        for access in [
+            AccessKind::Any,
+            AccessKind::Read,
+            AccessKind::Open(AccessMode::Read),
+            AccessKind::Close(AccessMode::Read),
+            AccessKind::Close(AccessMode::Write),
+            AccessKind::Other,
+        ] {
+            for rel in [".git/info/exclude", ".gitignore", ".ignore", ".git/HEAD", "a.txt"] {
+                let tmp = tempfile::tempdir().unwrap();
+                let root = dunce::canonicalize(tmp.path()).unwrap();
+                std::fs::create_dir_all(root.join(".git/info")).unwrap();
+                std::fs::create_dir(root.join("generated")).unwrap();
+                let path = root.join(rel);
+                std::fs::write(&path, "").unwrap();
+                let filter = EventFilter::new(root.clone(), &[]);
+                assert!(!filter.gitignore.is_ignored(&root.join("generated"), true));
+                std::fs::write(&path, "generated/\n").unwrap();
+
+                let (batch, rules) = filter.batch_detailed(&[ev(EventKind::Access(access), vec![path.clone()])]);
+                assert!(batch.is_empty(), "{access:?} on {rel}: {batch:?}");
+                assert!(rules.is_empty(), "{access:?} on {rel}: {rules:?}");
+                assert!(
+                    !filter.gitignore.is_ignored(&root.join("generated"), true),
+                    "{access:?} on {rel} reloaded rules"
+                );
+
+                let (batch, rules) = filter.batch_detailed(&[ev(
+                    EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+                    vec![path.clone()],
+                )]);
+                match rel {
+                    ".git/info/exclude" | ".gitignore" | ".ignore" => {
+                        assert_eq!(rules, vec![root.clone()], "{rel}");
+                        assert!(
+                            filter.gitignore.is_ignored(&root.join("generated"), true),
+                            "{rel} did not reload rules"
+                        );
+                    }
+                    ".git/HEAD" => {
+                        assert_eq!(batch.vcs, vec![path]);
+                        assert!(rules.is_empty());
+                    }
+                    _ => {
+                        assert_eq!(batch.modified, vec![path]);
+                        assert!(rules.is_empty());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn watch_dir_selection() {
         let tmp = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(tmp.path()).unwrap();
@@ -1050,7 +1672,7 @@ mod tests {
         assert!(filter.should_watch_dir(&root));
         assert!(w("src") && w("src/deep"));
         assert!(!w("node_modules") && !w("a/node_modules/b"));
-        assert!(!w("build") && w("src/build"));
+        assert!(w("build") && w("src/build"));
         assert!(w(".git") && w(".git/refs") && w(".git/refs/heads") && w(".git/info"));
         assert!(!w(".git/objects") && !w(".git/objects/ab") && !w(".git/logs"));
         // Linked-worktree gitdirs are watched so worktrees added below the
@@ -1102,8 +1724,8 @@ mod tests {
             )
             .unwrap()
         };
-        // root, src, src/a, lib, .git, .git/refs, .git/refs/heads
-        assert_eq!(watcher.watch_count(), 7);
+        // root, src, src/a, lib, lib/out, .git, .git/refs, .git/refs/heads
+        assert_eq!(watcher.watch_count(), 8);
 
         // A new directory tree created in one go: its contents are reported
         // even when written before the watch on it was registered.
@@ -1128,16 +1750,11 @@ mod tests {
         assert!(!paths.iter().any(|p| p.starts_with(root.join("node_modules"))), "{paths:?}");
         assert!(!paths.contains(&root.join("lib/out/o.txt")));
 
-        // Un-ignoring lib/out registers a watch on it.
+        // Un-ignoring lib/out keeps its existing filename watch.
         let before = watcher.watch_count();
         std::fs::write(root.join("lib/.gitignore"), "*.log\n").unwrap();
         assert!(wait_for(&batches, |b| all_paths(b).contains(&root.join("lib/.gitignore"))));
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while watcher.watch_count() == before && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        assert_eq!(watcher.watch_count(), before + 1);
-        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(watcher.watch_count(), before);
         std::fs::write(root.join("lib/out/now.txt"), "x").unwrap();
         assert!(wait_for(&batches, |b| all_paths(b).contains(&root.join("lib/out/now.txt"))));
 
@@ -1277,6 +1894,264 @@ mod tests {
         assert!(!all_paths(&batches.lock()).contains(&root.join("sub/deep.txt")));
     }
 
+    /// inotify that accepts `ALLOWED` watches and then runs out (`ENOSPC`, which
+    /// notify reports as `MaxFilesWatch`), and can't read directories named
+    /// `locked`. It reports no events, so only polling sees changes.
+    #[derive(Default)]
+    struct LimitedWatcher<const ALLOWED: usize> {
+        watched: usize,
+    }
+
+    impl<const ALLOWED: usize> notify::Watcher for LimitedWatcher<ALLOWED> {
+        fn new<F: notify::EventHandler>(_: F, _: notify::Config) -> notify::Result<Self> {
+            Ok(Self::default())
+        }
+
+        fn watch(&mut self, path: &Path, _: RecursiveMode) -> notify::Result<()> {
+            if path.ends_with("locked") {
+                return Err(notify::Error::io(std::io::ErrorKind::PermissionDenied.into()).add_path(path.into()));
+            }
+            if self.watched == ALLOWED {
+                return Err(notify::Error::new(ErrorKind::MaxFilesWatch).add_path(path.into()));
+            }
+            self.watched += 1;
+            Ok(())
+        }
+
+        fn unwatch(&mut self, _: &Path) -> notify::Result<()> {
+            Ok(())
+        }
+
+        fn kind() -> WatcherKind {
+            WatcherKind::Inotify
+        }
+    }
+
+    fn quiet_directory_state(root: &Path, polled: bool) -> DirState {
+        let watcher: Box<dyn notify::Watcher + Send> = if polled {
+            Box::new(PollWatcher::new(|_| {}, notify::Config::default().with_manual_polling()).unwrap())
+        } else {
+            Box::new(LimitedWatcher::<{ usize::MAX }>::default())
+        };
+        DirState {
+            filter: EventFilter::new(root.to_path_buf(), &["deps".into()]),
+            mode: WatchMode::PerDirectory,
+            watcher: Mutex::new(Some(watcher)),
+            watched: Mutex::default(),
+            queue: Mutex::default(),
+            wake: Condvar::new(),
+            stop: AtomicBool::new(false),
+            exhausted: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn per_directory_and_polling_register_ignored_but_not_excluded_directories() {
+        for polled in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = dunce::canonicalize(tmp.path()).unwrap();
+            for dir in [".git/info", ".git/objects/aa", "local/deep", "pkg/gen/deep", "deps/dep"] {
+                std::fs::create_dir_all(root.join(dir)).unwrap();
+            }
+            std::fs::write(root.join(".git/info/exclude"), "local/\n").unwrap();
+            std::fs::write(root.join("pkg/.gitignore"), "gen/\n").unwrap();
+            let state = quiet_directory_state(&root, polled);
+            let deferred = state.watch_tree_bounded(&root, 2);
+            assert!(!deferred.is_empty());
+            let mut found = FsBatch::default();
+            state.watch_stack(deferred, false, &mut found, None);
+            assert!(found.is_empty(), "startup registration must not publish existing files");
+            let expected = ["", ".git", ".git/info", "local", "local/deep", "pkg", "pkg/gen", "pkg/gen/deep"]
+                .into_iter()
+                .map(|rel| root.join(rel))
+                .collect::<HashSet<_>>();
+            assert_eq!(*state.watched.lock(), expected, "polled={polled}");
+
+            // Rule changes reclassify filenames without dropping ignored watches.
+            for rule in [".git/info/exclude", "pkg/.gitignore"] {
+                let (mut batch, dirs) = state.filter.batch_detailed(&[ev(
+                    EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+                    vec![root.join(rule)],
+                )]);
+                state.update_watches(&mut batch, &dirs);
+                assert_eq!(*state.watched.lock(), expected, "resync {rule}, polled={polled}");
+            }
+        }
+    }
+
+    #[test]
+    fn ignored_subtree_arrivals_and_removals_are_index_only() {
+        for polled in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = dunce::canonicalize(tmp.path()).unwrap();
+            for dir in [".git/info", "local", "pkg/gen"] {
+                std::fs::create_dir_all(root.join(dir)).unwrap();
+            }
+            std::fs::write(root.join(".git/info/exclude"), "local/\n").unwrap();
+            std::fs::write(root.join("pkg/.gitignore"), "gen/\n").unwrap();
+            let state = quiet_directory_state(&root, polled);
+            state.watch_tree(&root, false, &mut FsBatch::default());
+
+            for dir in ["local/new", "pkg/gen/new"] {
+                let subtree = root.join(dir);
+                let inner = subtree.join("inner");
+                let file = inner.join("Widget.rs");
+                std::fs::create_dir_all(&inner).unwrap();
+                std::fs::write(&file, "struct Widget;").unwrap();
+                // Only the subtree arrival is delivered; its existing files
+                // predate their watches and must be discovered by the scan.
+                let (mut batch, dirs) =
+                    state.filter.batch_detailed(&[ev(EventKind::Create(CreateKind::Folder), vec![subtree.clone()])]);
+                state.update_watches(&mut batch, &dirs);
+                assert_eq!(batch.ignored, vec![subtree.clone(), inner.clone(), file.clone()]);
+                assert!(batch.created.is_empty() && batch.modified.is_empty() && batch.removed.is_empty());
+                assert!(state.watched.lock().contains(&inner), "polled={polled}, {dir}");
+
+                let later = inner.join("Later.rs");
+                std::fs::write(&later, "struct Later;").unwrap();
+                let batch = state.filter.batch(&[ev(EventKind::Create(CreateKind::File), vec![later.clone()])]);
+                assert_eq!(batch.ignored, vec![later.clone()]);
+                assert!(batch.created.is_empty() && batch.modified.is_empty() && batch.removed.is_empty());
+                std::fs::remove_file(&later).unwrap();
+                let batch = state.filter.batch(&[ev(EventKind::Remove(RemoveKind::File), vec![later.clone()])]);
+                assert_eq!(batch.ignored, vec![later]);
+                assert!(batch.created.is_empty() && batch.modified.is_empty() && batch.removed.is_empty());
+
+                std::fs::remove_dir_all(&subtree).unwrap();
+                let (mut batch, dirs) =
+                    state.filter.batch_detailed(&[ev(EventKind::Remove(RemoveKind::Folder), vec![subtree.clone()])]);
+                state.update_watches(&mut batch, &dirs);
+                assert_eq!(batch.ignored, vec![subtree.clone()]);
+                assert!(batch.created.is_empty() && batch.modified.is_empty() && batch.removed.is_empty());
+                assert!(!state.watched.lock().iter().any(|p| p.starts_with(&subtree)));
+            }
+
+            // A directory-only ignore must still match after metadata is gone.
+            std::fs::remove_dir_all(root.join("local")).unwrap();
+            let (mut batch, dirs) =
+                state.filter.batch_detailed(&[ev(EventKind::Remove(RemoveKind::Folder), vec![root.join("local")])]);
+            state.update_watches(&mut batch, &dirs);
+            assert_eq!(batch.ignored, vec![root.join("local")]);
+            assert!(!state.watched.lock().contains(&root.join("local")));
+        }
+    }
+
+    #[test]
+    fn new_directory_scan_keeps_nested_ignored_files_out_of_worktree_events() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        let state = quiet_directory_state(&root, false);
+        state.watch_tree(&root, false, &mut FsBatch::default());
+        for dir in ["incoming/gen/deep", "incoming/deps/dep"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for (file, contents) in [
+            ("incoming/.gitignore", "gen/\n"),
+            ("incoming/gen/deep/Widget.rs", "struct Widget;"),
+            ("incoming/deps/dep/Hidden.rs", "struct Hidden;"),
+            ("incoming/Visible.rs", "struct Visible;"),
+        ] {
+            std::fs::write(root.join(file), contents).unwrap();
+        }
+        let (mut batch, dirs) =
+            state.filter.batch_detailed(&[ev(EventKind::Create(CreateKind::Folder), vec![root.join("incoming")])]);
+        state.update_watches(&mut batch, &dirs);
+        assert_eq!(
+            batch.created,
+            vec![root.join("incoming"), root.join("incoming/.gitignore"), root.join("incoming/Visible.rs")]
+        );
+        assert_eq!(
+            batch.ignored,
+            vec![root.join("incoming/gen"), root.join("incoming/gen/deep"), root.join("incoming/gen/deep/Widget.rs"),]
+        );
+        assert!(state.watched.lock().contains(&root.join("incoming/gen/deep")));
+        assert!(!state.watched.lock().iter().any(|p| p.starts_with(root.join("incoming/deps"))));
+    }
+
+    fn start_limited<const ALLOWED: usize>(root: &Path, batches: Arc<Mutex<Vec<FsBatch>>>) -> IdeResult<Inner> {
+        let emit: Emit = Arc::new(move |b: &FsBatch| batches.lock().push(b.clone()));
+        let filter = EventFilter::new(root.to_path_buf(), &[]);
+        Watcher::start_queued::<LimitedWatcher<ALLOWED>>(
+            root,
+            filter,
+            emit,
+            WatchMode::PerDirectory,
+            Default::default(),
+        )
+    }
+
+    #[test]
+    fn a_watch_refused_for_the_limit_fails_the_start_with_a_hint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        for d in ["a/b", "c"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        // On the last of its 4 directories, and on the root: either way part
+        // of the tree would go unwatched, so the caller polls it instead.
+        for result in [start_limited::<3>(&root, Arc::default()), start_limited::<0>(&root, Arc::default())] {
+            let Err(e) = result else { panic!("started with part of the tree unwatched") };
+            assert!(e.message.starts_with("cannot watch "), "{}", e.message);
+            assert!(e.message.contains("fs.inotify.max_user_watches"), "{}", e.message);
+        }
+    }
+
+    #[test]
+    fn other_watch_errors_skip_only_that_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        for d in ["a/locked/x", "c"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        let inner = start_limited::<{ usize::MAX }>(&root, Arc::default()).unwrap();
+        // root, a, c
+        assert_eq!(inner.state.watched.lock().len(), 3);
+    }
+
+    #[test]
+    fn a_watch_refused_for_the_limit_after_start_polls_the_whole_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        let dirs = SYNC_WATCH_BUDGET + 40;
+        for i in 0..dirs {
+            std::fs::create_dir_all(root.join(format!("d{i:03}"))).unwrap();
+        }
+        let batches: Arc<Mutex<Vec<FsBatch>>> = Arc::default();
+        // Runs out while the rest of the tree is watched in the background.
+        let inner = start_limited::<{ SYNC_WATCH_BUDGET + 10 }>(&root, batches.clone()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while inner.state.watched.lock().len() < dirs + 1 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(inner.state.watched.lock().len(), dirs + 1);
+        for i in [0, dirs - 1] {
+            let file = root.join(format!("d{i:03}/f.rs"));
+            std::fs::write(&file, "x").unwrap();
+            assert!(wait_for(&batches, |b| all_paths(b).contains(&file)), "{file:?}");
+        }
+    }
+
+    #[test]
+    fn a_new_directory_refused_for_the_limit_still_reports_its_contents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        for d in ["a", "c"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        let batches: Arc<Mutex<Vec<FsBatch>>> = Arc::default();
+        // root, a, c: started with the last watch the OS had.
+        let inner = start_limited::<3>(&root, batches.clone()).unwrap();
+        let file = root.join("new/inner/g.rs");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "x").unwrap();
+        let created = Event::new(EventKind::Create(notify::event::CreateKind::Folder)).add_path(root.join("new"));
+        inner.state.enqueue(created);
+        // Written before polling took over, so the poller never reports it.
+        assert!(wait_for(&batches, |b| all_paths(b).contains(&file)), "{:?}", batches.lock());
+        // root, a, c, new, new/inner
+        assert_eq!(inner.state.watched.lock().len(), 5);
+    }
+
     /// The fallback used when the OS watcher cannot start.
     fn polling_watcher(root: &Path, excludes: Vec<String>, batches: Arc<Mutex<Vec<FsBatch>>>) -> Watcher {
         let filter = EventFilter::new(root.to_path_buf(), &excludes);
@@ -1345,33 +2220,6 @@ mod tests {
         assert!(!watcher_error("cannot start file watcher", other).message.contains("inotify"));
     }
 
-    /// Watch calls succeed until `budget` is spent, then `ENOSPC` — mirrors
-    /// `fs.inotify.max_user_watches` running out part-way through a tree.
-    struct ExhaustedWatcher {
-        budget: std::sync::atomic::AtomicUsize,
-    }
-
-    impl notify::Watcher for ExhaustedWatcher {
-        fn new<F: notify::EventHandler>(_: F, _: notify::Config) -> notify::Result<Self> {
-            Ok(Self { budget: std::sync::atomic::AtomicUsize::new(3) })
-        }
-
-        fn watch(&mut self, _dir: &Path, _: RecursiveMode) -> notify::Result<()> {
-            if self.budget.fetch_sub(1, Ordering::SeqCst) == 0 {
-                return Err(notify::Error::new(ErrorKind::MaxFilesWatch));
-            }
-            Ok(())
-        }
-
-        fn unwatch(&mut self, _: &Path) -> notify::Result<()> {
-            Ok(())
-        }
-
-        fn kind() -> WatcherKind {
-            WatcherKind::NullWatcher
-        }
-    }
-
     /// #1915: a watch refused mid-tree must not stay silent — the limit is
     /// reported through `unwatched_reason` so the UI can warn like the
     /// polling fallback does.
@@ -1379,8 +2227,9 @@ mod tests {
     fn unwatched_reason_reports_the_watch_limit() {
         let tmp = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(tmp.path()).unwrap();
-        for d in ["a", "b", "c", "d"] {
-            std::fs::create_dir_all(root.join(d)).unwrap();
+        // Past startup: a limit hit while the project opens fails the start instead.
+        for i in 0..SYNC_WATCH_BUDGET + 4 {
+            std::fs::create_dir_all(root.join(format!("d{i:03}"))).unwrap();
         }
         let filter = EventFilter::new(root.clone(), &[]);
         let (excludes, rules) = (filter.excludes.clone(), filter.gitignore.clone());
@@ -1388,7 +2237,7 @@ mod tests {
         let emit: Emit = Arc::new(move |b| {
             let _ = tx.send(b.clone());
         });
-        let inner = Watcher::start_queued::<ExhaustedWatcher>(
+        let inner = Watcher::start_queued::<LimitedWatcher<{ SYNC_WATCH_BUDGET + 2 }>>(
             &root,
             filter,
             emit,
@@ -1398,6 +2247,10 @@ mod tests {
         .unwrap();
         let watcher = Watcher { inner, excludes, rules, polling: None };
         assert!(watcher.polling().is_none(), "the OS watcher did start");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while watcher.unwatched_reason().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         let reason = watcher.unwatched_reason().expect("watch limit must be reported");
         assert!(reason.contains("max_user_watches"), "{reason}");
         assert!(reason.contains("cannot watch"), "{reason}");

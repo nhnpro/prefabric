@@ -10,10 +10,11 @@ import { maybeEditorService, registerOverlay, registerStatusItem, registerToolWi
 import { confirmLeaveProject } from "@/platform/project";
 import { ConnectHost } from "./ConnectDialog";
 import { reopenInContainer } from "./container";
-import { reloadEnvironment } from "./environment";
+import { installDirenvNotifications, reloadEnvironment } from "./environment";
 import { RemoteStatus } from "./RemoteStatus";
 import { closeConnectDialog, openConnectDialog } from "./model";
 import { restorePorts, usePorts } from "./ports";
+import { installReconnect, reconnectNow } from "./reconnect";
 
 /** Forwarded ports are available while this window is connected to an SSH host or a dev container. */
 function trackPortsWindow(): () => void {
@@ -54,6 +55,8 @@ function trackPortsWindow(): () => void {
 export function activate(): () => void {
   const disposers = [
     trackPortsWindow(),
+    installReconnect(),
+    installDirenvNotifications(),
     registerOverlay({ id: "remote.connect", component: ConnectHost }),
     registerStatusItem({
       id: "remote.location",
@@ -73,13 +76,22 @@ export function activate(): () => void {
         run: () => openConnectDialog(),
       },
       {
+        id: "remote.reconnect",
+        title: "Reconnect to Remote Host",
+        description: "Connects this window to its remote project again after the connection was lost.",
+        category: "File",
+        keywords: ["ssh", "remote", "reconnect", "connection", "lost"],
+        when: "remoteConnectionLost",
+        run: () => reconnectNow(),
+      },
+      {
         id: "remote.disconnect",
         title: "Disconnect from Remote Host",
         category: "File",
         keywords: ["ssh", "remote", "close"],
         when: "projectOpen",
         run: async () => {
-          if (!(await confirmLeaveProject())) return;
+          if (!(await confirmLeaveProject(false))) return;
           try {
             await disconnectRemote();
           } catch (e) {
@@ -105,7 +117,20 @@ export function activate(): () => void {
         description:
           "Reads the login shell's environment (and devcontainer.json remoteEnv on a remote host) again for new terminals and processes.",
         category: "File",
-        keywords: ["env", "environment", "variables", "path", "shell", "remoteEnv", "devcontainer", "reload"],
+        keywords: [
+          "env",
+          "environment",
+          "variables",
+          "path",
+          "shell",
+          "remoteEnv",
+          "devcontainer",
+          "direnv",
+          "envrc",
+          "nix",
+          "flake",
+          "reload",
+        ],
         when: "projectOpen",
         run: () => reloadEnvironment(),
       },

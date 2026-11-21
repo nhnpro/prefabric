@@ -1,8 +1,10 @@
 /** Project view: the "project" tool window, its file operations and actions. */
 import { onEditorEvent, openEditorPaths } from "@/editor/api";
-import { commands, isTauri, onIdeEvent } from "@/platform/ipc";
+import { call, commands, isTauri, onIdeEvent } from "@/platform/ipc";
+import { tx } from "@/platform/i18n";
+import { userScopes } from "@/platform/scopes";
 import { useBuildModel } from "@/platform/buildModel";
-import { validateProjectStructure, type RootFolder } from "@/platform/languageSettings";
+import { effectiveContentRoots, validateProjectStructure, type RootFolder } from "@/platform/languageSettings";
 import { setContext } from "@/platform/context";
 import { useProject } from "@/platform/project";
 import { initProjectRoots, useProjectRoots } from "@/platform/projectRoots";
@@ -13,11 +15,14 @@ import {
   registerOverlay,
   registerProjectViewRoot,
   registerToolWindow,
+  notifications,
   registerUndoHandler,
+  setProjectViewLead,
   useLocalChanges,
   useProjectViewRoots,
 } from "@/workbench/contributions";
 import { registerProjectActions } from "./actions";
+import { mavenExternalRoots } from "./mavenRoots";
 import { gradleModuleGroups } from "./moduleGroups";
 import { FileRefactorDialogHost } from "./FileRefactorDialogs";
 import { NewPopupHost } from "./NewPopup";
@@ -26,17 +31,24 @@ import { ProjectHeaderActions, useProjectHeaderMenu, useProjectTitleMenu } from 
 import { loadHomeDir } from "./home";
 import { selectedNodes, undoLastFileOperation } from "./operations";
 import { ProjectView } from "./ProjectView";
+import { initProjectTypes } from "./projectTypes";
 import {
   applyFsChange,
   dropOutlines,
   initProjectTree,
+  leadSelection,
   reloadAll,
+  reloadArchiveDirs,
   reloadLoadedDirs,
   setChangedFiles,
   setOpenFiles,
+  setScopeFiles,
   setViewMode,
   useProjectTree,
 } from "./store";
+
+/** Files a scope pane lists at most. */
+const SCOPE_FILES_LIMIT = 20000;
 
 export function activate(): () => void {
   loadHomeDir();
@@ -115,8 +127,8 @@ export function activate(): () => void {
   let shownRoots = "";
   const syncContentRoots = () => {
     const { project, settings } = useProject.getState();
-    const own = project && !project.workspace;
-    const paths = own ? validateProjectStructure(settings?.projectStructure).contentRoots : [];
+    const own = project && (!project.workspace || project.workspace.projects[0] === project.root);
+    const paths = own ? effectiveContentRoots(validateProjectStructure(settings?.projectStructure)) : [];
     // The Build tool window's model (one load per build change), not a load of our own.
     const build = useBuildModel.getState();
     const gradleBuilds = build.root === project?.root ? (build.model?.gradle ?? []) : [];
@@ -126,7 +138,11 @@ export function activate(): () => void {
             gradleModuleGroups(g.projects, g.projects.find((p) => p.path === ":")?.name ?? "", project.root, g.dir),
           )
         : [];
-    const key = JSON.stringify([paths, groups]);
+    const mavenRoots =
+      own && project && build.root === project.root
+        ? mavenExternalRoots(build.model?.maven?.projects ?? [], project.root)
+        : [];
+    const key = JSON.stringify([paths, groups, mavenRoots]);
     if (key === shownRoots) return;
     shownRoots = key;
     contentRoots.forEach((d) => d());
@@ -139,6 +155,18 @@ export function activate(): () => void {
         path,
         order: -100 + i,
       }),
+    );
+    mavenRoots.forEach((root, i) =>
+      contentRoots.push(
+        registerProjectViewRoot({
+          id: root.id,
+          label: root.label,
+          detail: root.detail,
+          icon: "maven-project",
+          path: root.path,
+          order: -50 + i,
+        }),
+      ),
     );
     groups.forEach((g, i) =>
       contentRoots.push(registerProjectViewRoot({ ...g, id: g.id!, order: -200 + i, beforeProject: true })),
@@ -176,6 +204,61 @@ export function activate(): () => void {
     if (s.lists !== prev.lists) syncChanged();
   });
 
+  // Scope panes: the files of the chosen user scope, again as files come and go.
+  let scopeTimer: ReturnType<typeof setTimeout> | undefined;
+  let scopeGeneration = 0;
+  const syncScope = () => {
+    clearTimeout(scopeTimer);
+    scopeTimer = setTimeout(() => void loadScopeFiles(++scopeGeneration), 150);
+  };
+  const loadScopeFiles = async (gen: number) => {
+    const { mode, scope } = useProjectTree.getState();
+    if (mode !== "scope" || !scope || !isTauri()) return;
+    const pattern = userScopes().find((s) => s.name === scope)?.pattern;
+    if (!pattern?.trim()) return setScopeFiles([]);
+    try {
+      const found = await call(commands.scopeFiles(pattern, SCOPE_FILES_LIMIT));
+      if (gen !== scopeGeneration) return;
+      setScopeFiles(found.paths);
+      if (found.truncated)
+        notifications().notify({
+          level: "info",
+          group: "project",
+          key: "project.scopeTruncated",
+          title: tx`The scope ${scope} has more than ${SCOPE_FILES_LIMIT} files; the Project view shows the first ones`,
+        });
+    } catch (e) {
+      if (gen !== scopeGeneration) return;
+      setScopeFiles([]);
+      notifications().notify({
+        level: "warning",
+        group: "project",
+        key: "project.scopeError",
+        title: tx`Cannot show the scope ${scope}`,
+        body: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+  syncScope();
+  const unsubScopeMode = useProjectTree.subscribe((s, prev) => {
+    if (s.mode !== prev.mode || s.scope !== prev.scope) syncScope();
+  });
+  const unsubScopeSettings = useProject.subscribe((s, prev) => {
+    const scopes = (x: typeof s) => (x.settings as { scopes?: unknown } | null)?.scopes;
+    if (scopes(s) !== scopes(prev)) syncScope();
+  });
+  const unsubScopeFs = onIdeEvent("fsChanged", (e) => {
+    if (e.created.length || e.removed.length) syncScope();
+  });
+
+  // IDEA's navigation bar shows the tree's current node while the tree is the
+  // user's context; the editor hands it back on focus or on a tab switch.
+  const publishLead = () => setProjectViewLead(leadSelection());
+  publishLead();
+  const unsubLead = useProjectTree.subscribe((s, prev) => {
+    if (s.selected !== prev.selected || s.lead !== prev.lead) publishLead();
+  });
+
   const disposers = [
     () => {
       clearTimeout(unityTimer);
@@ -185,6 +268,14 @@ export function activate(): () => void {
     () => clearTimeout(openTimer),
     unsubEditor,
     unsubDecorations,
+    () => clearTimeout(scopeTimer),
+    unsubScopeMode,
+    unsubScopeSettings,
+    unsubScopeFs,
+    () => {
+      unsubLead();
+      setProjectViewLead(null);
+    },
     unsubProject,
     unsubExtraRoots,
     unsubExcludes,
@@ -221,8 +312,10 @@ export function activate(): () => void {
         .filter((n) => !n.group)
         .map((n) => n.path),
     ),
+    initProjectTypes(),
     onIdeEvent("fsChanged", (e) => void applyFsChange(e)),
     onIdeEvent("excludedDirsChanged", (e) => void reloadLoadedDirs(e.dirs)),
+    onIdeEvent("projectRootsChanged", () => void reloadArchiveDirs()),
   ];
   return () => {
     disposers.reverse().forEach((d) => d());

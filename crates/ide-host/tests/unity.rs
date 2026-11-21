@@ -38,7 +38,7 @@ async fn opens_unity_without_generated_solutions_and_excludes_caches_from_the_in
     // The asset index starts after the code index, in its own store.
     let assets = project.unity.as_ref().expect("a Unity project has an asset index");
     assert!(assets.wait_idle(Duration::from_secs(20)));
-    assert!(!ops::unity::index_status(&host, "main").unwrap().unwrap().indexing);
+    assert!(!ops::unity::unity_index_status(&host, "main").unwrap().unwrap().indexing);
     assert!(base.join("data/unity-index").read_dir().unwrap().next().is_some());
     let listed = project.index.files_matching(&project.root, |rel| rel.ends_with("Player.cs"), 10).unwrap();
     assert_eq!(listed.len(), 1);
@@ -52,12 +52,12 @@ async fn opens_unity_without_generated_solutions_and_excludes_caches_from_the_in
         "include": [], "exclude": [], "scope": { "kind": "project" }, "maxMatches": 100,
     }))
     .unwrap();
-    ops::search::start(
+    ops::search::search_start(
         &host,
         "main",
         RequestId::next(),
         query,
-        Arc::new(move |event| {
+        ops::Channel::new(move |event| {
             if let ops::search::SearchEvent::File { file } = event {
                 out.lock().unwrap().push(file.rel_path);
             }
@@ -66,7 +66,7 @@ async fn opens_unity_without_generated_solutions_and_excludes_caches_from_the_in
     .await
     .unwrap();
     assert_eq!(*hits.lock().unwrap(), ["Assets/Scripts/Player.cs"]);
-    let listing = ops::fs::read_dir(&host, "main", root.clone()).await.unwrap();
+    let listing = ops::fs::fs_read_dir(&host, "main", root.clone()).await.unwrap();
     assert!(listing.iter().any(|e| e.name == "Library" && e.excluded));
     assert!(project.exclude_globs().contains(&"/Obj".to_owned()));
 
@@ -88,10 +88,10 @@ async fn opens_unity_without_generated_solutions_and_excludes_caches_from_the_in
     };
     let original_metadata = "fileFormatVersion: 2\nguid: 11111111111111111111111111111111\n";
     std::fs::write(meta(&original), original_metadata).unwrap();
-    ops::fs::rename(&host, original.clone(), renamed.clone()).await.unwrap();
+    ops::fs::fs_rename(&host, "main", original.clone(), renamed.clone()).await.unwrap();
     assert!(!original.exists() && !meta(&original).exists());
     assert_eq!(std::fs::read_to_string(meta(&renamed)).unwrap(), original_metadata);
-    ops::fs::copy(&host, renamed.clone(), copied.clone()).await.unwrap();
+    ops::fs::fs_copy(&host, "main", renamed.clone(), copied.clone()).await.unwrap();
     assert!(copied.exists());
     assert_ne!(std::fs::read_to_string(meta(&copied)).unwrap(), original_metadata);
     assert_eq!(std::fs::read_to_string(meta(&renamed)).unwrap(), original_metadata);
@@ -126,7 +126,7 @@ async fn other_projects_have_no_asset_index() {
     });
     let project = host.open_project("main", &root).unwrap();
     assert!(project.unity.is_none());
-    assert_eq!(ops::unity::index_status(&host, "main").unwrap(), None);
+    assert_eq!(ops::unity::unity_index_status(&host, "main").unwrap(), None);
     assert!(!base.join("data/unity-index").exists());
 }
 
@@ -169,7 +169,7 @@ async fn finds_asset_usages_of_the_symbol_at_the_caret() {
     assert!(project.unity.as_ref().unwrap().wait_idle(Duration::from_secs(30)));
     let script = root.join("Assets/Scripts/Player.cs");
     let text = std::fs::read_to_string(&script).unwrap();
-    let doc = ops::doc::open(&host, "main", script).await.unwrap().id;
+    let doc = ops::doc::doc_open(&host, "main", script).await.unwrap().id;
     let at = |needle: &str| {
         let line = text.lines().position(|l| l.contains(needle)).unwrap();
         let col = text.lines().nth(line).unwrap().find(needle).unwrap();
@@ -178,7 +178,7 @@ async fn finds_asset_usages_of_the_symbol_at_the_caret() {
     let usages = |pos| {
         let host = &host;
         async move {
-            ops::unity::asset_usages(host, "main", doc, pos)
+            ops::unity::unity_asset_usages(host, "main", doc, pos)
                 .await
                 .unwrap()
                 .unwrap_or_else(|| panic!("no symbol at {pos:?}"))
@@ -228,7 +228,7 @@ async fn finds_asset_usages_of_the_symbol_at_the_caret() {
             ("Assets/Scenes/Main.unity".to_owned(), Some("7"), true),
         ]
     );
-    let lenses = ops::unity::lenses(&host, "main", doc).await.unwrap();
+    let lenses = ops::unity::unity_lenses(&host, "main", doc).await.unwrap();
     let summary = |needle: &str| {
         let line = at(needle).line;
         lenses.iter().find(|l| l.line == line).map(|l| l.summary.clone())
@@ -248,7 +248,7 @@ async fn finds_asset_usages_of_the_symbol_at_the_caret() {
     assert_eq!(summary("speed = 2f"), Some(LensSummary::Field { values: vec!["2".into()], overrides: 2 }));
     assert_eq!(summary("void Update"), None);
     // A local variable isn't a symbol assets use.
-    assert!(ops::unity::asset_usages(&host, "main", doc, at("var unused")).await.unwrap().is_none());
+    assert!(ops::unity::unity_asset_usages(&host, "main", doc, at("var unused")).await.unwrap().is_none());
     host.close_project("main");
 }
 
@@ -302,10 +302,10 @@ async fn merges_a_conflicted_prefab_with_unity_yaml_merge() {
     });
     host.trust.decide(&root, true, false).unwrap();
     host.open_project("main", &root).unwrap();
-    let merged = ops::unity::merge_asset(&host, "main", root.join("Assets/P.prefab")).await.unwrap().unwrap();
+    let merged = ops::unity::unity_merge_asset(&host, "main", root.join("Assets/P.prefab")).await.unwrap().unwrap();
     assert_eq!(
         merged.merged.unwrap(),
         prefab.replace("m_Radius: 0.5", "m_Radius: 0.7").replace("m_Height: 1", "m_Height: 2")
     );
-    assert!(ops::unity::merge_asset(&host, "main", root.join("Assets/notes.txt")).await.unwrap().is_none());
+    assert!(ops::unity::unity_merge_asset(&host, "main", root.join("Assets/notes.txt")).await.unwrap().is_none());
 }

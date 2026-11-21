@@ -22,6 +22,7 @@ import {
 import { useGithubShell } from "./shell";
 import { githubHandler, handlerContextKey } from "./toolwindow/handlers";
 import { GithubDialogHost } from "./ui/dialogs";
+import { activateSettingsPages } from "./settingsPages";
 
 const WINDOW = "pullRequests";
 const TIMELINE_KIND = "github.timeline";
@@ -255,6 +256,7 @@ export function activate(): () => void {
   active = true;
   setContext("githubPrTab", "list");
   const disposers = [
+    activateSettingsPages(),
     registerCloneSource({
       id: "github",
       label: "GitHub",

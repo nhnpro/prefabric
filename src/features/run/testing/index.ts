@@ -9,12 +9,23 @@ import { pytestParser } from "./pytest";
 import { rubyParser } from "./ruby";
 import { unittestParser } from "./unittest";
 import { unityParser } from "./unity";
+import { zigParser } from "./zig";
 import type { TestEvent, TestOutputParser } from "./types";
 
 export type { TestEvent, TestOutputParser, TestStatus } from "./types";
-export { parseDuration } from "./types";
-export { TestResults, nodeStatus, type TestNode } from "./results";
-export { cargoParser, goParser, jsParser, jvmParser, phpunitParser, pytestParser, rubyParser, unittestParser };
+export { formatDuration, parseDuration } from "./types";
+export { TestResults, nodeDuration, nodeOutput, nodeStatus, type TestNode } from "./results";
+export {
+  cargoParser,
+  goParser,
+  jsParser,
+  jvmParser,
+  phpunitParser,
+  pytestParser,
+  rubyParser,
+  unittestParser,
+  zigParser,
+};
 
 /** Runs several parsers side by side (unknown tool: e.g. `make test`). */
 export function combinedParser(parsers: TestOutputParser[]): TestOutputParser {
@@ -35,11 +46,14 @@ export type Framework =
   | "ruby"
   | "dotnet"
   | "unity"
+  | "zig"
   | "auto";
 
 export function frameworkFor(config: Pick<RunConfig, "kind" | "command" | "args">): Framework {
   const cmd = [config.command, ...config.args].join(" ");
   switch (config.kind) {
+    case "dotnet-test":
+      return "dotnet";
     case "cargo":
       return "cargo";
     case "npm":
@@ -64,11 +78,12 @@ export function frameworkFor(config: Pick<RunConfig, "kind" | "command" | "args"
     case "rake":
     case "rspec":
       return "ruby";
-    case "dotnet-test":
-      return "dotnet";
     case "unity-test":
       return "unity";
+    case "zig":
+      return "zig";
   }
+  if (/(^|[/\\])dotnet(?:\.exe)?$/i.test(config.command) && config.args[0] === "test") return "dotnet";
   if (/\bcargo\b/.test(cmd)) return "cargo";
   if (/\b(jest|vitest|npm|pnpm|yarn|bun|npx|deno)\b/.test(cmd)) return "js";
   if (/\bpytest\b/.test(cmd)) return "pytest";
@@ -76,7 +91,6 @@ export function frameworkFor(config: Pick<RunConfig, "kind" | "command" | "args"
   if (/(^|[/\\\s])(phpunit|pest)(\.phar|\.bat)?(\s|$)/.test(cmd)) return "phpunit";
   if (/\bgo\s+test\b/.test(cmd)) return "go";
   if (/\b(gradlew?|mvnw?)\b/.test(cmd)) return "jvm";
-  if (/\bdotnet(\.exe)?\s+test\b/.test(cmd)) return "dotnet";
   return "auto";
 }
 
@@ -112,6 +126,10 @@ export function withTestReporting<T extends Pick<RunConfig, "kind" | "command" |
     };
   }
   if (frameworkFor(config) === "phpunit") return { ...config, args: withTeamcity(config.args) };
+  if (frameworkFor(config) === "zig" && config.args[0] === "build") {
+    // `zig build test` prints nothing for a passing (or cached) run; the summary reports the counts.
+    return config.args.includes("--summary") ? config : { ...config, args: [...config.args, "--summary", "all"] };
+  }
   if (frameworkFor(config) === "unittest") {
     const chosen = config.args.some((a) => /^(-v|--verbosity)(=?\d)?$/.test(a));
     return chosen ? config : { ...config, args: [...config.args, "-v", "2"] };
@@ -127,6 +145,8 @@ export function withTestReporting<T extends Pick<RunConfig, "kind" | "command" |
 
 export function createTestParser(config: Pick<RunConfig, "kind" | "command" | "args">): TestOutputParser {
   switch (frameworkFor(config)) {
+    case "dotnet":
+      return { feed: () => [] };
     case "cargo":
       return cargoParser();
     case "js":
@@ -143,11 +163,10 @@ export function createTestParser(config: Pick<RunConfig, "kind" | "command" | "a
       return jvmParser();
     case "ruby":
       return rubyParser();
-    case "dotnet":
-      // Results come from the TRX reports once the run ends (`trx.ts`).
-      return { feed: () => [] };
     case "unity":
       return unityParser();
+    case "zig":
+      return zigParser();
     default:
       return combinedParser([
         cargoParser(),

@@ -34,29 +34,8 @@ export function ProgressBar({ value, className, ...aria }: ProgressBarProps) {
   );
 }
 
-export function Spinner({
-  size = 14,
-  className,
-  label = "Loading",
-}: {
-  size?: number;
-  className?: string;
-  label?: string;
-}) {
-  return (
-    <svg
-      className={clsx(styles.spinner, className)}
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      role="status"
-      aria-label={label}
-    >
-      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2.4" />
-      <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-    </svg>
-  );
-}
+// Lives in its own module so `Button` can show it without importing this file back.
+export { Spinner } from "./Spinner";
 
 export interface BadgeProps {
   children: ReactNode;
@@ -102,6 +81,7 @@ export type ToastLevel = "info" | "warning" | "error" | "success";
 export interface ToastProps {
   level: ToastLevel;
   title: ReactNode;
+  variant?: "balloon" | "history";
   body?: ReactNode;
   actions?: Array<{ label: string; run: () => void }>;
   onClose?: () => void;
@@ -114,10 +94,11 @@ export interface ToastProps {
 
 const LEVEL_ICON: Record<ToastLevel, IconName> = { info: "info", warning: "warning", error: "error", success: "check" };
 
-/** IDEA-style notification balloon. */
+/** Notification balloon or entry in a notification history list. */
 export function Toast({
   level,
   title,
+  variant = "balloon",
   body,
   actions,
   onClose,
@@ -129,7 +110,7 @@ export function Toast({
   const tx = useTx();
   return (
     <div
-      className={clsx(styles.toast, className)}
+      className={clsx(styles.toast, variant === "history" && styles.toastHistory, className)}
       role={level === "error" ? "alert" : "status"}
       data-level={level}
       onPointerEnter={onPointerEnter}

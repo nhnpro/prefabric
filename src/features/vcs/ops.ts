@@ -4,14 +4,21 @@
  */
 import { Channel } from "@tauri-apps/api/core";
 import { create } from "zustand";
-import type { GitOperation, RemoteOp } from "@/bindings";
+import type { BranchUpdate, GitOperation, RemoteOp } from "@/bindings";
 import { executeAction } from "@/platform/actions";
 import { tx } from "@/platform/i18n";
+import { AnsiStream, stripAnsi, type Span } from "@/ui/ansi";
 import { call, commands, isCancelled, nextRequestId } from "@/platform/ipc";
 import { attachDocument, editorsFor } from "@/editor/api";
-import { maybeEditorService, notifications } from "@/workbench/contributions";
+import {
+  maybeEditorService,
+  notifications,
+  toolWindowService,
+  type NotificationService,
+} from "@/workbench/contributions";
 import { cancelTask, upsertTaskSoon, useTasks } from "@/workbench/tasks";
 import { progressFraction } from "./model";
+import { saveDiffWindows } from "./diffWindowSave";
 import { beginGitWork, conflictedFiles, currentRepo, refreshNow, repoName, useVcs } from "./store";
 
 // ---------------------------------------------------------------------------
@@ -22,7 +29,10 @@ export interface ConsoleLine {
   id: number;
   time: number;
   kind: ConsoleKind;
+  /** The line without escape sequences (copying, searching). */
   text: string;
+  /** Its coloured runs, when the output had SGR colours (hook output). */
+  spans?: Span[];
 }
 
 interface ConsoleState {
@@ -35,11 +45,17 @@ export const useVcsConsole = create<ConsoleState>(() => ({ lines: [] }));
 
 export function logConsole(kind: ConsoleKind, text: string) {
   const time = Date.now();
+  // One stream per output, so a colour set on one line carries to the next.
+  const ansi = new AnsiStream();
   const add = text
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .filter((l, i, all) => l.length > 0 || (i > 0 && i < all.length - 1))
-    .map((l) => ({ id: ++lineSeq, time, kind, text: l }));
+    .map((l): ConsoleLine => {
+      if (!l.includes("\x1b")) return { id: ++lineSeq, time, kind, text: l };
+      const spans = ansi.parse(l);
+      return { id: ++lineSeq, time, kind, text: spans.map((s) => s.text).join(""), spans };
+    });
   if (!add.length) return;
   useVcsConsole.setState((s) => {
     const lines = s.lines.concat(add);
@@ -53,6 +69,17 @@ export function clearConsole() {
 
 export function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** Feedback for an explicit Git command stays visible when background VCS notifications are muted. */
+function notify(n: Omit<Parameters<NotificationService["notify"]>[0], "group" | "userInitiated">) {
+  // Hook output (linters, test runners) is often coloured; a balloon shows it as plain text.
+  notifications().notify({
+    ...n,
+    body: typeof n.body === "string" ? stripAnsi(n.body) : n.body,
+    group: "vcs",
+    userInitiated: true,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -80,7 +107,7 @@ export async function runOp<T>(title: string, fn: () => Promise<T>, opts: OpOpti
     const msg = typeof opts.success === "function" ? opts.success(value) : opts.success;
     if (msg) {
       logConsole("info", msg);
-      notifications().notify({ group: "vcs", level: "info", title: msg });
+      notify({ level: "info", title: msg });
     }
     return value;
   } catch (e) {
@@ -88,8 +115,7 @@ export async function runOp<T>(title: string, fn: () => Promise<T>, opts: OpOpti
     logConsole("err", message);
     const handled = opts.onError ? await opts.onError(message) : false;
     if (!opts.quiet && !handled)
-      notifications().notify({
-        group: "vcs",
+      notify({
         level: "error",
         title: tx`${title} failed`,
         body: message,
@@ -104,6 +130,17 @@ export async function runOp<T>(title: string, fn: () => Promise<T>, opts: OpOpti
 
 /** Saves all documents so git sees the editor contents. */
 export async function saveAll() {
+  try {
+    await saveDiffWindows();
+  } catch (error) {
+    notifications().notify({
+      group: "vcs",
+      level: "error",
+      title: tx("Could not save diff"),
+      body: errorMessage(error),
+    });
+    throw error;
+  }
   try {
     await maybeEditorService()?.saveAll();
   } catch {
@@ -122,7 +159,6 @@ const REMOTE_TITLE: Record<RemoteOp["op"], [string, string]> = {
   push: ["Pushing", "Push"],
   deleteBranch: ["Deleting remote branch", "Delete remote branch"],
   pushBranch: ["Pushing", "Push"],
-  updateBranch: ["Updating branch", "Update"],
   pushTag: ["Pushing", "Push"],
   deleteRemoteTag: ["Deleting remote tag", "Delete remote tag"],
 };
@@ -160,7 +196,7 @@ export async function runRemote(
   handled?: (message: string) => boolean,
 ): Promise<boolean> {
   if (useVcs.getState().remoteBusy) {
-    notifications().notify({ group: "vcs", level: "warning", title: "Another remote operation is in progress" });
+    notify({ level: "warning", title: "Another remote operation is in progress" });
     return false;
   }
   const [progressText, doneTitle] = REMOTE_TITLE[op.op];
@@ -173,8 +209,7 @@ export async function runRemote(
   const task = (message: string | null, fraction: number | null, done: boolean) =>
     upsertTaskSoon({ id: taskId, title: progressTitle, message, fraction, done, cancel });
   task(detail ?? null, null, false);
-  notifications().notify({
-    group: "vcs",
+  notify({
     level: "info",
     key: "vcs.remote",
     title: `${progressTitle}…`,
@@ -211,7 +246,8 @@ export async function runRemote(
         const before = isUpdate(op) ? await publishedTip(repo, op) : null;
         // The push summary counts what the push carries: the commits the branch is
         // ahead of its upstream before the push (pushing does not move the local head).
-        if (op.op === "push" || (op.op === "pushBranch" && !op.target)) {
+        // Another remote or target receives other commits than "ahead of the upstream".
+        if (op.op === "push" || (op.op === "pushBranch" && !op.target && !op.remote)) {
           const info = await call(commands.vcsBranchInfo(repo)).catch(() => null);
           if (info?.upstream && info.ahead > 0) pushed.push({ to: info.upstream, commits: info.ahead });
         }
@@ -230,8 +266,7 @@ export async function runRemote(
     else {
       // One repository's push names what went out; a partial multi-repo push stays generic.
       const one = pushed.length === 1 ? pushed[0] : null;
-      notifications().notify({
-        group: "vcs",
+      notify({
         level: "info",
         key: "vcs.remote",
         title:
@@ -255,8 +290,7 @@ export async function runRemote(
       notifications().expire?.("vcs.remote");
       void executeAction("vcs.resolveConflicts");
     } else
-      notifications().notify({
-        group: "vcs",
+      notify({
         level: "error",
         key: "vcs.remote",
         title: `${doneTitle} failed`,
@@ -265,6 +299,67 @@ export async function runRemote(
     return false;
   } finally {
     task(null, 1, true);
+    activeRemote = null;
+    useVcs.setState({ remoteBusy: null });
+    void refreshNow();
+  }
+}
+
+export interface RepoBranchUpdate extends BranchUpdate {
+  repo: string | null;
+}
+
+/**
+ * Branches › Update Selected: fast-forwards `branches` of each repository (one fetch per
+ * remote), with progress like `runRemote`. Null when it failed or was cancelled (a failure
+ * is reported here); otherwise what happened to each branch, for the caller to report.
+ */
+export async function runBranchUpdates(
+  branches: ReadonlyMap<string | null, readonly string[]>,
+): Promise<RepoBranchUpdate[] | null> {
+  if (useVcs.getState().remoteBusy) {
+    notify({ level: "warning", title: "Another remote operation is in progress" });
+    return null;
+  }
+  const progressTitle = tx("Updating branches");
+  const request = nextRequestId();
+  const taskId = `vcs:${request}`;
+  activeRemote = request;
+  useVcs.setState({ remoteBusy: progressTitle });
+  const cancel = () => void commands.cancelRequest(request);
+  const task = (message: string | null, done: boolean) =>
+    upsertTaskSoon({ id: taskId, title: progressTitle, message, fraction: done ? 1 : null, done, cancel });
+  task(null, false);
+  notify({
+    level: "info",
+    key: "vcs.remote",
+    title: `${progressTitle}…`,
+    sticky: true,
+    actions: [{ label: "Cancel", run: cancelRemote }],
+  });
+  const channel = new Channel<string>();
+  channel.onmessage = (line) => {
+    logConsole("out", line);
+    task(line.trim() || null, false);
+  };
+  const results: RepoBranchUpdate[] = [];
+  try {
+    for (const [repo, names] of branches) {
+      logConsole("cmd", `git update ${names.join(" ")}${repo && branches.size > 1 ? ` (${repoName(repo)})` : ""}`);
+      const updates = await call(commands.vcsUpdateBranches(repo, request, [...names], channel));
+      results.push(...updates.map((u) => ({ ...u, repo })));
+    }
+    lastRemoteError = null;
+    return results;
+  } catch (e) {
+    const cancelled = isCancelled(e);
+    lastRemoteError = cancelled ? null : errorMessage(e);
+    logConsole(cancelled ? "info" : "err", cancelled ? "Update cancelled" : errorMessage(e));
+    if (cancelled) notifications().expire?.("vcs.remote");
+    else notify({ level: "error", key: "vcs.remote", title: "Update failed", body: errorMessage(e) });
+    return null;
+  } finally {
+    task(null, true);
     activeRemote = null;
     useVcs.setState({ remoteBusy: null });
     void refreshNow();
@@ -315,10 +410,28 @@ const commitsText = (n: number) => (n === 1 ? tx`${n} commit` : tx`${n} commits`
 const pushedTitle = (n: number, to: string) =>
   n === 1 ? tx`Pushed ${n} commit to ${to}` : tx`Pushed ${n} commits to ${to}`;
 
+/**
+ * View Commits: an Update Info tab in the Git tool window, the Log of each updated repository
+ * limited to the commits the update brought in. Each update opens a tab of its own.
+ */
+async function openUpdateInfo(updated: readonly UpdatedRange[]) {
+  const { roots, root } = useVcs.getState();
+  const repoRanges = Object.fromEntries(
+    updated.flatMap(({ repo, from, to }) => {
+      const r = repo ?? roots[0] ?? root;
+      return r ? [[r, `${from}..${to}`]] : [];
+    }),
+  );
+  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const { openLogTab } = await import("./logStore");
+  openLogTab("update", time, "toolWindow", Object.keys(repoRanges), { repoRanges });
+  toolWindowService().show("git", true);
+}
+
 /** IDEA's Update Project result: "N files updated in M commits" with View Commits. */
 async function notifyUpdated(updated: readonly UpdatedRange[]) {
   if (!updated.length) {
-    notifications().notify({ group: "vcs", level: "info", key: "vcs.remote", title: "All files are up-to-date" });
+    notify({ level: "info", key: "vcs.remote", title: "All files are up-to-date" });
     return;
   }
   let files = 0;
@@ -343,18 +456,14 @@ async function notifyUpdated(updated: readonly UpdatedRange[]) {
       commits += log.length;
     }),
   );
-  notifications().notify({
-    group: "vcs",
+  notify({
     level: "info",
     key: "vcs.remote",
     title: `${filesText(files)} updated in ${commitsText(commits)}`,
     actions: [
       {
         label: "View Commits",
-        run: () => {
-          const { repo, from, to } = updated.find((u) => u.repo === currentRepo()) ?? updated[0]!;
-          void import("./CompareBranches").then((m) => m.showCommitRange("Update Info", from, to, repo));
-        },
+        run: () => void openUpdateInfo(updated),
       },
     ],
   });
@@ -388,7 +497,7 @@ export async function runGitOperation(
   repo = currentRepo(),
 ): Promise<boolean> {
   if (useVcs.getState().remoteBusy) {
-    notifications().notify({ group: "vcs", level: "warning", title: "Another Git operation is in progress" });
+    notify({ level: "warning", title: "Another Git operation is in progress" });
     return false;
   }
   await saveAll();
@@ -401,8 +510,7 @@ export async function runGitOperation(
   const task = (message: string | null, done: boolean) =>
     upsertTaskSoon({ id: taskId, title: progress, message, fraction: done ? 1 : null, done, cancel });
   task(null, false);
-  notifications().notify({
-    group: "vcs",
+  notify({
     level: "info",
     key: "vcs.operation",
     title: `${progress}…`,
@@ -424,7 +532,7 @@ export async function runGitOperation(
     }
     logConsole("info", success);
     const actions = opts.successActions ? await opts.successActions() : undefined;
-    notifications().notify({ group: "vcs", level: "info", key: "vcs.operation", title: success, actions });
+    notify({ level: "info", key: "vcs.operation", title: success, actions });
     return true;
   } catch (e) {
     const cancelled = isCancelled(e);
@@ -434,8 +542,7 @@ export async function runGitOperation(
     await refreshNow();
     const handled = cancelled || (opts.onError ? await opts.onError(message) : false);
     if (!handled)
-      notifications().notify({
-        group: "vcs",
+      notify({
         level: "error",
         key: "vcs.operation",
         title: opts.failure,

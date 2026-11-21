@@ -1,36 +1,48 @@
 /** Search Everywhere's Unity tab: GameObjects and prefab instances across scenes and prefabs, and
- * assets, by name, from the asset index; each shows where it is. */
-import type { UnityHit } from "@/bindings";
+ * assets, by name, from the asset index; each shows where it is. A search category, as a plugin's,
+ * offered while the project is a Unity one. */
+import type { PluginSearchItem, UnityHit } from "@/bindings";
 import { call, commands } from "@/platform/ipc";
-import { basename, relativeDir, useProject } from "@/platform/project";
-import { fileIconName } from "@/ui";
-import type { SearchEverywhereItem, SearchEverywhereTab } from "@/workbench/contributions";
+import { relativeDir, useProject } from "@/platform/project";
+import { registerSearchCategory, type SearchCategory } from "@/workbench/contributions";
 
-export function unityHitItem(h: UnityHit, root: string): SearchEverywhereItem {
+export function unityHitItem(h: UnityHit, root: string): PluginSearchItem {
   const asset = h.kind === "asset";
+  const at = { line: asset ? 0 : h.line, col: 0 };
   return {
-    key: `${h.path}:${h.line}:${h.kind}:${h.name}`,
+    id: `${h.path}:${h.line}:${h.kind}:${h.name}`,
     title: h.name,
-    indices: h.indices,
     // Where it is: the hierarchy above a GameObject, the folder of an asset.
-    detail: asset ? relativeDir(root, h.path) : h.parents.join("/") || undefined,
-    location: asset ? undefined : basename(h.path),
-    icon: asset ? fileIconName(h.name, h.path) : h.kind === "prefabInstance" ? "module" : "hierarchy",
-    path: h.path,
-    ...(asset ? {} : { line: h.line, col: 0 }),
+    description: (asset ? relativeDir(root, h.path) : h.parents.join("/")) || null,
+    target: { kind: "location", value: { path: h.path, range: { start: at, end: at } } },
   };
 }
 
-export const unitySearchTab: SearchEverywhereTab = {
-  id: "unity",
-  label: "Unity",
-  // Between Actions and Text.
-  order: 45,
-  visible: () => !!useProject.getState().project?.unity,
-  async search(query, limit, signal) {
+export const unitySearchCategory: SearchCategory = {
+  id: "plugin:unity:unity",
+  title: "Unity",
+  async search(_request, query, limit) {
     const found = await call(commands.unitySearch(query, limit));
-    if (signal.aborted) return { items: [], hasMore: false };
     const root = useProject.getState().project?.root ?? "";
     return { items: found.hits.map((h) => unityHitItem(h, root)), hasMore: found.more };
   },
+  command: () => undefined,
 };
+
+/** Offers the tab while the open project is a Unity one. */
+export function trackUnitySearchCategory(): () => void {
+  let unregister: (() => void) | null = null;
+  const sync = (unity: boolean) => {
+    if (unity && !unregister) unregister = registerSearchCategory(unitySearchCategory);
+    else if (!unity && unregister) {
+      unregister();
+      unregister = null;
+    }
+  };
+  sync(!!useProject.getState().project?.unity);
+  const unsubscribe = useProject.subscribe((s) => sync(!!s.project?.unity));
+  return () => {
+    unsubscribe();
+    sync(false);
+  };
+}

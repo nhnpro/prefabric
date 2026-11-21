@@ -151,6 +151,24 @@ fn stdin_echo_with_cat() {
 }
 
 #[test]
+fn full_stdin_does_not_block_input_or_stop_for_pipes_and_ptys() {
+    for pty in [false, true] {
+        let h = harness();
+        let mut config =
+            cfg("t:blocked-input", "/bin/sh", &["-c", "stty raw -echo 2>/dev/null; printf READY; exec sleep 60"]);
+        config.extras.emulate_terminal = pty;
+        let (id, chunks) = start(&h, &config);
+        wait_for(&chunks, "READY");
+        let started = Instant::now();
+        h.pm.write_stdin(id, &"x".repeat(512 * 1024)).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(250));
+        h.pm.stop(id).unwrap();
+        h.pm.stop(id).unwrap();
+        wait_exit(&h, id, Duration::from_secs(10));
+    }
+}
+
+#[test]
 fn missing_command_and_cwd_are_errors() {
     let h = harness();
     let err =
@@ -214,6 +232,22 @@ fn stop_kills_whole_process_group() {
         assert!(Instant::now() < deadline, "grandchild {grandchild} survived stop");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn running_in_lists_the_live_runs_of_one_project_root() {
+    let h = harness();
+    let (done, _) = start(&h, &cfg("t:done", "true", &[]));
+    wait_exit(&h, done, Duration::from_secs(5));
+    let (id, _) = start(&h, &cfg("t:serve", "sleep", &["30"]));
+    let running: Vec<_> = h.pm.running_in(h.root.path()).into_iter().map(|r| (r.id, r.name)).collect();
+    assert_eq!(running, [(id, "t:serve".to_owned())], "the finished run is left out");
+    // Another project's root, even one that contains this root, has none.
+    assert!(h.pm.running_in(h.root.path().parent().unwrap()).is_empty());
+    assert!(h.pm.running_in(&h.root.path().join("nested")).is_empty());
+    h.pm.stop(id).unwrap();
+    wait_exit(&h, id, Duration::from_secs(5));
+    assert!(h.pm.running_in(h.root.path()).is_empty());
 }
 
 #[test]
@@ -319,6 +353,36 @@ fn env_files_system_env_and_redirects() {
 
     config.extras.env_files = vec!["missing.env".into()];
     assert!(h.pm.start(root, &config, &StartOptions::default(), h.sink.clone(), Box::new(|_| {})).is_err());
+}
+
+#[test]
+fn runs_get_the_project_environment_and_its_programs() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = harness();
+    let root = h.root.path();
+    // A Nix devshell's tool, on the project's `PATH` only.
+    let devshell = tempfile::tempdir().unwrap();
+    let tool = devshell.path().join("openidea-devshell-tool");
+    std::fs::write(&tool, "#!/bin/sh\nprintf 'tool:%s' \"$OPENIDEA_TEST_DEVSHELL\"\n").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(devshell.path().to_path_buf()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    ide_core::project_env::set(
+        root,
+        vec![("PATH".into(), Some(path)), ("OPENIDEA_TEST_DEVSHELL".into(), Some("loaded".into()))],
+    );
+    let mut config = cfg("t:devshell", "openidea-devshell-tool", &[]);
+    config.extras.include_system_env = true;
+    assert_eq!(ide_run::resolved_env(root, &config).unwrap().get("OPENIDEA_TEST_DEVSHELL").unwrap(), "loaded");
+    for pty in [false, true] {
+        config.extras.emulate_terminal = pty;
+        let (id, chunks) = start(&h, &config);
+        assert_eq!(wait_exit(&h, id, Duration::from_secs(10)), Some(0), "pty: {pty}");
+        assert!(wait_for(&chunks, "tool:loaded").contains("tool:loaded"), "pty: {pty}");
+    }
+    ide_core::project_env::remove(root);
 }
 
 #[test]

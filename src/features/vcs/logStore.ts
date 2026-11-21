@@ -41,6 +41,8 @@ export interface LogFilters {
   path: string | null;
   paths?: string[];
   range?: string | null;
+  /** Revision ranges per repository root, instead of `range` (Update Info: what an update brought in). */
+  repoRanges?: Record<string, string>;
   date: LogDateFilter | null;
 }
 
@@ -94,7 +96,7 @@ function parseFragments(value: unknown): LogFragments {
 /** A log tab of its own (IDEA's "History: file" / "Log: branch" tabs): its own filters and view. */
 export interface LogTab {
   id: string;
-  kind: "history" | "branch" | "log" | "external";
+  kind: "history" | "branch" | "log" | "external" | "update";
   /** What it shows (the file path or the branch); opening the same again selects the tab. */
   target: string;
   repo?: string | null;
@@ -119,6 +121,25 @@ export const emptyFilters = (): LogFilters => ({
 export function toggleRepository(selected: readonly string[] | undefined, repo: string): string[] {
   const cur = selected ?? [];
   return cur.includes(repo) ? cur.filter((r) => r !== repo) : [...cur, repo];
+}
+
+export function logPathRepository(path: string, roots: readonly string[]): string | null {
+  const normalized = stripSlash(path);
+  return roots.includes(normalized) ? normalized : repoOf(normalized, roots);
+}
+
+export function scopedLogRepositories<T extends string | null>(
+  repositories: readonly T[],
+  filters: Pick<LogFilters, "path" | "paths" | "repositories">,
+  ownerRoots: readonly string[],
+): T[] {
+  const paths = filters.path ? [filters.path] : filters.paths;
+  const pathRoots = paths?.length ? new Set(paths.map((path) => logPathRepository(path, ownerRoots))) : null;
+  return repositories.filter(
+    (repo) =>
+      (!pathRoots || pathRoots.has(repo)) &&
+      (!filters.repositories?.length || (repo !== null && filters.repositories.includes(repo))),
+  );
 }
 
 /** Any filter other than the text field's toggles is set. */
@@ -391,9 +412,7 @@ let tabSeq = 0;
  * enclosing repository; any other path belongs to the innermost repository containing it.
  */
 function historyRepo(target: string): string | null {
-  const roots = useVcs.getState().roots;
-  const path = stripSlash(target);
-  return roots.includes(path) ? path : repoOf(target);
+  return logPathRepository(target, useVcs.getState().roots);
 }
 
 /**
@@ -405,6 +424,7 @@ export function openLogTab(
   target: string,
   location: LogTab["location"] = "toolWindow",
   repositories?: string[],
+  initialFilters?: Partial<LogFilters>,
 ): string {
   const active = useGitLog.getState().logTabs.find((t) => t.id === useGitLog.getState().shownLog);
   repositories ??=
@@ -421,6 +441,7 @@ export function openLogTab(
         : (active?.repo ?? (kind === "log" ? null : currentRepoRoot()));
   const existing =
     kind !== "log" &&
+    kind !== "update" &&
     useGitLog
       .getState()
       .logTabs.find(
@@ -442,6 +463,7 @@ export function openLogTab(
       : {
           ...emptyFilters(),
           ...(kind === "history" ? { path: target } : kind === "branch" ? { branches: [target] } : {}),
+          ...initialFilters,
         };
   parked.set(id, freshView(filters));
   useGitLog.setState((s) => ({
@@ -566,6 +588,13 @@ function parseFilters(value: unknown): LogFilters {
     text: typeof raw.text === "string" ? raw.text : "",
     path: typeof raw.path === "string" ? raw.path : null,
     range: typeof raw.range === "string" ? raw.range : null,
+    ...(raw.repoRanges && typeof raw.repoRanges === "object"
+      ? {
+          repoRanges: Object.fromEntries(
+            Object.entries(raw.repoRanges).filter((e): e is [string, string] => typeof e[1] === "string"),
+          ),
+        }
+      : {}),
     regex: raw.regex === true,
     matchCase: raw.matchCase === true,
   };
@@ -625,7 +654,7 @@ function restoreLogSession(root: string | null) {
             typeof tab === "object" &&
             typeof tab.id === "string" &&
             typeof tab.target === "string" &&
-            ["history", "branch", "log", "external"].includes(tab.kind) &&
+            ["history", "branch", "log", "external", "update"].includes(tab.kind) &&
             (tab.repo == null || typeof tab.repo === "string"),
         )
       : [];
@@ -675,11 +704,42 @@ export function toggleCommitBookmark(commit: Commit) {
   });
 }
 
+/**
+ * Identity of a remembered filter value (#2443). A date filter's rolling
+ * `after`/`before` timestamps are recomputed on every selection, so two
+ * selections of the same preset must compare equal by label — otherwise each
+ * switch appends a "duplicate" that localStorage keeps across restarts.
+ */
+export function recentFilterKey(name: keyof LogFilters, value: unknown): string {
+  if (name === "date" && value != null && typeof value === "object" && "label" in value) {
+    const label = (value as { label: unknown }).label;
+    if (typeof label === "string") return `date:${label}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Identity of a remembered whole-filter snapshot: same, with the date normalized to its label. */
+function recentFiltersKey(value: LogFilters): string {
+  return JSON.stringify(value.date ? { ...value, date: value.date.label } : value);
+}
+
+function dedupeBy<K>(items: K[], key: (item: K) => string): K[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const k = key(item);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export function recentFilterValues<K extends keyof LogFilters>(name: K): LogFilters[K][] {
   try {
-    return JSON.parse(
+    const raw: unknown = JSON.parse(
       localStorage.getItem(`openidea.vcs.logRecent.v1:${useVcs.getState().root}:${name}`) ?? "[]",
-    ) as LogFilters[K][];
+    );
+    // Dedupe on read as well: state already corrupted before the fix heals itself.
+    return Array.isArray(raw) ? dedupeBy(raw as LogFilters[K][], (v) => recentFilterKey(name, v)).slice(0, 10) : [];
   } catch {
     return [];
   }
@@ -690,7 +750,7 @@ export function recentLogFilters(): LogFilters[] {
     const raw: unknown = JSON.parse(
       localStorage.getItem(`openidea.vcs.logFilters.v1:${useVcs.getState().root}`) ?? "[]",
     );
-    return Array.isArray(raw) ? raw.slice(0, 10).map(parseFilters) : [];
+    return Array.isArray(raw) ? dedupeBy(raw.slice(0, 10).map(parseFilters), recentFiltersKey).slice(0, 10) : [];
   } catch {
     return [];
   }
@@ -704,7 +764,10 @@ function rememberRecentFilters(before: LogFilters) {
       localStorage.setItem(
         `openidea.vcs.logRecent.v1:${useVcs.getState().root}:${name}`,
         JSON.stringify(
-          [value, ...recentFilterValues(name).filter((v) => JSON.stringify(v) !== JSON.stringify(value))].slice(0, 10),
+          [
+            value,
+            ...recentFilterValues(name).filter((v) => recentFilterKey(name, v) !== recentFilterKey(name, value)),
+          ].slice(0, 10),
         ),
       );
     } catch {
@@ -713,10 +776,10 @@ function rememberRecentFilters(before: LogFilters) {
   }
   if (hasFilters(before)) {
     try {
-      const recent = [before, ...recentLogFilters().filter((f) => JSON.stringify(f) !== JSON.stringify(before))].slice(
-        0,
-        10,
-      );
+      const recent = [
+        before,
+        ...recentLogFilters().filter((f) => recentFiltersKey(f) !== recentFiltersKey(before)),
+      ].slice(0, 10);
       localStorage.setItem(`openidea.vcs.logFilters.v1:${useVcs.getState().root}`, JSON.stringify(recent));
     } catch {
       /* Recent filters are optional session state. */
@@ -785,13 +848,6 @@ async function loadOutgoing(id: string) {
   if (logState(id).generation === generation) setViewState(id, { outgoing, tracked });
 }
 
-/** The commit is on the upstream of the current branch (rewriting it needs a force push). */
-export function isPushed(id: string): boolean {
-  const { outgoing, tracked, commits } = useGitLog.getState();
-  const c = commits.find((c) => commitKey(c) === id);
-  return !!c && tracked.has(commitRepo(c) ?? "") && !!outgoing && !outgoing.has(id);
-}
-
 export function loadMore(id = useGitLog.getState().shownLog): Promise<void> {
   return loadPage(false, id);
 }
@@ -823,29 +879,19 @@ function loadPage(replace: boolean, id: string, before = false): Promise<void> {
       if (tab?.readOnly)
         for (const repo of tab.repositories ?? (tab.repo ? [tab.repo] : []))
           await call(commands.vcsOpenExternalLog(repo));
-      const tabRoots = tab?.repositories ?? (tab?.repo ? [tab.repo] : []);
-      const ownerOf = (path: string) =>
-        tabRoots
-          .filter((repo) => path === repo || path.startsWith(`${repo}/`))
-          .sort((a, b) => b.length - a.length)[0] ?? repoOf(path);
-      const pathRoots = f.path ? [ownerOf(f.path)] : f.paths?.length ? [...new Set(f.paths.map(ownerOf))] : null;
-      const roots = (
-        tab?.repositories?.length
-          ? tab.repositories
-          : tab?.repo
-            ? [tab.repo]
-            : pathRoots
-              ? pathRoots
-              : f.repositories?.length
-                ? f.repositories
-                : useVcs.getState().roots.length
-                  ? useVcs.getState().roots
-                  : [currentRepo()]
-      ).filter(
-        (repo) =>
-          (!pathRoots || pathRoots.includes(repo)) &&
-          (!f.repositories?.length || (!!repo && f.repositories.includes(repo))),
-      );
+      const tabRoots = tab?.repositories?.length ? tab.repositories : tab?.repo ? [tab.repo] : [];
+      const { roots: registeredRoots } = useVcs.getState();
+      const projectRepo = currentRepoRoot();
+      const projectRoots = registeredRoots.length ? registeredRoots : projectRepo ? [projectRepo] : [];
+      const ownerRoots = tabRoots.length ? tabRoots : projectRoots;
+      const candidates = tabRoots.length
+        ? tabRoots
+        : f.repositories?.length
+          ? f.repositories
+          : registeredRoots.length
+            ? registeredRoots
+            : [f.path || f.paths?.length ? projectRepo : currentRepo()];
+      const roots = scopedLogRepositories(candidates, f, ownerRoots);
       const limit = Math.min(replace ? Math.max(PAGE, s.commits.length) : PAGE, cap - loaded);
       const refs = await branchesByRepo(roots.filter((r): r is string => !!r));
       const knownRefs = new Set(
@@ -880,6 +926,7 @@ function loadPage(replace: boolean, id: string, before = false): Promise<void> {
             !f.path &&
             !f.paths?.length &&
             !f.range &&
+            !f.repoRanges &&
             !f.date &&
             !o.noMerges &&
             !o.firstParent
@@ -898,14 +945,14 @@ function loadPage(replace: boolean, id: string, before = false): Promise<void> {
               authors: ownAuthors,
               authorsExact: true,
               path: f.path,
-              paths: f.paths?.filter((path) => ownerOf(path) === repo),
+              paths: f.paths?.filter((path) => logPathRepository(path, ownerRoots) === repo),
               follow: tab?.kind === "history",
               author: null,
               text: f.text.trim() || null,
               textRegex: f.regex,
               textMatchCase: f.matchCase,
               range: null,
-              ranges: f.range?.split(/\s+/).filter(Boolean) ?? [],
+              ranges: ((repo && f.repoRanges?.[repo]) || f.range)?.split(/\s+/).filter(Boolean) ?? [],
               request,
               summaryOnly: true,
               stopAt,
@@ -1096,31 +1143,55 @@ async function pageUntil(find: () => boolean) {
   }
 }
 
-/** Selects `id` in the log, clearing filters and paging until it is loaded. */
+/** Selects `id` in the log, seeking directly to it (and clearing filters only if needed). */
 export async function revealCommit(id: string, repo = currentRepo(), tab = "log") {
   if (useGitLog.getState().logTabs.find((t) => t.id === tab)?.location === "editor") showLogView(tab);
   else selectGitTab(tab);
-  const f = useGitLog.getState().filters;
-  const filtered = hasFilters(f);
+  if (tab === "log") initLogBranchFilter();
+  let { filters } = useGitLog.getState();
+  const { selected } = useGitLog.getState();
+  const root = useVcs.getState().root;
+  const valid = () => {
+    const state = useGitLog.getState();
+    return (
+      useVcs.getState().root === root &&
+      state.shownLog === tab &&
+      state.filters === filters &&
+      state.selected === selected
+    );
+  };
   const find = () =>
     useGitLog
       .getState()
-      .commits.find((c) => (!commitRepo(c) || commitRepo(c) === repo) && (c.id === id || c.id.startsWith(id)));
-  if (filtered) {
-    useGitLog.setState({ filters: emptyFilters() });
-    const load = reloadLog();
-    const generation = useGitLog.getState().generation;
-    await load;
-    if (useGitLog.getState().generation !== generation) return;
-  } else if (!useGitLog.getState().commits.length) {
-    const load = reloadLog();
-    const generation = useGitLog.getState().generation;
-    await load;
-    if (useGitLog.getState().generation !== generation) return;
+      .commits.find((c) => (!repo || !commitRepo(c) || commitRepo(c) === repo) && (c.id === id || c.id.startsWith(id)));
+  const waitReload = async () => {
+    await reloadLog();
+    // The log's first mount may replace this request with its own initial load.
+    while (valid()) {
+      const pending = loadPromises.get(tab);
+      if (!pending) break;
+      await pending;
+    }
+  };
+  if (find() && !loadPromises.has(tab)) {
+    const hit = find();
+    if (hit) selectCommit(commitKey(hit), true);
+    return;
   }
-  const generation = useGitLog.getState().generation;
-  await pageUntil(() => !!find());
-  if (useGitLog.getState().generation !== generation) return;
+  useGitLog.setState({ seek: { repo, id } });
+  await waitReload();
+  if (!valid()) return;
+  if (!find() && hasFilters(useGitLog.getState().filters)) {
+    filters = emptyFilters();
+    useGitLog.setState({ filters, seek: { repo, id } });
+    await waitReload();
+    if (!valid()) return;
+  }
+  if (!find()) {
+    const generation = useGitLog.getState().generation;
+    await pageUntil(() => !!find());
+    if (!valid() || useGitLog.getState().generation !== generation) return;
+  }
   const hit = find();
   if (hit) selectCommit(commitKey(hit), true);
 }
@@ -1145,12 +1216,18 @@ export function displayedLogGraph() {
 
 export async function goToParent(c: Commit) {
   const generation = useGitLog.getState().generation;
-  const parents = () => displayedLogGraph().graph.find((x) => x.id === commitKey(c))?.parents ?? [];
-  if (!parents().length) return;
-  const find = () => displayedLogGraph().commits.filter((x) => parents().includes(commitKey(x)));
-  await pageUntil(() => find().length === parents().length);
+  const find = () => {
+    const { graph, commits } = displayedLogGraph();
+    const parents = graph.find((x) => x.id === commitKey(c))?.parents ?? [];
+    return { parents, candidates: commits.filter((x) => parents.includes(commitKey(x))) };
+  };
+  if (!find().parents.length) return;
+  await pageUntil(() => {
+    const { parents, candidates } = find();
+    return candidates.length === parents.length;
+  });
   if (useGitLog.getState().generation !== generation) return;
-  const candidates = find();
+  const { candidates } = find();
   const chosen = candidates.length > 1 ? await chooseLogCommit(candidates, "Select Parent Commit") : candidates[0];
   if (chosen && useGitLog.getState().generation === generation) selectCommit(commitKey(chosen), true);
 }

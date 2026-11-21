@@ -10,7 +10,7 @@ import { LspPopups } from "@/editor/lsp/Popups";
 import { registerProjectActions } from "@/features/project-tree/actions";
 import { useProjectTree } from "@/features/project-tree/store";
 import { useContextMenuStore } from "@/ui";
-import { provideNotificationService } from "@/workbench/contributions";
+import { provideNotificationService, registerMenuGroup, type MenuGroupContext } from "@/workbench/contributions";
 import * as controller from "./controller";
 import { createMemoryBackend } from "./backend";
 import { registerEditorActions } from "./actions";
@@ -154,6 +154,18 @@ describe("editor Copy Path/Reference chooser", () => {
     expect(writeText).toHaveBeenCalledExactlyOnceWith(path);
   });
 
+  it("copies a selection over several lines as path:first-last", async () => {
+    const view = ctrl.activeSlot!.view!;
+    view.dispatch({ selection: { anchor: 0, head: documentText.indexOf("A {}") } });
+    await executeAction("editor.copyPathReference");
+    const item = popup().items.find((item) => item.id === "editor.copyPathWithLineNumber")!;
+    expect(item.preview).toBe("src/A.java:1-2");
+    // A selection that ends at the start of a line leaves that line out.
+    view.dispatch({ selection: { anchor: 0, head: documentText.indexOf("class") } });
+    await executeAction("editor.copyPathWithLineNumber");
+    await vi.waitFor(() => expect(writeText).toHaveBeenLastCalledWith("src/A.java:1"));
+  });
+
   it("uses path:line off a symbol and ignores stale reference resolution", async () => {
     ctrl.activeSlot!.view!.dispatch({ selection: { anchor: documentText.length - 1 } });
     await executeAction("editor.copyPathReference");
@@ -187,6 +199,74 @@ describe("editor Copy Path/Reference chooser", () => {
     await act(() => executeAction("editor.copyPathReference"));
     fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
     expect(useLspPopup.getState().popup).toBeNull();
+  });
+
+  it("lists contributed links before Reference, for the selected lines", async () => {
+    const contexts: MenuGroupContext[] = [];
+    const run = vi.fn();
+    disposers.push(
+      registerMenuGroup({
+        id: "test.link",
+        menus: ["copyPath"],
+        items: (_menu, ctx) => {
+          contexts.push(ctx);
+          return [{ id: "test.copyLink", label: "Host Link", verbatim: true, preview: "https://host/a#L1", run }];
+        },
+      }),
+    );
+    const view = ctrl.activeSlot!.view!;
+    await executeAction("editor.copyPathReference");
+    expect(
+      popup()
+        .items.map((item) => item.label)
+        .slice(-2),
+    ).toEqual(["Host Link", "Reference"]);
+    expect(popup().items.at(-2)).toMatchObject({
+      preview: "https://host/a#L1",
+      shortcut: shortcutLabel("test.copyLink"),
+    });
+    await popup().items.at(-2)!.run();
+    expect(run).toHaveBeenCalledOnce();
+    // From the first line into the second; then ending at the start of the second line.
+    view.dispatch({ selection: { anchor: 0, head: documentText.indexOf("A {}") } });
+    await executeAction("editor.copyPathReference");
+    view.dispatch({ selection: { anchor: 0, head: documentText.indexOf("class") } });
+    await executeAction("editor.copyPathReference");
+    expect(contexts.map(({ paths, line, endLine }) => [paths, line, endLine])).toEqual([
+      [[path], 1, undefined],
+      [[path], 0, 1],
+      [[path], 0, undefined],
+    ]);
+  });
+
+  it("gives Open In contributions the selected lines", () => {
+    const contexts: MenuGroupContext[] = [];
+    disposers.push(
+      registerMenuGroup({
+        id: "test.openIn",
+        menus: ["openIn"],
+        items: (_menu, ctx) => {
+          contexts.push(ctx);
+          return [];
+        },
+      }),
+    );
+    const view = ctrl.activeSlot!.view!;
+    vi.spyOn(view, "posAtCoords").mockReturnValue(null);
+    // The caret; a selection from the second line back into the first; one ending at the start of the second.
+    for (const selection of [
+      { anchor: documentText.indexOf("A {}") },
+      { anchor: documentText.indexOf("A {}"), head: 0 },
+      { anchor: 0, head: documentText.indexOf("class") },
+    ]) {
+      view.dispatch({ selection });
+      ctrl.onContextMenu(ctrl.activeSlot!, new MouseEvent("contextmenu"));
+    }
+    expect(contexts.map(({ paths, line, endLine }) => [paths, line, endLine])).toEqual([
+      [[path], 1, undefined],
+      [[path], 0, 1],
+      [[path], 0, undefined],
+    ]);
   });
 
   it("adds the chooser to Copy / Paste Special", () => {

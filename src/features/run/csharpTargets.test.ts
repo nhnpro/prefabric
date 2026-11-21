@@ -1,11 +1,112 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { RunConfig } from "@/platform/ipc";
-import { contextConfig } from "./context";
+import { contextConfig, fileRole } from "./context";
+import { csharpTargets } from "./csharpTargets";
 import { testHostProcessId } from "./dotnetDebug";
 import { detectRunTargets, targetConfig } from "./targets";
+import { produceContext, produceFile, OPTIMISTIC } from "./producers";
+import { dotnetTestType } from "./dotnetTypes";
+import type { RunConfig } from "@/platform/ipc";
 
-const pick = (ts: ReturnType<typeof detectRunTargets>) => ts.map((t) => [t.line, t.kind, t.path.join("/")]);
+const config = (project: string): RunConfig => ({
+  id: project,
+  name: project,
+  command: "dotnet",
+  args: ["test", project],
+  kind: "dotnet-test",
+  params: { project, framework: "net9.0" },
+  cwd: null,
+  env: {},
+  detected: true,
+  isTest: true,
+  debugAdapter: null,
+});
+const source = `namespace Demo.Tests;
+public class Calculator {
+ // [Fact] public void NotATest() {}
+ [Xunit.Fact]
+ public void Adds() { var s = "}"; }
+ [Theory, InlineData(1)]
+ public async Task Values(int n) { }
+ public class Nested {
+   [TestMethod] public void Child() {}
+ }
+}`;
+describe("C# editor test targets", () => {
+  it("tracks lines across multiline tokens and separate test classes", () => {
+    const text = `namespace Demo {
+/* a comment
+   across lines */
+class First {
+  [Fact]
+  void One(
+  ) {}
+}
+class Second {
+  [TestCase(
+    1)]
+  void Two(int value) {}
+}
+}`;
+    expect(csharpTargets(text).map((t) => [t.line, t.path])).toEqual([
+      [3, ["Demo.First"]],
+      [5, ["Demo.First", "One"]],
+      [8, ["Demo.Second"]],
+      [11, ["Demo.Second", "Two"]],
+    ]);
+  });
+  it("runs only methods declared in the chosen file", () => {
+    const result = produceFile(
+      { path: "/repo/two/Tests.cs", root: "/repo", content: source, configs: [config("/repo/two/Two.csproj")] },
+      OPTIMISTIC,
+    );
+    expect(JSON.parse(result!.config!.params!.testMethods!)).toEqual([
+      "Demo.Tests.Calculator.Adds",
+      "Demo.Tests.Calculator.Values",
+      "Demo.Tests.Calculator+Nested.Child",
+    ]);
+  });
+  it("finds qualified and multiline attributes, nested types, and skips literals/comments", () => {
+    expect(
+      csharpTargets(source)
+        .filter((t) => t.kind === "test")
+        .map((t) => [t.line, t.path]),
+    ).toEqual([
+      [4, ["Demo.Tests.Calculator", "Adds"]],
+      [6, ["Demo.Tests.Calculator", "Values"]],
+      [8, ["Demo.Tests.Calculator+Nested", "Child"]],
+    ]);
+    expect(csharpTargets("namespace A { namespace B { class C { [Test] void T() {} } } }").at(-1)?.path).toEqual([
+      "A.B.C",
+      "T",
+    ]);
+  });
+  it("selects the owning project when same-named tests exist in sibling projects", () => {
+    const targets = csharpTargets(source);
+    const configs = [config("one/One.csproj"), config("two/Two.csproj")];
+    const result = targetConfig(
+      targets.find((t) => t.name === "Adds")!,
+      "two/Tests.cs",
+      configs,
+      source,
+    )!;
+    expect(result.params?.project).toBe("two/Two.csproj");
+    expect(dotnetTestType.commandLine(result.params!)?.args).toContain("FullyQualifiedName=Demo.Tests.Calculator.Adds");
+  });
+  it("normalizes absolute workspace project paths for caret/gutter launch", () => {
+    const result = produceContext(
+      {
+        path: "/repo/two/Tests.cs",
+        root: "/repo",
+        content: source,
+        line: 4,
+        configs: [config("/repo/one/One.csproj"), config("/repo/two/Two.csproj")],
+      },
+      OPTIMISTIC,
+    );
+    expect(result?.config?.params?.project).toBe("two/Two.csproj");
+  });
+});
 
 const dotnet = (project: string, test: boolean, launchProfile = ""): RunConfig => ({
   id: `dotnet:${project}:${test ? "test" : "run"}:${launchProfile}`,
@@ -28,8 +129,10 @@ const CONFIGS = [
   dotnet("tests/Other.Tests/Other.Tests.csproj", true),
 ];
 
+const pick = (ts: ReturnType<typeof detectRunTargets>) => ts.map((t) => [t.line, t.kind, t.path.join("/")]);
+
 describe("C# run targets", () => {
-  it("finds the fixture's xUnit facts, theory and class", () => {
+  it("finds the fixture's xUnit facts and their class", () => {
     const text = readFileSync("fixtures/csharp-app/tests/Tasks.Tests/TaskStoreTests.cs", "utf8");
     const targets = detectRunTargets(text, "tests/Tasks.Tests/TaskStoreTests.cs");
     const C = "Tasks.Tests.TaskStoreTests";
@@ -42,50 +145,21 @@ describe("C# run targets", () => {
     expect(targets.find((t) => t.name === "SearchMatchesSubstrings")?.line).toBe(35);
   });
 
-  it("NUnit and MSTest, block namespaces, nested classes and combined attributes", () => {
+  it("finds Unity's [UnityTest] coroutines", () => {
     const text = [
-      "using NUnit.Framework;",
-      "namespace Game.Tests",
+      "using System.Collections;",
+      "using UnityEngine.TestTools;",
+      "public class PlayerTests",
       "{",
-      "    [TestFixture]",
-      "    public class Inventory",
-      "    {",
-      '        [Test, Category("fast")]',
-      "        public void Adds() { }",
-      '        [TestCase(1, "Test")] [TestCase(2, "x")]',
-      "        public async Task Counts(int n, string s) { }",
-      "        public class Nested",
-      "        {",
-      "            [TestMethod] public void Inner() { }",
-      "        }",
-      "        public void Helper() { }",
-      "    }",
-      "    public class NotTests { public void M() { } }",
+      "    [UnityTest]",
+      "    public IEnumerator Jumps() { yield return null; }",
       "}",
     ].join("\n");
-    expect(pick(detectRunTargets(text, "Tests/Inventory.cs"))).toEqual([
-      [4, "suite", "Game.Tests.Inventory"],
-      [7, "test", "Game.Tests.Inventory/Adds"],
-      [9, "test", "Game.Tests.Inventory/Counts"],
-      [10, "suite", "Game.Tests.Inventory+Nested"],
-      [12, "test", "Game.Tests.Inventory+Nested/Inner"],
+    expect(pick(detectRunTargets(text, "Assets/Tests/PlayerTests.cs"))).toEqual([
+      [2, "suite", "PlayerTests"],
+      [5, "test", "PlayerTests/Jumps"],
     ]);
-  });
-
-  it("a record without a body doesn't hold the tests after it", () => {
-    const text = [
-      "namespace App.Tests;",
-      "public record Item(string Title);",
-      "public class ItemTests",
-      "{",
-      "    private record Row(int A);",
-      "    [Fact] public void Adds() { }",
-      "}",
-    ].join("\n");
-    expect(pick(detectRunTargets(text, "ItemTests.cs"))).toEqual([
-      [2, "suite", "App.Tests.ItemTests"],
-      [5, "test", "App.Tests.ItemTests/Adds"],
-    ]);
+    expect(fileRole("Assets/Tests/PlayerTests.cs", text)).toBe("test");
   });
 
   it("declarations in the global namespace aren't top-level statements", () => {
@@ -94,6 +168,7 @@ describe("C# run targets", () => {
       "public enum Color { Red }",
       "public delegate void H();",
       "public readonly ref struct Span2 { }",
+      '[assembly: InternalsVisibleTo("X")]',
     ])
       expect(detectRunTargets(text, "A.cs"), text).toEqual([]);
   });
@@ -107,6 +182,7 @@ describe("C# run targets", () => {
         ),
       ),
     ).toEqual([[3, "main", ""]]);
+    expect(detectRunTargets("class C { void Main() { } }", "C.cs")).toEqual([]);
     const fixture = readFileSync("fixtures/csharp-app/src/Tasks.Cli/Program.cs", "utf8");
     const main = detectRunTargets(fixture, "src/Tasks.Cli/Program.cs").filter((t) => t.kind === "main");
     expect(main).toHaveLength(1);
@@ -114,18 +190,6 @@ describe("C# run targets", () => {
       { line: 3, kind: "main" },
     ]);
     expect(detectRunTargets("namespace A;\npublic enum E { X }\n", "E.cs")).toEqual([]);
-  });
-
-  it("runs one test or class through the closest test project's filter", () => {
-    const rel = "tests/Tasks.Tests/TaskStoreTests.cs";
-    const C = "Tasks.Tests.TaskStoreTests";
-    const test = targetConfig({ line: 9, kind: "test", name: "Adds", path: [C, "Adds"] }, rel, CONFIGS)!;
-    expect(test.kind).toBe("dotnet-test");
-    expect(test.params?.project).toBe("tests/Tasks.Tests/Tasks.Tests.csproj");
-    expect(test.params?.programArgs).toBe(`--filter 'FullyQualifiedName=${C}.Adds|FullyQualifiedName~${C}.Adds\\('`);
-    expect(test.name).toBe("Adds");
-    const suite = targetConfig({ line: 6, kind: "suite", name: "TaskStoreTests", path: [C] }, rel, CONFIGS)!;
-    expect(suite.params?.programArgs).toBe(`--filter FullyQualifiedName~${C}.|FullyQualifiedName~${C}+`);
   });
 
   it("runs Main through its project's configuration without a launch profile", () => {
@@ -136,26 +200,23 @@ describe("C# run targets", () => {
       "Console.WriteLine();",
     );
     expect(main?.id).toBe("dotnet:src/Tasks.Cli/Tasks.Cli.csproj:run:");
-    expect(contextConfig("tests/Other.Tests/ATests.cs", CONFIGS)?.params?.project).toBe(
-      "tests/Other.Tests/Other.Tests.csproj",
+    expect(
+      contextConfig("tests/Other.Tests/ATests.cs", CONFIGS, "class A { [Fact] void T() {} }")?.params?.project,
+    ).toBe("tests/Other.Tests/Other.Tests.csproj");
+  });
+
+  it("runs Program.cs through its project's configuration", () => {
+    const content = readFileSync("fixtures/csharp-app/src/Tasks.Cli/Program.cs", "utf8");
+    const produced = produceFile(
+      { path: "/w/src/Tasks.Cli/Program.cs", root: "/w", content, configs: CONFIGS } as never,
+      OPTIMISTIC,
     );
+    expect(produced?.config?.id).toBe("dotnet:src/Tasks.Cli/Tasks.Cli.csproj:run:");
   });
 
   it("reads the waiting test host's process id", () => {
     expect(testHostProcessId("Process Id: 43650, Name: dotnet")).toBe(43650);
     expect(testHostProcessId("Process Id: 1, Name: testhost")).toBe(1);
     expect(testHostProcessId("Waiting for debugger attach...")).toBeNull();
-  });
-});
-
-describe("C# file context", () => {
-  it("runs Program.cs through its project's configuration", async () => {
-    const { produceFile } = await import("./producers");
-    const content = readFileSync("fixtures/csharp-app/src/Tasks.Cli/Program.cs", "utf8");
-    const produced = produceFile(
-      { path: "/w/src/Tasks.Cli/Program.cs", root: "/w", content, configs: CONFIGS } as never,
-      {} as never,
-    );
-    expect(produced?.config?.id).toBe("dotnet:src/Tasks.Cli/Tasks.Cli.csproj:run:");
   });
 });

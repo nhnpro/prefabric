@@ -2,11 +2,12 @@
 import { activeEditor } from "@/editor/api";
 import { getAction, registerActions, type Action } from "@/platform/actions";
 import { getContext } from "@/platform/context";
+import { canRevealInFileManager, revealInFileManagerLabel } from "@/platform/fileManager";
 import { dirname, useProject } from "@/platform/project";
 import { showContextMenu, type MenuItem } from "@/ui";
 import { maybeEditorService, menuGroupItems, toolWindowService } from "@/workbench/contributions";
 import { OPTION_LABELS, SORT_LABELS } from "./HeaderActions";
-import { newMenuItems, revealLabel } from "./contextMenu";
+import { compareTarget, newMenuItems, revealLabel } from "./contextMenu";
 import { openNewPopup } from "./newPopupModel";
 import { generateUnityProjectFiles, installUnityPackage } from "./unityPackage";
 import type { ProjectNode } from "./model";
@@ -24,14 +25,19 @@ import {
   openMoveDialog,
   openRenameDialog,
   openSelection,
+  openSelectionInRightSplit,
   paste,
+  reformatNodes,
   reloadFromDisk,
+  openWithAssociatedApp,
   revealInFinder,
+  selectedFiles,
   selectedNodes,
   type PathKind,
 } from "./operations";
 import { nameOf, parentOf } from "./paths";
 import { showFilePathPopup } from "./filePath";
+import { canDownload, downloadTo } from "./download";
 import { showNewPopup, treeHandle } from "./ProjectView";
 import { lastFileRefactoring, undoFileRefactoring } from "./fileRefactor";
 import {
@@ -105,7 +111,7 @@ export function selectInProjectView(path?: string | null, focus = true) {
   if (!target) return false;
   if (!modeShows(target)) setViewMode("project");
   showProjectView(focus);
-  return revealPath(target, focus);
+  return revealPath(target, focus, true);
 }
 
 /**
@@ -114,14 +120,31 @@ export function selectInProjectView(path?: string | null, focus = true) {
  * menu groups), the navigation bar, Finder / Explorer and the terminal.
  */
 export function selectInTargets(path: string): MenuItem[] {
+  const { unity } = useProjectTree.getState();
+  const views = VIEW_MODES.filter(([mode]) => mode !== "unity" || unity).map(([mode, label]) => ({
+    label,
+    disabled: !modeShows(path, mode),
+    run: () => {
+      setViewMode(mode);
+      selectInProjectView(path);
+    },
+  }));
   return [
-    { kind: "header", label: "Select In" },
-    { label: "Project View", icon: "toolwindow-project", run: () => void selectInProjectView(path) },
+    { kind: "header", label: "Select In", asTitle: true },
+    {
+      label: "Project View",
+      icon: "toolwindow-project",
+      run: () => void selectInProjectView(path),
+      submenu: views,
+      performOnSelect: true,
+    },
     ...menuGroupItems("selectIn", { paths: [path] }),
     ...(getAction("navigate.navigationBar") && maybeEditorService()?.activePath() === path
       ? [{ kind: "action" as const, action: "navigate.navigationBar", label: "Navigation Bar" }]
       : []),
-    { label: revealLabel(), icon: "external-link", run: () => void revealInFinder(nodesFrom(path)) },
+    ...(canRevealInFileManager()
+      ? [{ label: revealLabel(), icon: "external-link", run: () => void revealInFinder(nodesFrom(path)) }]
+      : []),
     ...(getAction("terminal.openAt")
       ? [{ label: "Terminal", icon: "terminal", run: () => void delegate("terminal.openAt", parentOf(path)) }]
       : []),
@@ -146,11 +169,10 @@ export function showNewPopupForEditor(orRoot = false): boolean {
 }
 
 function showSelectIn(path: string) {
-  // At the caret, like IDEA's popup; centred near the top otherwise.
   const view = activeEditor()?.view;
   const coords = view && activeEditor()?.ctx.path === path ? view.coordsAtPos(view.state.selection.main.head) : null;
   const at = coords ? { x: coords.left, y: coords.bottom + 2 } : { x: window.innerWidth / 2 - 100, y: 80 };
-  showContextMenu(at, selectInTargets(path));
+  showContextMenu(at, selectInTargets(path), { numbers: true });
 }
 
 export function registerProjectActions(): () => void {
@@ -306,6 +328,16 @@ export function registerProjectActions(): () => void {
       run: openSelection,
     },
     {
+      id: "project.openInRightSplit",
+      title: "Open in Right Split",
+      category: "Project View",
+      icon: "split",
+      when: FOCUS,
+      // Folders keep Enter's expand / collapse.
+      enabled: () => selectedFiles().length > 0,
+      run: () => openSelectionInRightSplit(),
+    },
+    {
       id: "project.rename",
       title: "Rename File…",
       category: "Project View",
@@ -405,12 +437,32 @@ export function registerProjectActions(): () => void {
     copyPath("source", "project.copySourceRootPath", "Copy Path From Source Root"),
     {
       id: "project.revealInFinder",
-      title: tx`Reveal in ${revealLabel()}`,
+      title: revealInFileManagerLabel(),
       category: "Project View",
       icon: "external-link",
       when: OPEN,
       keywords: ["show in explorer", "open in finder"],
       run: ({ arg }) => revealInFinder(nodesFrom(contextTarget(arg))),
+    },
+    {
+      id: "project.downloadTo",
+      title: "Download to…",
+      category: "Project View",
+      icon: "download",
+      when: OPEN,
+      enabled: () => canDownload(),
+      description: "Copy the selected files and folders of a remote project to a folder on this computer",
+      keywords: ["save to local", "copy to local", "scp", "remote"],
+      run: ({ arg }) => downloadTo(nodesFrom(contextTarget(arg)).map((n) => n.path)),
+    },
+    {
+      id: "project.openWithAssociatedApp",
+      title: "Open in Associated Application",
+      category: "Project View",
+      icon: "external-link",
+      when: OPEN,
+      keywords: ["open with", "default application", "system application", "external"],
+      run: ({ arg }) => void openWithAssociatedApp(nodesFrom(contextTarget(arg))),
     },
     {
       id: "project.openInTerminal",
@@ -458,14 +510,11 @@ export function registerProjectActions(): () => void {
     },
     {
       id: "project.reformatCode",
-      title: "Reformat File",
+      title: "Reformat Code",
       category: "Project View",
       hidden: true,
       when: FOCUS,
-      run: ({ arg }) => {
-        const node = nodesFrom(arg)[0];
-        if (node && !node.dir) delegate("code.reformatFile", { path: node.path });
-      },
+      run: ({ arg }) => void reformatNodes(nodesFrom(arg)),
     },
     {
       id: "project.optimizeImports",
@@ -484,14 +533,11 @@ export function registerProjectActions(): () => void {
       category: "Project View",
       hidden: true,
       when: FOCUS,
+      // Show Diff claims ⌘D outside text editors by keyWhen; this claim keeps it in the project view.
+      keyWhen: FOCUS,
       run: ({ arg }) => {
-        const files = nodesFrom(arg).filter((n) => !n.dir);
-        if (files.length === 2)
-          delegate(
-            "diff.compareFiles",
-            files.map((f) => f.path),
-          );
-        else if (files[0]) delegate("diff.compareWith", files[0].path);
+        const target = compareTarget(nodesFrom(arg));
+        if (target) delegate(target.action, target.arg);
       },
     },
     {

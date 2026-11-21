@@ -37,8 +37,9 @@ fn compiler_errors_become_messages() {
     assert_ne!(broken, text);
     std::fs::write(&file, broken).unwrap();
 
-    let p = compile::plan(&root, &BuildModel::default(), BuildKind::Build, None, None).unwrap();
-    assert_eq!(p.system, BuildSystem::DotNet);
+    let p = compile::plan(&root, &BuildModel::default(), BuildKind::Build, None, None, None, &CancellationToken::new())
+        .unwrap();
+    assert_eq!(p.system, BuildSystem::Dotnet);
     let result = compile::run(&root, &p, &CancellationToken::new(), &|_| {}).unwrap();
     assert!(!result.success);
     let errors: Vec<_> = result.messages.iter().filter(|m| m.severity == Severity::Error).collect();

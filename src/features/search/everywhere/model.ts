@@ -4,52 +4,39 @@
  */
 import type { Action } from "@/platform/actions";
 import type { FileMatch, LineMatch, SymbolMatch, WorkspaceSymbol } from "@/platform/ipc";
-import {
-  registerSearchEverywhereTab,
-  searchEverywhereTabs,
-  useSearchEverywhereTabs,
-  type SearchEverywhereItem,
-  type SearchEverywhereTab,
-  type SettingsSearchEntry,
-} from "@/workbench/contributions";
+import { searchCategories, type SearchCategoryId, type SettingsSearchEntry } from "@/workbench/contributions";
 import { tx } from "@/platform/i18n";
 import { basename, isTypeKind, relDir, symbolDisplayName } from "../common/open";
 import { byScore, matchText } from "../common/rank";
+import { wordMatch } from "@/ui";
 
-/** A tab's id: a built-in tab's, or a contributed one's (`registerSearchEverywhereTab`). */
-export type SeTab = string;
-/** A built-in section, or a contributed tab's (its id). */
-export type SectionId = string;
+export type SeTab = "all" | "classes" | "files" | "symbols" | "actions" | "text" | SearchCategoryId;
+export const isCustomTab = (tab: string): tab is SearchCategoryId => tab.startsWith("plugin:");
+export function searchTabs(): ReadonlyArray<{ id: SeTab; label: string }> {
+  return [...TABS, ...searchCategories().map((c) => ({ id: c.id, label: c.title }))];
+}
+export function sectionTitle(id: SectionId): string {
+  return isCustomTab(id) ? (searchCategories().find((c) => c.id === id)?.title ?? "") : SECTION_TITLES[id];
+}
+export type SectionId =
+  | "recent"
+  | "recentActions"
+  | "classes"
+  | "files"
+  | "symbols"
+  | "endpoints"
+  | "actions"
+  | "text"
+  | SearchCategoryId;
 
-const ALL_SECTIONS = ["classes", "files", "symbols", "endpoints", "actions", "text"];
-
-/** The built-in tabs, registered like contributed ones. */
-const BUILTIN_TABS: readonly SearchEverywhereTab[] = [
-  { id: "all", label: "All", order: 0, sections: (empty) => (empty ? ["recent", "recentActions"] : ALL_SECTIONS) },
-  { id: "classes", label: "Classes", order: 10, sections: (empty) => (empty ? [] : ["classes"]) },
-  { id: "files", label: "Files", order: 20, sections: (empty) => (empty ? ["recent"] : ["files"]) },
-  { id: "symbols", label: "Symbols", order: 30, sections: (empty) => (empty ? [] : ["symbols"]) },
-  { id: "actions", label: "Actions", order: 40, sections: (empty) => (empty ? ["recentActions"] : ["actions"]) },
-  { id: "text", label: "Text", order: 50, sections: (empty) => (empty ? [] : ["text"]) },
+export const TABS: ReadonlyArray<{ id: SeTab; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "classes", label: "Classes" },
+  { id: "files", label: "Files" },
+  { id: "symbols", label: "Symbols" },
+  { id: "actions", label: "Actions" },
+  { id: "text", label: "Text" },
 ];
-for (const t of BUILTIN_TABS) registerSearchEverywhereTab(t);
-
-/** The tabs shown now, in order. */
-export function seTabs(tabs = useSearchEverywhereTabs.getState().tabs): SearchEverywhereTab[] {
-  return searchEverywhereTabs(tabs).filter((t) => t.visible?.() ?? true);
-}
-
-/** A contributed tab with its own search. */
-export function contributedTab(id: string): SearchEverywhereTab | undefined {
-  const t = useSearchEverywhereTabs.getState().tabs.get(id);
-  return t?.search ? t : undefined;
-}
-
-/** Contributed tabs whose results also show in the All tab. */
-const contributedInAll = () =>
-  seTabs()
-    .filter((t) => t.search && t.inAll)
-    .map((t) => t.id);
 
 export const SECTION_ORDER: readonly SectionId[] = [
   "recent",
@@ -62,7 +49,7 @@ export const SECTION_ORDER: readonly SectionId[] = [
   "text",
 ];
 
-const SECTION_TITLES: Record<string, string> = {
+export const SECTION_TITLES: Record<Exclude<SectionId, SearchCategoryId>, string> = {
   recent: "Recent Files",
   recentActions: "Recent Actions",
   classes: "Classes",
@@ -73,23 +60,22 @@ const SECTION_TITLES: Record<string, string> = {
   text: "Text",
 };
 
-export function sectionTitle(id: SectionId): string {
-  const t = contributedTab(id);
-  return SECTION_TITLES[id] ?? t?.sectionTitle ?? t?.label ?? id;
-}
-
-/** Sections in display order: the built-ins', then contributed tabs' in tab order. */
-function sectionOrder(): SectionId[] {
-  return [...SECTION_ORDER, ...seTabs().flatMap((t) => (t.search ? [t.id] : []))];
-}
-
 /** Sections a tab queries, for a non-empty and an empty query. */
 export function sectionsFor(tab: SeTab, emptyQuery: boolean): SectionId[] {
-  const def = useSearchEverywhereTabs.getState().tabs.get(tab);
-  if (!def) return [];
-  if (def.search) return emptyQuery ? [] : [def.id];
-  const sections = def.sections?.(emptyQuery) ?? [];
-  return tab === "all" && !emptyQuery ? [...sections, ...contributedInAll()] : sections;
+  if (isCustomTab(tab)) return [tab];
+  if (emptyQuery) {
+    switch (tab) {
+      case "all":
+        return ["recent", "recentActions"];
+      case "files":
+        return ["recent"];
+      case "actions":
+        return ["recentActions"];
+      default:
+        return [];
+    }
+  }
+  return tab === "all" ? ["classes", "files", "symbols", "endpoints", "actions", "text"] : [tab];
 }
 
 export const ALL_TAB_LIMIT = 6;
@@ -108,6 +94,8 @@ export interface FileItem {
   nameIndices: number[];
   line: number | null;
   col: number | null;
+  /** A directory: choosing it selects it in the Project view. */
+  folder?: boolean;
 }
 
 export interface SymbolItem {
@@ -135,6 +123,9 @@ export interface ActionItem {
   title: string;
   category?: string;
   icon?: string;
+  /** Provider-owned activation; does not look up a potentially colliding global action ID. */
+  run?: (ctx: import("@/platform/context").ContextKeys) => void | Promise<void>;
+  description?: string;
   enabled: boolean;
   indices: number[];
   score: number;
@@ -164,17 +155,7 @@ export interface SettingItem {
   score: number;
 }
 
-/** A contributed tab's result. */
-export interface ProvidedItem extends Omit<SearchEverywhereItem, "indices"> {
-  kind: "provided";
-  indices: number[];
-}
-
-export function providedItem(i: SearchEverywhereItem): ProvidedItem {
-  return { ...i, kind: "provided", indices: i.indices ?? [] };
-}
-
-export type SeItem = FileItem | SymbolItem | ActionItem | TextItem | SettingItem | ProvidedItem;
+export type SeItem = FileItem | SymbolItem | ActionItem | TextItem | SettingItem;
 
 export type SeRow =
   | { kind: "section"; key: string; section: SectionId; title: string }
@@ -209,6 +190,57 @@ export function fileItem(
     line,
     col,
   };
+}
+
+/** File outside the project index (a scratch file); `relPath` is shown under its root label. */
+export interface OutsideFile {
+  path: string;
+  relPath: string;
+}
+
+// The project index's file scores (`ide-index` matching.rs): a name match ranks in a tier
+// above path-only matches, with exact / exact-stem / prefix boosts.
+const NAME_TIER = 1 << 20;
+
+function nameBoost(name: string, q: string): number {
+  const n = name.toLowerCase();
+  if (n === q) return 4000;
+  const dot = n.indexOf(".");
+  if (dot >= 0 && n.slice(0, dot) === q) return 3000;
+  return n.startsWith(q) ? 600 : 0;
+}
+
+/** Files outside the index matching a Files query by name (or by path for `dir/name`), scored like the index's. */
+export function matchOutsideFiles(files: readonly OutsideFile[], query: string): FileMatch[] {
+  const q = query
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.?\/+/, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+  if (!q) return [];
+  const byPath = q.includes("/");
+  const out: FileMatch[] = [];
+  for (const f of files) {
+    const name = basename(f.relPath);
+    const nameStart = f.relPath.length - name.length;
+    const m = byPath ? wordMatch(f.relPath, q) : wordMatch(name, q);
+    if (!m) continue;
+    const boost = nameBoost(name, byPath ? q.slice(q.lastIndexOf("/") + 1) : q);
+    out.push({
+      path: f.path,
+      relPath: f.relPath,
+      score: (byPath ? 0 : NAME_TIER) + boost,
+      indices: byPath ? m : m.map((i) => i + nameStart),
+    });
+  }
+  return out;
+}
+
+/** A directory match (`relPath` ends in `/`), listed with the files as IDEA's Go to File does. */
+export function folderItem(m: Pick<FileMatch, "path" | "relPath" | "indices">): FileItem {
+  const rel = m.relPath.replace(/\/$/, "");
+  return { ...fileItem({ ...m, relPath: rel }), key: `d:${m.path}`, folder: true };
 }
 
 export function symbolItem(m: SymbolMatch): SymbolItem {
@@ -299,8 +331,6 @@ export function matchActions(
   const recentRank = new Map(opts.recent.map((id, i) => [id, i]));
   for (const a of actions) {
     if (a.hidden) continue;
-    const enabled = opts.isEnabled(a);
-    if (!enabled && opts.includeDisabled === false) continue;
     let score: number;
     let indices: number[] = [];
     const translated = shown(a, a.title);
@@ -321,6 +351,8 @@ export function matchActions(
       score = Math.max(best, idHit) - 400;
       if (!Number.isFinite(score)) continue;
     }
+    const enabled = opts.isEnabled(a);
+    if (!enabled && opts.includeDisabled === false) continue;
     if (!enabled) score -= 150;
     const r = recentRank.get(a.id);
     if (r !== undefined) score += 40 - Math.min(30, r * 3);
@@ -410,7 +442,7 @@ export function textItems(path: string, rel: string, matches: readonly LineMatch
     const first = m.ranges[0] ?? [0, 0];
     out.push({
       kind: "text",
-      key: `t:${path}:${m.line}:${first[0]}`,
+      key: `t:${path}:${m.line}:${first[0] + m.textOffset}`,
       path,
       rel,
       line: m.line,
@@ -427,7 +459,7 @@ export function textItems(path: string, rel: string, matches: readonly LineMatch
 // Rows
 
 /** Sections the All tab mixes into one relevance-ordered list. */
-const mixed = (): SectionId[] => [...ALL_SECTIONS, ...contributedInAll()];
+const MIXED: readonly SectionId[] = ["classes", "files", "symbols", "endpoints", "actions", "text"];
 
 /**
  * Weight of a text hit: a literal substring in a line ranks below name
@@ -449,8 +481,6 @@ export function itemWeight(item: SeItem, query: string): number {
       return item.score;
     case "text":
       return TEXT_WEIGHT;
-    case "provided":
-      return item.score ?? name(item.title) ?? 0;
   }
 }
 
@@ -467,7 +497,7 @@ interface Mixed {
  */
 export function mixItems(sections: ReadonlyMap<SectionId, SectionState>, query: string): Mixed[] {
   const out: Array<Mixed & { rank: number }> = [];
-  mixed().forEach((id, rank) => {
+  MIXED.forEach((id, rank) => {
     let cap = Infinity;
     for (const item of sections.get(id)?.items ?? []) {
       cap = Math.min(cap, itemWeight(item, query));
@@ -492,10 +522,10 @@ export function buildRows(
   const rows: SeRow[] = [];
   if (opts.mix?.trim()) {
     for (const m of mixItems(sections, opts.mix.trim())) rows.push({ ...m.item, section: m.section });
-    for (const id of mixed()) if (sections.get(id)?.hasMore) rows.push({ kind: "more", key: `+${id}`, section: id });
+    for (const id of MIXED) if (sections.get(id)?.hasMore) rows.push({ kind: "more", key: `+${id}`, section: id });
     return rows;
   }
-  for (const id of sectionOrder()) {
+  for (const id of [...SECTION_ORDER, ...[...sections.keys()].filter(isCustomTab)]) {
     const s = sections.get(id);
     if (!s || !s.items.length) continue;
     if (opts.headers) rows.push({ kind: "section", key: `#${id}`, section: id, title: sectionTitle(id) });
@@ -529,10 +559,9 @@ export function groupJump(rows: readonly SeRow[], active: number, dir: 1 | -1): 
 // ---------------------------------------------------------------------------
 // "/" commands
 
-const commands = (): Array<{ name: string; tab: SeTab; label: string }> =>
-  seTabs()
-    .filter((t) => t.id !== "all")
-    .map((t) => ({ name: `/${t.id}`, tab: t.id, label: t.label }));
+export const COMMANDS: ReadonlyArray<{ name: string; tab: SeTab; label: string }> = TABS.filter(
+  (t) => t.id !== "all",
+).map((t) => ({ name: `/${t.id}`, tab: t.id, label: t.label }));
 
 export type ParsedCommand = { kind: "list"; rows: SeRow[] } | { kind: "run"; tab: SeTab; rest: string };
 
@@ -545,16 +574,14 @@ export function parseCommand(query: string): ParsedCommand | null {
   if (!m) return null;
   const word = m[1]!.toLowerCase();
   if (m[2] !== undefined) {
-    const cmd = commands().find((c) => c.name === `/${word}`);
+    const cmd = COMMANDS.find((c) => c.name === `/${word}`);
     return cmd ? { kind: "run", tab: cmd.tab, rest: m[2] } : null;
   }
-  const rows: SeRow[] = commands()
-    .filter((c) => c.name.startsWith(`/${word}`))
-    .map((c) => ({
-      kind: "command",
-      key: `cmd:${c.tab}`,
-      ...c,
-    }));
+  const rows: SeRow[] = COMMANDS.filter((c) => c.name.startsWith(`/${word}`)).map((c) => ({
+    kind: "command",
+    key: `cmd:${c.tab}`,
+    ...c,
+  }));
   return rows.length ? { kind: "list", rows } : null;
 }
 
@@ -568,9 +595,9 @@ export function parseCommand(query: string): ParsedCommand | null {
 export function topResultSettled(sections: ReadonlyMap<SectionId, SectionState>, mix?: string): boolean {
   if (mix?.trim()) {
     const top = mixItems(sections, mix.trim())[0]?.weight ?? -Infinity;
-    return mixed().every((id) => !sections.get(id)?.loading || (id === "text" && top > TEXT_WEIGHT));
+    return MIXED.every((id) => !sections.get(id)?.loading || (id === "text" && top > TEXT_WEIGHT));
   }
-  for (const id of sectionOrder()) {
+  for (const id of [...SECTION_ORDER, ...[...sections.keys()].filter(isCustomTab)]) {
     const s = sections.get(id);
     if (!s) continue;
     if (s.loading) return false;
