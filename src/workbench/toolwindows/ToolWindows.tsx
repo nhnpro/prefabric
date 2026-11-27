@@ -387,7 +387,7 @@ function startStripeDrag(e: PointerEvent<HTMLButtonElement>, id: string) {
       endDrag = beginDrag();
       useStripeDrag.setState({ id, drop: null });
     }
-    if (!(ev.buttons & 1)) return;
+    if (!(ev.buttons & 1)) return finish(false);
     place(ev.clientX, ev.clientY);
     const drop = stripeDropAt(ev.clientX, ev.clientY);
     const cur = useStripeDrag.getState().drop;
@@ -397,6 +397,7 @@ function startStripeDrag(e: PointerEvent<HTMLButtonElement>, id: string) {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onCancel);
+    window.removeEventListener("blur", onCancel);
     window.removeEventListener("keydown", onKey, true);
     if (!ghost) return;
     ghost.remove();
@@ -418,6 +419,7 @@ function startStripeDrag(e: PointerEvent<HTMLButtonElement>, id: string) {
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
   window.addEventListener("pointercancel", onCancel);
+  window.addEventListener("blur", onCancel);
   window.addEventListener("keydown", onKey, true);
 }
 

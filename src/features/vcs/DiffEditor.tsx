@@ -392,8 +392,10 @@ export function DiffEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, leftKey, rightKey]);
 
+  const reloadGenRef = useRef(0);
   const reload = useCallback(async () => {
     if (!attached) return;
+    const gen = ++reloadGenRef.current;
     try {
       const paths = [sideFile(left, path), sideFile(right, path)].filter((p): p is string => !!p);
       const [a, b, modeA, modeB, probes] = await Promise.all([
@@ -403,6 +405,7 @@ export function DiffEditor({
         loadSideMode(path, right),
         Promise.all(paths.map((p) => call(commands.fsProbe(p)).catch(() => null))),
       ]);
+      if (gen !== reloadGenRef.current) return;
       const prev = staticsRef.current;
       if (!prev || prev.a !== a || prev.b !== b) {
         staticsRef.current = { a, b };
@@ -412,6 +415,7 @@ export function DiffEditor({
       setBinary(probes.some((p) => p?.binary));
       setError(null);
     } catch (e) {
+      if (gen !== reloadGenRef.current) return;
       setError(errorMessage(e));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

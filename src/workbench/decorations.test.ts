@@ -19,4 +19,12 @@ describe("file decorations", () => {
     setFileDecorations("vcs", new Map());
     expect(getFileDecoration("/p/nested/a/b.rs")).toBeUndefined();
   });
+
+  it("preserves VCS folder color when a descendant file has a problem error", () => {
+    setFileDecorations("vcs", new Map([["/p/src/a.ts", { color: "var(--vcs-modified)", propagate: true }]]));
+    setFileDecorations("problems", new Map([["/p/src/b.ts", { error: true, propagate: true, tooltip: "1 error" }]]));
+    expect(getFileDecoration("/p/src")).toEqual({ color: "var(--vcs-modified)", error: true });
+    setFileDecorations("vcs", new Map());
+    setFileDecorations("problems", new Map());
+  });
 });

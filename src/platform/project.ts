@@ -59,41 +59,48 @@ export function startupLaunchHandled(): Promise<void> {
   return (startupLaunch ?? Promise.resolve()).catch(() => {});
 }
 
+let openGen = 0;
+
 export async function openProject(path: string): Promise<ProjectInfo> {
   await confirmProjectTrust(path, "local");
+  const gen = ++openGen;
   useProject.setState({ opening: true, openingPath: path });
   try {
     const project = await call(commands.openProject(path));
-    useProject.setState({ project, settings: project.settings, lightEdit: false });
+    if (gen === openGen) useProject.setState({ project, settings: project.settings, lightEdit: false });
     return project;
   } catch (error) {
     // Opening may fail after the backend has already closed the old project.
-    if (useProject.getState().project) {
+    if (gen === openGen && useProject.getState().project) {
       const project = await commands.projectCurrent().catch(() => null);
-      if (project?.root !== useProject.getState().project?.root)
+      if (gen === openGen && project?.root !== useProject.getState().project?.root)
         useProject.setState({ project, ...(project ? { settings: project.settings } : {}), lightEdit: false });
     }
     throw error;
   } finally {
-    useProject.setState({ opening: false, openingPath: null });
+    if (gen === openGen) useProject.setState({ opening: false, openingPath: null });
   }
 }
 
 /** Switches this window to LightEdit for the loose file `path` (kept when already in LightEdit). */
 export async function openLightEdit(path: string): Promise<void> {
+  openGen++;
   const settings = await call(commands.lightEditOpen(path));
   useProject.setState({ project: null, settings, lightEdit: true });
 }
 
 /** Switches this window to LightEdit without a file (File › New File from the welcome screen). */
 export async function openLightEditUntitled(): Promise<void> {
+  openGen++;
   const settings = await call(commands.lightEditOpenUntitled());
   useProject.setState({ project: null, settings, lightEdit: true });
 }
 
 export async function closeProject() {
+  openGen++;
   await commands.closeProject();
   useProject.setState({ project: null, lightEdit: false });
+  await loadSettings().catch(() => {});
 }
 
 export async function loadSettings() {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { LensSummary, UnityLens } from "@/bindings";
-import { codeLenses } from "@/editor/api";
+import { codeLenses, viewShown } from "@/editor/api";
 import { executeAction } from "@/platform/actions";
 import { commands } from "@/platform/ipc";
 import { useProject } from "@/platform/project";
@@ -88,6 +88,35 @@ describe("Unity Code Vision", () => {
     useProject.setState({ settings: { editor: { inlay: { codeVisionUsages: true } } } as never });
     await vi.advanceTimersByTimeAsync(10);
     expect(view.state.facet(codeLenses)).toHaveLength(1);
+    view.destroy();
+    host.remove();
+  });
+
+  it("refreshes lenses via viewShown after changes occur while detached", async () => {
+    vi.useFakeTimers();
+    const lens: UnityLens = { line: 0, col: 6, summary: { kind: "class", prefabs: 1, scenes: 0, other: 0 } };
+    const spy = vi.spyOn(commands, "unityLenses").mockResolvedValue({ status: "ok", data: [lens] });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({ doc: "class Player : MonoBehaviour {}", extensions: [unityLenses(1)] }),
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(view.state.facet(codeLenses)).toHaveLength(1);
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // Detach (simulating keptSlots), toggle setting off: must not dispatch while disconnected.
+    host.remove();
+    useProject.setState({ settings: { editor: { inlay: { codeVisionUsages: false } } } as never });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(view.state.facet(codeLenses)).toHaveLength(1);
+
+    // Re-attach and notify viewShown: lenses clear immediately.
+    document.body.appendChild(host);
+    view.dispatch({ effects: viewShown.of(null) });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(view.state.facet(codeLenses)).toHaveLength(0);
     view.destroy();
     host.remove();
   });

@@ -123,7 +123,7 @@ export function installDistractionFree(): () => void {
     previous();
   });
   const unsubLayout = useToolWindowLayout.subscribe((s, prev) => {
-    if (s.scope === prev.scope || !isDistractionFree()) return;
+    if ((s.layoutLoads === prev.layoutLoads && s.scope === prev.scope) || !isDistractionFree()) return;
     enterDistractionFreeLayout();
     showHint();
   });
