@@ -59,6 +59,8 @@ namespace Prefabric.Unity.Editor
 				return false;
 #if UNITY_EDITOR_OSX
 			return Directory.Exists(path) && Regex.IsMatch(IOPath.GetFileName(path.TrimEnd('/')), "^Prefabric.*\\.app$", RegexOptions.IgnoreCase);
+#elif UNITY_EDITOR_WIN
+			return File.Exists(path) && IOPath.GetFileName(path).Equals("prefabric.exe", StringComparison.OrdinalIgnoreCase);
 #else
 			var name = IOPath.GetFileNameWithoutExtension(path);
 			return File.Exists(path) && name.Equals("prefabric", StringComparison.OrdinalIgnoreCase);
@@ -72,9 +74,12 @@ namespace Prefabric.Unity.Editor
 				return false;
 
 			var version = ReadVersion(editorPath);
+			var versionLabel = version == null
+				? string.Empty
+				: $" [{(version.Build >= 0 ? version.ToString(3) : version.ToString(2))}]";
 			installation = new PrefabricInstallation
 			{
-				Name = DisplayName + (version != null ? $" [{version.ToString(3)}]" : string.Empty),
+				Name = DisplayName + versionLabel,
 				Path = editorPath,
 				Version = version ?? new Version(),
 			};
@@ -91,7 +96,7 @@ namespace Prefabric.Unity.Editor
 				if (match.Success && Version.TryParse(match.Groups[1].Value, out var version))
 					return version;
 			}
-			catch (IOException)
+			catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
 			{
 			}
 #endif
@@ -103,21 +108,36 @@ namespace Prefabric.Unity.Editor
 			var candidates = new List<string>();
 			var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 #if UNITY_EDITOR_OSX
-			foreach (var applications in new[] { "/Applications", IOPath.Combine(home, "Applications") })
+			var dirs = string.IsNullOrEmpty(home)
+				? new[] { "/Applications" }
+				: new[] { "/Applications", IOPath.Combine(home, "Applications") };
+			foreach (var applications in dirs)
 			{
-				if (Directory.Exists(applications))
-					candidates.AddRange(Directory.EnumerateDirectories(applications, "Prefabric*.app"));
+				try
+				{
+					if (Directory.Exists(applications))
+						candidates.AddRange(Directory.EnumerateDirectories(applications, "Prefabric*.app"));
+				}
+				catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+				{
+				}
 			}
 #elif UNITY_EDITOR_WIN
 			var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-			candidates.Add(IOPath.Combine(localAppData, "Prefabric", "prefabric.exe"));
-			candidates.Add(IOPath.Combine(localAppData, "Programs", "Prefabric", "prefabric.exe"));
-			candidates.Add(IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Prefabric", "prefabric.exe"));
+			if (!string.IsNullOrEmpty(localAppData))
+			{
+				candidates.Add(IOPath.Combine(localAppData, "Prefabric", "prefabric.exe"));
+				candidates.Add(IOPath.Combine(localAppData, "Programs", "Prefabric", "prefabric.exe"));
+			}
+			var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+			if (!string.IsNullOrEmpty(programFiles))
+				candidates.Add(IOPath.Combine(programFiles, "Prefabric", "prefabric.exe"));
 #else
 			candidates.Add("/usr/bin/prefabric");
 			candidates.Add("/usr/local/bin/prefabric");
 			candidates.Add("/opt/Prefabric/prefabric");
-			candidates.Add(IOPath.Combine(home, ".local", "bin", "prefabric"));
+			if (!string.IsNullOrEmpty(home))
+				candidates.Add(IOPath.Combine(home, ".local", "bin", "prefabric"));
 #endif
 			foreach (var candidate in candidates.Distinct())
 			{
@@ -130,14 +150,23 @@ namespace Prefabric.Unity.Editor
 		/// Prefabric takes the request (single instance) and shows the file in that project's window.</summary>
 		public bool Open(string path, int line, int column, string projectDirectory)
 		{
+			if (string.IsNullOrEmpty(Path))
+				return false;
 			var arguments = OpenArguments(path, line, column, projectDirectory);
+			try
+			{
 #if UNITY_EDITOR_OSX
-			// `open -n` starts the binary even when the app runs; that instance hands the request over and exits.
-			ProcessRunner.Start(ProcessRunner.ProcessStartInfoFor("open", $"-n {Quote(Path)} --args {arguments}", redirect: false, shell: true));
+				// `open -n` starts the binary even when the app runs; that instance hands the request over and exits.
+				return ProcessRunner.Start(ProcessRunner.ProcessStartInfoFor("/usr/bin/open", $"-n {Quote(Path)} --args {arguments}", redirect: false, shell: false));
 #else
-			ProcessRunner.Start(ProcessRunner.ProcessStartInfoFor(Path, arguments, redirect: false));
+				return ProcessRunner.Start(ProcessRunner.ProcessStartInfoFor(Path, arguments, redirect: false));
 #endif
-			return true;
+			}
+			catch (Exception e)
+			{
+				UnityEngine.Debug.LogWarning($"Prefabric: failed to launch {Path}: {e.Message}");
+				return false;
+			}
 		}
 
 		internal static string OpenArguments(string path, int line, int column, string projectDirectory)
@@ -148,12 +177,18 @@ namespace Prefabric.Unity.Editor
 
 			if (line > 0)
 				arguments += $" --line {line} --column {Math.Max(1, column)}";
-			return arguments + " " + Quote(IOPath.GetFullPath(path));
+			var resolved = IOPath.IsPathRooted(path) || string.IsNullOrEmpty(projectDirectory)
+				? IOPath.GetFullPath(path)
+				: IOPath.GetFullPath(IOPath.Combine(projectDirectory, path));
+			return arguments + " " + Quote(resolved);
 		}
 
 		internal static string Quote(string value)
 		{
-			return "\"" + value.Replace("\"", "\\\"") + "\"";
+			// Windows CRT CommandLineToArgvW rules: double any run of backslashes preceding `"` or the closing quote.
+			var escaped = Regex.Replace(value ?? string.Empty, @"(\\*)" + "\"", "$1$1\\\"");
+			escaped = Regex.Replace(escaped, @"(\\*)$", "$1$1");
+			return "\"" + escaped + "\"";
 		}
 	}
 }

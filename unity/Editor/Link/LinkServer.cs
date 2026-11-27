@@ -54,16 +54,24 @@ namespace Prefabric.Unity.Editor.Link
         /// <summary>Loopback only. The previous port is reused after a domain reload when it's free.</summary>
         static TcpListener Listen(int port)
         {
+            var l = new TcpListener(IPAddress.Loopback, port);
             try
             {
-                var l = new TcpListener(IPAddress.Loopback, port);
+#if !UNITY_EDITOR_WIN
                 l.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+#endif
                 l.Start();
                 return l;
             }
             catch (SocketException) when (port != 0)
             {
+                l.Stop();
                 return Listen(0);
+            }
+            catch
+            {
+                l.Stop();
+                throw;
             }
         }
 
@@ -157,6 +165,11 @@ namespace Prefabric.Unity.Editor.Link
                 }
                 lock (clients)
                 {
+                    if (stopped)
+                    {
+                        client.Abort();
+                        return;
+                    }
                     if (clients.Count >= MaxClients)
                     {
                         client.Send(Error(null, TooManyClients, "too many clients"));
@@ -220,11 +233,22 @@ namespace Prefabric.Unity.Editor.Link
                     client.Send(Error(id, BadToken, "bad token"));
                     return false;
                 }
-                var wanted = parameters.TryGetValue("protocol", out var v) && v is double d ? (int)d : Protocol;
+                var wanted = Protocol;
+                if (parameters.TryGetValue("protocol", out var v) && v != null)
+                {
+                    if (!(v is double d) || double.IsNaN(d) || double.IsInfinity(d) || d < 1)
+                    {
+                        client.Send(Error(id, -32602, "invalid protocol"));
+                        return false;
+                    }
+                    wanted = d >= Protocol ? Protocol : (int)d;
+                }
                 var result = helloResult();
                 result["protocol"] = Math.Min(wanted, Protocol);
-                client.Ready = true;
+                // Queue the hello reply before marking the client Ready so Notify() cannot race ahead of it.
                 client.Send(Response(id, result));
+                client.Ready = true;
+                client.CancelHandshakeTimeout();
                 return true;
             }
 
@@ -283,6 +307,7 @@ namespace Prefabric.Unity.Editor.Link
             const int MaxPending = 2000;
             /// <summary>Before the handshake a peer is unknown: it gets little time and little room.</summary>
             const int HandshakeTimeoutMs = 5000;
+            const int CloseSendTimeoutMs = 1000;
             const int MaxLineBeforeHello = 64 * 1024;
             const int MaxLine = 16 * 1024 * 1024;
 
@@ -307,15 +332,19 @@ namespace Prefabric.Unity.Editor.Link
 
             public void Start()
             {
-                new Thread(ReadLoop) { IsBackground = true, Name = "Prefabric link client" }.Start();
                 // A peer that never completes the handshake doesn't keep a client slot.
-                handshake = new Timer(_ =>
+                var timer = new Timer(_ =>
                 {
                     if (!Ready)
                         Abort();
-                    handshake?.Dispose();
-                }, null, HandshakeTimeoutMs, Timeout.Infinite);
+                    CancelHandshakeTimeout();
+                }, null, Timeout.Infinite, Timeout.Infinite);
+                handshake = timer;
+                timer.Change(HandshakeTimeoutMs, Timeout.Infinite);
+                new Thread(ReadLoop) { IsBackground = true, Name = "Prefabric link client" }.Start();
             }
+
+            public void CancelHandshakeTimeout() => Interlocked.Exchange(ref handshake, null)?.Dispose();
 
             void ReadLoop()
             {
@@ -331,6 +360,9 @@ namespace Prefabric.Unity.Editor.Link
                         {
                             if (buffer[i] != (byte)'\n')
                                 continue;
+                            var limit = Ready ? MaxLine : MaxLineBeforeHello;
+                            if (line.Length + (i - start) > limit)
+                                return;
                             line.Write(buffer, start, i - start);
                             start = i + 1;
                             var text = Encoding.UTF8.GetString(line.GetBuffer(), 0, (int)line.Length).TrimEnd('\r');
@@ -338,9 +370,10 @@ namespace Prefabric.Unity.Editor.Link
                             if (text.Length > 0 && !server.Handle(this, text))
                                 return;
                         }
-                        line.Write(buffer, start, read - start);
-                        if (line.Length > (Ready ? MaxLine : MaxLineBeforeHello))
+                        var tailLimit = Ready ? MaxLine : MaxLineBeforeHello;
+                        if (line.Length + (read - start) > tailLimit)
                             return;
+                        line.Write(buffer, start, read - start);
                     }
                 }
                 catch (Exception)
@@ -376,6 +409,7 @@ namespace Prefabric.Unity.Editor.Link
                 finally
                 {
                     closing = true;
+                    CancelHandshakeTimeout();
                     try
                     {
                         tcp.Close();
@@ -403,15 +437,24 @@ namespace Prefabric.Unity.Editor.Link
             /// <summary>Closes once the queued lines are written.</summary>
             public void Close()
             {
+                CancelHandshakeTimeout();
                 if (closing)
                     return;
                 closing = true;
+                try
+                {
+                    tcp.SendTimeout = CloseSendTimeoutMs;
+                }
+                catch (Exception)
+                {
+                }
                 pending.Release();
             }
 
             /// <summary>Closes now, dropping what is queued.</summary>
             public void Abort()
             {
+                CancelHandshakeTimeout();
                 closing = true;
                 while (outgoing.TryDequeue(out _))
                 {

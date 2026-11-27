@@ -14,7 +14,11 @@ namespace Prefabric.Unity.Editor
 	[InitializeOnLoad]
 	public class PrefabricEditor : IExternalCodeEditor
 	{
-		private static readonly Dictionary<string, PrefabricInstallation> _installations = new Dictionary<string, PrefabricInstallation>();
+#if UNITY_EDITOR_WIN || UNITY_EDITOR_OSX
+		private static readonly Dictionary<string, PrefabricInstallation> _installations = new Dictionary<string, PrefabricInstallation>(StringComparer.OrdinalIgnoreCase);
+#else
+		private static readonly Dictionary<string, PrefabricInstallation> _installations = new Dictionary<string, PrefabricInstallation>(StringComparer.Ordinal);
+#endif
 
 		CodeEditor.Installation[] IExternalCodeEditor.Installations => _installations.Values.Select(i => i.ToCodeEditorInstallation()).ToArray();
 
@@ -53,13 +57,23 @@ namespace Prefabric.Unity.Editor
 
 		private static bool TryGetInstallation(string editorPath, out PrefabricInstallation installation)
 		{
+			installation = null;
 			if (string.IsNullOrEmpty(editorPath))
+				return false;
+			try
 			{
-				installation = null;
+				editorPath = FileUtility.GetAbsolutePath(editorPath);
+			}
+			catch (Exception e) when (e is ArgumentException || e is NotSupportedException || e is PathTooLongException)
+			{
 				return false;
 			}
-			editorPath = FileUtility.GetAbsolutePath(editorPath);
-			return _installations.TryGetValue(editorPath, out installation) || PrefabricInstallation.TryDiscover(editorPath, out installation);
+			if (_installations.TryGetValue(editorPath, out installation))
+				return true;
+			if (!PrefabricInstallation.TryDiscover(editorPath, out installation))
+				return false;
+			_installations[editorPath] = installation;
+			return true;
 		}
 
 #if !UNITY_MSBUILD_ENABLED

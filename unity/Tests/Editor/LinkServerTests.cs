@@ -206,5 +206,55 @@ namespace Prefabric.Unity.Editor.Tests
 			var text = "{\"a\":[1,2.5,\"x\\n\\\"y\\\"\"],\"b\":{\"c\":true,\"d\":null}}";
 			Assert.AreEqual(text, Json.Write(Json.Parse(text)));
 		}
+
+		[Test]
+		public void JsonHandlesNonFiniteNumbersAndNonNumericFormattables()
+		{
+			var guid = Guid.Parse("12345678-1234-1234-1234-123456789abc");
+			var written = Json.Write(new Dictionary<string, object>
+			{
+				["nan"] = double.NaN,
+				["inf"] = double.PositiveInfinity,
+				["fnan"] = float.NaN,
+				["guid"] = guid,
+			});
+			var parsed = (Dictionary<string, object>)Json.Parse(written);
+			Assert.IsNull(parsed["nan"]);
+			Assert.IsNull(parsed["inf"]);
+			Assert.IsNull(parsed["fnan"]);
+			Assert.AreEqual(guid.ToString(), parsed["guid"]);
+		}
+
+		[Test]
+		public void JsonRejectsMalformedUnicodeAndOverflowNumbersAsFormatException()
+		{
+			Assert.Throws<FormatException>(() => Json.Parse("\"\\u-123\""));
+			Assert.Throws<FormatException>(() => Json.Parse("\"\\u0x12\""));
+			Assert.Throws<FormatException>(() => Json.Parse("1e999"));
+		}
+
+		[Test]
+		public void RefusesInvalidProtocolInHello()
+		{
+			using var c = new Connection(server.Port);
+			c.Send(Json.Write(new Dictionary<string, object>
+			{
+				["jsonrpc"] = "2.0",
+				["id"] = 1,
+				["method"] = "hello",
+				["params"] = new Dictionary<string, object> { ["token"] = Token, ["protocol"] = 0 },
+			}));
+			Assert.AreEqual(-32602, ErrorCode(c.Receive()));
+			Assert.IsTrue(c.Closed);
+		}
+
+		[Test]
+		public void DropsLineExceedingPreHelloLimitWithinFinalChunk()
+		{
+			using var c = new Connection(server.Port);
+			// 64 KiB + 100 bytes with newline in the same read chunk must still be rejected.
+			c.Send(new string('x', 64 * 1024 + 100));
+			Assert.IsTrue(c.Closed);
+		}
 	}
 }
