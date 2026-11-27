@@ -1068,6 +1068,11 @@ impl DebugManager {
             .flatten();
         let mut session = Session::new(id, owner, name, adapter_name, parent, request, conn, spec, io.port, io.child);
         session.exception_classes = exception_classes;
+        if session.adapter == unity::ADAPTER
+            && let Some(port) = arguments.get("port").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok())
+        {
+            session.unity_forward_port = Some(port);
+        }
         let session = Arc::new(session);
         if let Some(launch_type) = arguments.get("type").and_then(Value::as_str) {
             let _ = session.launch_type.set(launch_type.to_owned());
@@ -1349,6 +1354,11 @@ impl DebugManager {
     /// The connection dropped (adapter exited or `shutdown` finished).
     pub(crate) fn session_closed(&self, s: &Arc<Session>) {
         s.kill_processes();
+        if let Some(port) = s.unity_forward_port
+            && let Ok(handle) = tokio::runtime::Handle::try_current()
+        {
+            handle.spawn_blocking(move || unity_devices::release_local_port(port));
+        }
         let removed = self.sessions.lock().remove(&s.id).is_some();
         self.order.lock().retain(|id| *id != s.id);
         if removed && !s.terminated.swap(true, Ordering::AcqRel) {

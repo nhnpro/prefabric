@@ -115,3 +115,36 @@ fn unknown_objects_and_cycles_resolve_to_nothing() {
     cyclic.insert(Guid(1), scan(looping.as_bytes()));
     assert!(resolve(&cyclic, Guid(1), 8).is_none());
 }
+
+#[test]
+fn resolves_negative_file_ids_and_skips_removed_objects() {
+    let base_guid = Guid(0x11);
+    let inst_guid = Guid(0x22);
+    let neg_id: i64 = -7493120387424395000;
+    let base_yaml = format!(
+        "%YAML 1.1\n\
+         --- !u!1 &10\nGameObject:\n  m_Name: Root\n  m_Component:\n  - component: {{fileID: {neg_id}}}\n  - component: {{fileID: 20}}\n\
+         --- !u!114 &{neg_id}\nMonoBehaviour:\n  m_GameObject: {{fileID: 10}}\n  speed: 4\n\
+         --- !u!114 &20\nMonoBehaviour:\n  m_GameObject: {{fileID: 10}}\n  coins: 1\n\
+         --- !u!1 &30\nGameObject:\n  m_Name: Child\n  m_Component:\n  - component: {{fileID: 31}}\n\
+         --- !u!114 &31\nMonoBehaviour:\n  m_GameObject: {{fileID: 30}}\n  hp: 9\n"
+    );
+    let inst_id: i64 = 100;
+    let inst_yaml = format!(
+        "%YAML 1.1\n\
+         --- !u!1001 &{inst_id}\nPrefabInstance:\n  m_Modification:\n    m_RemovedComponents:\n    - {{fileID: 20, guid: {base_guid}, type: 3}}\n    m_RemovedGameObjects:\n    - {{fileID: 30, guid: {base_guid}, type: 3}}\n  m_SourcePrefab: {{fileID: 100100000, guid: {base_guid}, type: 3}}\n"
+    );
+    let mut files = HashMap::new();
+    files.insert(base_guid, scan(base_yaml.as_bytes()));
+    files.insert(inst_guid, scan(inst_yaml.as_bytes()));
+
+    let mapped_neg = inst_id ^ neg_id;
+    let origin = resolve(&files, inst_guid, mapped_neg).expect("negative fileID should resolve");
+    assert_eq!((origin.file, origin.object.file_id), (base_guid, neg_id));
+    assert_eq!(property(&files, inst_guid, mapped_neg, "speed").and_then(|v| v.value).as_deref(), Some("4"));
+
+    // Removed component and component belonging to a removed GameObject must not resolve.
+    assert!(resolve(&files, inst_guid, inst_id ^ 20).is_none());
+    assert!(resolve(&files, inst_guid, inst_id ^ 30).is_none());
+    assert!(resolve(&files, inst_guid, inst_id ^ 31).is_none());
+}

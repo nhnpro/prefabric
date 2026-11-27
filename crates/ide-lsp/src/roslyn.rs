@@ -133,7 +133,7 @@ impl LspManager {
     pub(crate) fn restore_roslyn_projects(&self, server: Arc<Server>, generation: u64, params: Value) {
         let projects = params.get("projectFilePaths").cloned().unwrap_or_else(|| json!([]));
         self.runtime.spawn(async move {
-            let Some(run) = server.running_gen(generation) else { return };
+            let Some(run) = server.initialized_gen(generation) else { return };
             let restore = run.peer.request::<_, Value>(RESTORE, json!({ "projectFilePaths": projects }), None);
             if let Err(e) = restore.await {
                 tracing::warn!("{}: {RESTORE}: {e}", server.name);

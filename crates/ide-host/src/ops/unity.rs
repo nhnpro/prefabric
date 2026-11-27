@@ -98,7 +98,9 @@ pub async fn unity_generate_project_files(
 
 fn run_batch(editor: &Path, root: &Path, cancel: &CancellationToken) -> IdeResult<()> {
     let log = std::env::temp_dir().join(format!("prefabric-unity-{}-{}.log", std::process::id(), nonce()));
-    let mut child = Command::new(editor)
+    let mut cmd = Command::new(editor);
+    ide_core::process::prepare(&mut cmd);
+    let mut child = cmd
         .args(["-batchmode", "-quit", "-nographics", "-projectPath"])
         .arg(root)
         .args(["-executeMethod", GENERATE_METHOD, "-logFile"])

@@ -15,8 +15,21 @@ pub(crate) use workspace_edit::{expand_workspace_edit, validate_workspace_edit_p
 #[cfg(test)]
 mod tests;
 
+fn strip_trailing_separators(path: &Path) -> PathBuf {
+    let mut s = path.as_os_str().to_string_lossy().into_owned();
+    while s.len() > 1 && s.ends_with(['/', '\\']) {
+        // Preserve Windows drive roots like `C:\`.
+        if cfg!(windows) && s.len() == 3 && s.as_bytes()[1] == b':' {
+            break;
+        }
+        s.pop();
+    }
+    PathBuf::from(s)
+}
+
 pub fn meta_path(path: &Path) -> PathBuf {
-    let mut name = path.as_os_str().to_os_string();
+    let normalized = strip_trailing_separators(path);
+    let mut name = normalized.into_os_string();
     name.push(".meta");
     name.into()
 }
@@ -87,7 +100,13 @@ fn is_link(metadata: &fs::Metadata) -> bool {
 }
 
 fn key(path: &Path) -> String {
-    let s = path.to_string_lossy().replace('\\', "/");
+    let mut s = path.to_string_lossy().replace('\\', "/");
+    while s.len() > 1 && s.ends_with('/') {
+        if cfg!(windows) && s.len() == 3 && s.as_bytes()[1] == b':' {
+            break;
+        }
+        s.pop();
+    }
     if cfg!(windows) { s.to_lowercase() } else { s }
 }
 

@@ -18,13 +18,14 @@ pub(crate) enum Problem {
 
 /// What a serialized asset's content allows.
 pub(crate) fn problem(bytes: &[u8]) -> Problem {
+    let has_open = bytes.starts_with(b"<<<<<<< ") || memmem::find(bytes, b"\n<<<<<<< ").is_some();
+    let has_close = bytes.starts_with(b">>>>>>> ") || memmem::find(bytes, b"\n>>>>>>> ").is_some();
+    if has_open && has_close {
+        return Problem::Conflict;
+    }
     // An empty file is a placeholder, not a binary asset.
     if !bytes.is_empty() && !bytes.starts_with(b"%YAML") {
         return Problem::Binary;
-    }
-    let marker = |m: &[u8]| bytes.starts_with(m) || memmem::find(bytes, &[b"\n", m].concat()).is_some();
-    if marker(b"<<<<<<< ") && marker(b">>>>>>> ") {
-        return Problem::Conflict;
     }
     Problem::None
 }
@@ -83,6 +84,8 @@ mod tests {
         let conflicted =
             b"%YAML 1.1\n--- !u!1 &1\nGameObject:\n<<<<<<< HEAD\n  m_Name: A\n=======\n  m_Name: B\n>>>>>>> feature\n";
         assert_eq!(problem(conflicted), Problem::Conflict);
+        let line1_conflict = b"<<<<<<< HEAD\n%YAML 1.1\n=======\n%YAML 1.1\n>>>>>>> feature\n";
+        assert_eq!(problem(line1_conflict), Problem::Conflict);
         // A name that merely contains the characters isn't a conflict.
         assert_eq!(problem(b"%YAML 1.1\n  m_Name: <<<<<<< x >>>>>>> y\n"), Problem::None);
     }

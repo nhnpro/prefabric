@@ -14,9 +14,41 @@ pub const USB_PREFIX: &str = "usb:";
 /// Unity's iOS players listen for the debugger on this device port.
 const IOS_PLAYER_PORT: u16 = 56000;
 
+/// Timeout for device discovery/forwarding commands (`adb`, `idevice_id`, `idevicename`).
+const CMD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 fn run(program: &Path, args: &[&str]) -> Option<String> {
-    let out = ide_core::process::prepare(&mut Command::new(program)).args(args).stdin(Stdio::null()).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    let mut child = ide_core::process::prepare(&mut Command::new(program))
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
+    let deadline = std::time::Instant::now() + CMD_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = reader.join();
+                return None;
+            }
+        }
+    };
+    let bytes = reader.join().ok()?;
+    status.success().then(|| String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn on_path(name: &str) -> Option<PathBuf> {
@@ -24,15 +56,43 @@ fn on_path(name: &str) -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join(&exe)).find(|p| p.is_file())
 }
 
+/// `6000.6.8f1` → `[6000, 6, 8, 1]`: numeric order, so 2022.3.10 sorts after 2022.3.9.
+fn version_key(dir: &Path) -> Vec<u64> {
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    name.split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).map(|s| s.parse().unwrap_or(0)).collect()
+}
+
+fn hub_config_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support")
+    } else if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| home.join("AppData").join("Roaming"))
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"))
+    }
+}
+
 /// Unity Hub's editors, newest version first (`Hub/Editor/<version>`).
 fn hub_editors() -> Vec<PathBuf> {
-    let roots: Vec<PathBuf> = if cfg!(target_os = "macos") {
-        vec!["/Applications/Unity/Hub/Editor".into()]
+    let mut roots: Vec<PathBuf> = Vec::new();
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    if let Some(ref home) = home
+        && let Ok(text) =
+            std::fs::read_to_string(hub_config_dir(home).join("UnityHub").join("secondaryInstallPath.json"))
+        && let Ok(custom) = serde_json::from_str::<String>(text.trim())
+        && !custom.is_empty()
+    {
+        roots.push(PathBuf::from(custom));
+    }
+    if cfg!(target_os = "macos") {
+        roots.push("/Applications/Unity/Hub/Editor".into());
     } else if cfg!(windows) {
-        vec!["C:\\Program Files\\Unity\\Hub\\Editor".into()]
-    } else {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Unity/Hub/Editor")).into_iter().collect()
-    };
+        let program_files =
+            std::env::var_os("ProgramFiles").map(PathBuf::from).unwrap_or_else(|| "C:\\Program Files".into());
+        roots.push(program_files.join("Unity").join("Hub").join("Editor"));
+    } else if let Some(home) = home {
+        roots.push(home.join("Unity/Hub/Editor"));
+    }
     let mut dirs: Vec<PathBuf> = roots
         .iter()
         .filter_map(|r| std::fs::read_dir(r).ok())
@@ -41,8 +101,7 @@ fn hub_editors() -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| p.is_dir())
         .collect();
-    dirs.sort();
-    dirs.reverse();
+    dirs.sort_by_key(|p| std::cmp::Reverse(version_key(p)));
     dirs
 }
 
@@ -148,17 +207,73 @@ pub fn discover() -> Vec<AttachableProcess> {
     rows
 }
 
-/// `iproxy` processes kept alive while the IDE runs, by `udid:port`.
-static PROXIES: Mutex<Vec<(String, u16, Child)>> = Mutex::new(Vec::new());
+struct ProxyEntry {
+    udid: String,
+    device_port: u16,
+    local_port: u16,
+    child: Child,
+}
+
+struct AdbForwardEntry {
+    adb: PathBuf,
+    serial: String,
+    device_port: u16,
+    local_port: u16,
+}
+
+/// Active `iproxy` processes keyed by `(udid, device_port)` and cleaned up when their session ends.
+static PROXIES: Mutex<Vec<ProxyEntry>> = Mutex::new(Vec::new());
+/// Active `adb forward` rules keyed by `(serial, device_port)` and removed when their session ends.
+static ADB_FORWARDS: Mutex<Vec<AdbForwardEntry>> = Mutex::new(Vec::new());
 
 fn free_local_port() -> IdeResult<u16> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| IdeError::unavailable(e.to_string()))?;
     Ok(listener.local_addr().map_err(|e| IdeError::unavailable(e.to_string()))?.port())
 }
 
+/// Releases any `iproxy` process or `adb forward` rule bound to `local_port`. Blocking.
+pub fn release_local_port(local_port: u16) {
+    let mut to_kill = Vec::new();
+    {
+        let mut proxies = PROXIES.lock();
+        let mut i = 0;
+        while i < proxies.len() {
+            if proxies[i].local_port == local_port {
+                to_kill.push(proxies.swap_remove(i));
+            } else {
+                i += 1;
+            }
+        }
+    }
+    for mut entry in to_kill {
+        let _ = entry.child.kill();
+        let _ = entry.child.wait();
+    }
+    let mut to_remove = Vec::new();
+    {
+        let mut forwards = ADB_FORWARDS.lock();
+        let mut i = 0;
+        while i < forwards.len() {
+            if forwards[i].local_port == local_port {
+                to_remove.push(forwards.swap_remove(i));
+            } else {
+                i += 1;
+            }
+        }
+    }
+    for entry in to_remove {
+        let _ = run(&entry.adb, &["-s", &entry.serial, "forward", "--remove", &format!("tcp:{}", entry.local_port)]);
+    }
+}
+
 /// Maps a device target's port to a local one and returns it. Blocking.
 pub fn forward(host: &str, port: u16) -> IdeResult<u16> {
     if let Some(serial) = host.strip_prefix(ADB_PREFIX) {
+        if let Some(local) =
+            ADB_FORWARDS.lock().iter().find(|e| e.serial == serial && e.device_port == port).map(|e| e.local_port)
+        {
+            return Ok(local);
+        }
         let adb = find_adb().ok_or_else(|| {
             IdeError::unavailable("adb not found: install the Android SDK or Unity's Android Build Support")
         })?;
@@ -166,33 +281,62 @@ pub fn forward(host: &str, port: u16) -> IdeResult<u16> {
         let out = run(&adb, &["-s", serial, "forward", "tcp:0", &format!("tcp:{port}")]).ok_or_else(|| {
             IdeError::unavailable(format!("adb forward to {serial} failed (is the device still connected?)"))
         })?;
-        return out.trim().parse().map_err(|_| IdeError::unavailable(format!("unexpected adb forward output: {out}")));
+        let local: u16 =
+            out.trim().parse().map_err(|_| IdeError::unavailable(format!("unexpected adb forward output: {out}")))?;
+        ADB_FORWARDS.lock().push(AdbForwardEntry {
+            adb,
+            serial: serial.to_owned(),
+            device_port: port,
+            local_port: local,
+        });
+        return Ok(local);
     }
     if let Some(udid) = host.strip_prefix(USB_PREFIX) {
-        let mut proxies = PROXIES.lock();
-        proxies.retain_mut(|(_, _, child)| matches!(child.try_wait(), Ok(None)));
-        if let Some((_, local, _)) = proxies.iter().find(|(u, _, _)| u == udid) {
-            return Ok(*local);
+        {
+            let mut proxies = PROXIES.lock();
+            proxies.retain_mut(|entry| matches!(entry.child.try_wait(), Ok(None)));
+            if let Some(entry) = proxies.iter().find(|e| e.udid == udid && e.device_port == port) {
+                return Ok(entry.local_port);
+            }
         }
         let iproxy =
             on_path("iproxy").ok_or_else(|| IdeError::unavailable("iproxy not found: install libimobiledevice"))?;
         let local = free_local_port()?;
-        let child = ide_core::process::prepare(&mut Command::new(iproxy))
+        let mut child = ide_core::process::prepare(&mut Command::new(iproxy))
             .args([&format!("{local}:{port}"), "-u", udid])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| IdeError::unavailable(format!("cannot start iproxy: {e}")))?;
-        proxies.push((udid.to_owned(), local, child));
-        // Give it a moment to listen before the adapter connects.
+        // Wait for iproxy to bind the local port outside the global mutex and fail fast if it exits.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut bound = false;
         while std::time::Instant::now() < deadline {
+            if let Ok(Some(status)) = child.try_wait() {
+                return Err(IdeError::unavailable(format!("iproxy exited early ({status})")));
+            }
             if std::net::TcpListener::bind(("127.0.0.1", local)).is_err() {
+                bound = true;
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+        if !bound {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(IdeError::unavailable(format!("iproxy did not listen on port {local}")));
+        }
+        let mut proxies = PROXIES.lock();
+        proxies.retain_mut(|entry| matches!(entry.child.try_wait(), Ok(None)));
+        if let Some(existing) = proxies.iter().find(|e| e.udid == udid && e.device_port == port) {
+            let existing_port = existing.local_port;
+            drop(proxies);
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(existing_port);
+        }
+        proxies.push(ProxyEntry { udid: udid.to_owned(), device_port: port, local_port: local, child });
         return Ok(local);
     }
     Err(IdeError::invalid(format!("not a device target: {host}")))
@@ -252,5 +396,12 @@ mod tests {
     #[test]
     fn rejects_non_device_targets() {
         assert!(forward("127.0.0.1", 56000).is_err());
+    }
+
+    #[test]
+    fn sorts_unity_editor_versions_numerically() {
+        assert!(version_key(Path::new("2022.3.10f1")) > version_key(Path::new("2022.3.9f1")));
+        assert!(version_key(Path::new("6000.0.10f1")) > version_key(Path::new("6000.0.2f1")));
+        assert!(version_key(Path::new("6000.0.2f1")) > version_key(Path::new("2023.2.20f1")));
     }
 }

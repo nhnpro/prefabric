@@ -132,12 +132,15 @@ pub fn console_text(update: &TestUpdate) -> (String, String) {
     (out, String::new())
 }
 
-/// The exit code once the run ended: 1 when a test failed, 0 when none did, none when the Editor
-/// went away.
+/// The exit code once the run ended: 1 when a test failed, 0 when none did, none when the run was
+/// cancelled or the Editor went away.
 pub fn exit_code(update: &TestUpdate) -> Option<Option<i32>> {
     match update {
         TestUpdate::Lost => Some(None),
         TestUpdate::Event(e) if e.get("event").and_then(Value::as_str) == Some("runFinished") => {
+            if e.get("canceled").and_then(Value::as_bool) == Some(true) {
+                return Some(None);
+            }
             Some(Some(i32::from(e.get("failed").and_then(Value::as_f64).unwrap_or(0.0) > 0.0)))
         }
         TestUpdate::Event(_) => None,

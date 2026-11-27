@@ -440,3 +440,42 @@ fn a_pausepoint_pauses_without_toggling() {
         sender.join().unwrap().unwrap();
     }
 }
+
+#[test]
+fn yaml_asset_detection_is_case_insensitive_and_object_at_rejects_malformed_ids() {
+    assert!(is_yaml_asset(Path::new("Assets/Main.UNITY")));
+    assert!(is_yaml_asset(Path::new("Assets/Player.Prefab")));
+    assert!(is_yaml_asset(Path::new("Assets/Config.ASSET")));
+    assert!(!is_yaml_asset(Path::new("Assets/Player.cs")));
+
+    let text = "%YAML 1.1\n--- !u!1 &100\nGameObject:\n--- !u!1 &-\n--- !u!1 &+5\n  m_Name: A\n";
+    assert_eq!(object_at(text, 5), Some(YamlObject { class: 1, file_id: "100".into(), stripped: false }));
+    assert_eq!(object_at("--- !u!1 &-\nGameObject:\n", 1), None);
+}
+
+#[test]
+fn bounded_line_reader_rejects_oversized_lines_and_shrinks_buffer() {
+    let mut reader = BufReader::new(std::io::Cursor::new(b"hello\nworld\n".as_slice()));
+    let mut buf = Vec::with_capacity(SHRINK_LINE_CAPACITY * 2);
+    assert_eq!(read_bounded_line(&mut reader, &mut buf, 16).unwrap(), 6);
+    assert_eq!(&buf, b"hello\n");
+    assert!(buf.capacity() <= SHRINK_LINE_CAPACITY);
+
+    let mut oversized = BufReader::new(std::io::Cursor::new(b"0123456789abcdef\n".as_slice()));
+    let err = read_bounded_line(&mut oversized, &mut buf, 8).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn canceled_test_run_reports_no_exit_code() {
+    let canceled = TestUpdate::Event(json!({
+        "runId": "r1",
+        "event": "runFinished",
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0,
+        "canceled": true,
+        "durationMs": 50
+    }));
+    assert_eq!(test_exit_code(&canceled), Some(None));
+}

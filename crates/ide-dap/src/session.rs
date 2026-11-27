@@ -129,6 +129,7 @@ pub(crate) struct Session {
     /// Used only by a kotlin-lsp session: see [`Session::kotlin_lsp_quirks`].
     pub(crate) quirks: kotlin_lsp::Quirks,
     pub(crate) unity_startup_activity: Mutex<Instant>,
+    pub(crate) unity_forward_port: Option<u16>,
 }
 
 /// Which threads of the program are suspended: each from its `stopped` event until a
@@ -297,6 +298,7 @@ impl Session {
             stream_trace_done: parking_lot::Mutex::new(None),
             quirks: kotlin_lsp::Quirks::default(),
             unity_startup_activity: Mutex::new(Instant::now()),
+            unity_forward_port: None,
         }
     }
 
