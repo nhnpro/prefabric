@@ -10,7 +10,13 @@ export function DotnetView() {
   const s = useDotnet();
   const tx = useTx();
   const root = useProject((state) => state.project?.root ?? "");
-  const relative = (path: string) => (root && path.startsWith(root + "/") ? path.slice(root.length + 1) : path);
+  const norm = (p: string) => p.replaceAll("\\", "/");
+  const normRoot = root ? norm(root).replace(/\/+$/, "") : "";
+  const relative = (path: string) => {
+    const n = norm(path);
+    return normRoot && n.startsWith(`${normRoot}/`) ? n.slice(normRoot.length + 1) : path;
+  };
+  const baseName = (path: string) => norm(path).split("/").at(-1) ?? path;
   const [versions, setVersions] = useState<Record<string, string>>({});
   const results = new Map<string, string[]>();
   for (const p of s.found) results.set(p.id, [...new Set([...(results.get(p.id) ?? []), p.version])]);
@@ -29,15 +35,15 @@ export function DotnetView() {
           {s.error}
         </div>
       )}
-      {s.model.errors?.map((error) => (
-        <details key={error} className={styles.error}>
+      {s.model.errors?.map((error, i) => (
+        <details key={`${i}:${error}`} className={styles.error}>
           <summary>{tx("Project evaluation failed")}</summary>
           {error}
         </details>
       ))}
       {s.model.solutions.map((solution) => (
         <details key={solution.path}>
-          <summary>{solution.path.split("/").at(-1)}</summary>
+          <summary>{baseName(solution.path)}</summary>
           {solution.projects.map((path) => (
             <Button key={path} title={path} disabled={s.busy} onClick={() => action("select", { path })}>
               {relative(path)}

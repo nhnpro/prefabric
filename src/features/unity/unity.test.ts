@@ -53,6 +53,30 @@ describe("csharp scanner", () => {
     expect(unityBaseInFile(text, other!, types)).toBeUndefined();
     expect(unityBaseInFile("class A {}", classes("class A {}")[0]!, types)).toBeNull();
   });
+
+  it("ignores generic type arguments in base lists", () => {
+    const text = "class Foo : IConverter<int, MonoBehaviour, Dictionary<string, ScriptableObject>> {}";
+    const [foo] = classes(text);
+    expect(foo?.bases).toEqual(["IConverter"]);
+    expect(unityBaseInFile(text, foo!, new Set(["MonoBehaviour", "ScriptableObject"]))).toBeNull();
+  });
+
+  it("blanks interpolated strings with quotes and C# 11 raw string literals without losing brace balance", () => {
+    const text = [
+      "class A : MonoBehaviour {",
+      '    string a = $"x: {Get("}")}";',
+      '    string b = """',
+      "        } class Fake : MonoBehaviour {",
+      '    """;',
+      "    void Update() {}",
+      "}",
+    ].join("\n");
+    const code = codeOnly(text);
+    expect(code).toHaveLength(text.length);
+    const found = classes(text);
+    expect(found.map((c) => c.name)).toEqual(["A"]);
+    expect([...declaredMethods(text, found[0]!)]).toEqual(["Update"]);
+  });
 });
 
 describe("message data", async () => {
@@ -337,6 +361,23 @@ describe("Unity-aware rename: what isn't a serialized field", () => {
     expect(ext?.label).toBe("Rename file to Hero.cs");
   });
 
+  it("offers FormerlySerializedAs when a field shares a sibling class name and coalesces line-0 edits", async () => {
+    const text = "class Stats {} class Player : MonoBehaviour { public Stats Stats; }";
+    const fieldPos = text.lastIndexOf("Stats");
+    const [ext] = await unityRename(deps)({
+      state: EditorState.create({ doc: text }),
+      path: "/p/Player.cs",
+      pos: fieldPos,
+      oldName: "Stats",
+      newName: "Metrics",
+      edit: empty,
+    });
+    expect(ext?.label).toBe('Add [FormerlySerializedAs("Stats")] to keep saved values');
+    const edits = (ext!.extend(empty).files[0] as { edits: TextEdit[] }).edits;
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.new_text).toBe('using UnityEngine.Serialization;\n[FormerlySerializedAs("Stats")]\n');
+  });
+
   it("asks the server about bases that only look like interfaces", async () => {
     const types = unityTypeNames(await data);
     const text = "class Shop : IAPStoreBase {}";
@@ -366,6 +407,15 @@ describe("assembly definition references", () => {
     expect(referenceAt("/p/Assets/X/X.asmref", asmref, asmref.indexOf("GUID") + 1)?.value).toBe(
       "GUID:F3A9C0D1E2B34567890ABCDEF1234567",
     );
+    // Unterminated strings return null instead of a negative `to`, and escaped quotes don't truncate.
+    const unterminated = '{"references": ["Game.Runtime';
+    expect(referenceAt(asmdef, unterminated, unterminated.indexOf("Game") + 2)).toBeNull();
+    const escaped = '{"references": ["Foo\\"Bar"]}';
+    expect(referenceAt(asmdef, escaped, escaped.indexOf("Foo") + 1)).toEqual({
+      value: 'Foo\\"Bar',
+      from: escaped.indexOf("Foo"),
+      to: escaped.lastIndexOf('"'),
+    });
   });
 
   it("resolves names and GUIDs", () => {
@@ -426,5 +476,16 @@ describe("Unity YAML", () => {
     const plain = EditorState.create({ doc: "a: 1\n", extensions: unityYamlLock("/p/config.yaml") });
     expect(plain.readOnly).toBe(false);
     view.destroy();
+    expect(useUnityYaml.getState().locked[path]).toBeUndefined();
+  });
+
+  it("does not dispatch to a view destroyed before the unlock microtask runs", async () => {
+    const path = "/p/Assets/Prefabs/Destroyed.prefab";
+    const view = new EditorView({ state: EditorState.create({ doc: prefab, extensions: unityYamlLock(path) }) });
+    const dispatchSpy = vi.spyOn(view, "dispatch");
+    unlockUnityYaml(path);
+    view.destroy();
+    await Promise.resolve();
+    expect(dispatchSpy).not.toHaveBeenCalled();
   });
 });

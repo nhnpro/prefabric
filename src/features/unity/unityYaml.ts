@@ -27,6 +27,12 @@ export function unlockUnityYaml(path: string) {
   useUnityYaml.setState((s) => ({ unlocked: new Set(s.unlocked).add(path), locked: { ...s.locked, [path]: false } }));
 }
 
+export function clearUnityYaml() {
+  useUnityYaml.setState({ locked: {}, unlocked: new Set() });
+}
+
+const openViews = new Map<string, number>();
+
 const setUnlocked = StateEffect.define<boolean>();
 
 const unlockedField = StateField.define<boolean>({
@@ -42,6 +48,8 @@ export function unityYamlLock(path: string): Extension {
     EditorState.readOnly.compute(["doc", unlockedField], locked),
     EditorView.editable.compute(["doc", unlockedField], (s) => !locked(s)),
     ViewPlugin.define((view) => {
+      let destroyed = false;
+      openViews.set(path, (openViews.get(path) ?? 0) + 1);
       const publish = () => {
         const isLocked = locked(view.state);
         const known = useUnityYaml.getState().locked[path];
@@ -52,14 +60,31 @@ export function unityYamlLock(path: string): Extension {
       publish();
       const off = useUnityYaml.subscribe((s, prev) => {
         if (s.unlocked.has(path) && !prev.unlocked.has(path) && !view.state.field(unlockedField)) {
-          queueMicrotask(() => view.dispatch({ effects: setUnlocked.of(true) }));
+          queueMicrotask(() => {
+            if (!destroyed) view.dispatch({ effects: setUnlocked.of(true) });
+          });
         }
       });
       return {
         update: (u) => {
           if (u.docChanged || u.transactions.some((t) => t.effects.some((e) => e.is(setUnlocked)))) publish();
         },
-        destroy: off,
+        destroy: () => {
+          destroyed = true;
+          off();
+          const remaining = (openViews.get(path) ?? 1) - 1;
+          if (remaining > 0) {
+            openViews.set(path, remaining);
+          } else {
+            openViews.delete(path);
+            if (path in useUnityYaml.getState().locked) {
+              useUnityYaml.setState((s) => {
+                const { [path]: _, ...rest } = s.locked;
+                return { locked: rest };
+              });
+            }
+          }
+        },
       };
     }),
   ];

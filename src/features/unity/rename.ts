@@ -108,18 +108,20 @@ export function formerlySerializedEdits(
   const line = doc.lineAt(declarationStart);
   const indent = /^\s*/.exec(line.text)![0];
   const at = posAt(doc, line.from);
-  const edits: TextEdit[] = [
-    { range: { start: at, end: at }, new_text: `${indent}[FormerlySerializedAs("${oldName}")]\n` },
-  ];
+  const attr = `${indent}[FormerlySerializedAs("${oldName}")]\n`;
   if (!/^\s*using\s+UnityEngine\.Serialization\s*;/m.test(codeOnly(text))) {
     const { offset, prefix } = usingInsertion(text);
+    const usingText = prefix ? `${prefix}using UnityEngine.Serialization;` : "using UnityEngine.Serialization;\n";
+    if (offset === 0 && line.from === 0) {
+      return [{ range: { start: at, end: at }, new_text: `${usingText}${attr}` }];
+    }
     const p = posAt(doc, offset);
-    edits.push({
-      range: { start: p, end: p },
-      new_text: prefix ? `${prefix}using UnityEngine.Serialization;` : "using UnityEngine.Serialization;\n",
-    });
+    return [
+      { range: { start: at, end: at }, new_text: attr },
+      { range: { start: p, end: p }, new_text: usingText },
+    ];
   }
-  return edits;
+  return [{ range: { start: at, end: at }, new_text: attr }];
 }
 
 export function unityRename(deps: UnityDeps): ContributedRename {
@@ -135,8 +137,24 @@ export function unityRename(deps: UnityDeps): ContributedRename {
     const text = state.doc.toString();
     const out: RenameExtension[] = [];
 
-    // The class itself, renamed from its declaration or a use in its file (a member can't share
-    // its class's name, CS0542).
+    // Check serialized field declarations first: a field may share the name of a sibling or nested
+    // class in the same file (only its own enclosing class name is disallowed, CS0542).
+    const owner = classAtMemberLevel(text, pos);
+    const field = owner && serializedFieldAt(text, pos);
+    if (owner && field) {
+      const base = await unityBaseOf(path, text, owner, unityTypes, deps);
+      if (base && SERIALIZING.has(base)) {
+        const edits = formerlySerializedEdits(state.doc, text, field.declarationStart, oldName);
+        out.push({
+          label: tx`Add [FormerlySerializedAs("${oldName}")] to keep saved values`,
+          checked: true,
+          extend: (e) => withTextEdits(e, path, edits),
+        });
+      }
+      return out;
+    }
+
+    // The class itself, renamed from its declaration or a use in its file.
     const cls = classes(text).find((c) => c.name === oldName);
     if (cls) {
       const { dir, name } = split(path);
@@ -152,19 +170,6 @@ export function unityRename(deps: UnityDeps): ContributedRename {
       return out;
     }
 
-    const owner = classAtMemberLevel(text, pos);
-    const field = owner && serializedFieldAt(text, pos);
-    if (owner && field) {
-      const base = await unityBaseOf(path, text, owner, unityTypes, deps);
-      if (base && SERIALIZING.has(base)) {
-        const edits = formerlySerializedEdits(state.doc, text, field.declarationStart, oldName);
-        out.push({
-          label: tx`Add [FormerlySerializedAs("${oldName}")] to keep saved values`,
-          checked: true,
-          extend: (e) => withTextEdits(e, path, edits),
-        });
-      }
-    }
     return out;
   };
 }
