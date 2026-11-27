@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 using System;
+using System.Globalization;
 using UnityEditor;
 #if !UNITY_MSBUILD_ENABLED
 using UnityEditor.Compilation;
@@ -43,8 +44,14 @@ namespace Prefabric.Unity.Editor
 #if !UNITY_MSBUILD_ENABLED
 		public static Version LatestLanguageVersionSupported(Assembly assembly)
 		{
-			if (assembly?.compilerOptions != null && Version.TryParse(assembly.compilerOptions.LanguageVersion, out var result))
-				return result;
+			var raw = assembly?.compilerOptions?.LanguageVersion;
+			if (!string.IsNullOrEmpty(raw))
+			{
+				if (Version.TryParse(raw, out var result))
+					return result;
+				if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var major) && major > 0)
+					return new Version(major, 0);
+			}
 
 			// if parsing fails, we know at least we have support for 8.0
 			return new Version(8, 0);

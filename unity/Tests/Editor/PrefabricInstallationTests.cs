@@ -59,5 +59,44 @@ namespace Prefabric.Unity.Editor.Tests
 				Directory.Delete(dir, true);
 			}
 		}
+
+		[Test]
+		public void MakeRelativeToProjectPathRespectsDirectoryBoundaryAndCanonicalizes()
+		{
+			Assert.IsNull(FileUtility.MakeRelativeToProjectPath(null));
+			Assert.IsNull(FileUtility.MakeRelativeToProjectPath(""));
+			var projectDir = Path.GetFullPath(Path.Combine(UnityEngine.Application.dataPath, ".."));
+			Assert.IsNull(FileUtility.MakeRelativeToProjectPath(projectDir + "Extra.csproj"));
+			Assert.AreEqual("Assembly-CSharp.csproj", FileUtility.MakeRelativeToProjectPath("./Assembly-CSharp.csproj"));
+			Assert.IsTrue(FileUtility.IsFileInProjectRootDirectory("./Assembly-CSharp.csproj"));
+		}
+
+#if !UNITY_MSBUILD_ENABLED
+		[Test]
+		public void XmlFilenameEscapesMsBuildAndXmlMetacharacters()
+		{
+			Assert.AreEqual(
+				"R&amp;D%2520%3b%24%40%28%29%2a%3f.dll",
+				ProjectGeneration.XmlFilename("R&D%20;$@()*?.dll"));
+		}
+
+		[Test]
+		public void SolutionParserSkipsProjectElementsWithoutPathAttribute()
+		{
+			var sln = SolutionParser.ParseSolutionXmlContent("<Solution><Project /><Project Path=\"Game.csproj\" /></Solution>");
+			Assert.AreEqual(1, sln.Projects.Length);
+			Assert.AreEqual("Game.csproj", sln.Projects[0].FileName);
+		}
+
+		[Test]
+		public void LatestLanguageVersionParsesMajorOnlyVersions()
+		{
+			var assembly = new UnityEditor.Compilation.Assembly
+			{
+				compilerOptions = new UnityEditor.Compilation.ScriptCompilerOptions { LanguageVersion = "10" },
+			};
+			Assert.AreEqual(new System.Version(10, 0), UnityInstallation.LatestLanguageVersionSupported(assembly));
+		}
+#endif
 	}
 }

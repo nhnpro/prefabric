@@ -81,7 +81,7 @@ namespace Prefabric.Unity.Editor.Link
                 {
                     File.Delete(linkFile);
                 }
-                catch (IOException)
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
                 {
                 }
             };

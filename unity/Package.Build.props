@@ -16,7 +16,7 @@
 
   <ItemGroup Condition="'$(_PrefabricImportBuildProps)' == 'true' And Exists('$(SolutionDir)Library/Prefabric/MSBuild/Prefabric.Generated.props')">
     <_PrefabricGeneratedProps Include="$(SolutionDir)Library/Prefabric/MSBuild/Prefabric.Generated.props" />
-    <FastUpToDateCheckBuildInput Include="_PrefabricGeneratedProps" />
+    <FastUpToDateCheckBuildInput Include="@(_PrefabricGeneratedProps)" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(_PrefabricImportBuildProps)' == 'true' And '$(PrefabricActive)' == 'true' And '$(IsEntryPointProject)' != 'true' And '$(MSBuildProjectName)' != 'Main.EntryPoint'">

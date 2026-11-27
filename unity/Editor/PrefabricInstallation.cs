@@ -28,11 +28,13 @@ namespace Prefabric.Unity.Editor
 
 		public bool SupportsAnalyzers => true;
 
+		private static readonly Lazy<PackageInfo> _packageInfo = new Lazy<PackageInfo>(() => PackageInfo.FindForAssembly(typeof(PrefabricInstallation).Assembly));
+
 		/// <summary>Analyzers shipped in the package (Microsoft.Unity.Analyzers), outside Unity's asset
 		/// import (`Analyzers~`), so they apply to the IDE only and never to Unity's own compilation.</summary>
 		public string[] GetAnalyzers()
 		{
-			var package = PackageInfo.FindForAssembly(typeof(PrefabricInstallation).Assembly);
+			var package = _packageInfo.Value;
 			if (package == null || string.IsNullOrEmpty(package.resolvedPath))
 				return Array.Empty<string>();
 
@@ -44,7 +46,7 @@ namespace Prefabric.Unity.Editor
 
 		public static string PackageVersion()
 		{
-			return PackageInfo.FindForAssembly(typeof(PrefabricInstallation).Assembly)?.version ?? "0.0.0";
+			return _packageInfo.Value?.version ?? "0.0.0";
 		}
 
 		public CodeEditor.Installation ToCodeEditorInstallation()

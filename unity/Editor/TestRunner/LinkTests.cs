@@ -29,9 +29,11 @@ namespace Prefabric.Unity.Editor.TestRunner
         const string DrainKey = "Prefabric.Tests.Drain";
         const double DrainSeconds = 15;
         const int MaxPendingEvents = 50000;
+        const int MaxFlushBatch = 200;
         static readonly string[] CountKeys = { "passed", "failed", "skipped" };
 
-        static readonly List<object> pending = new List<object>();
+        static readonly Queue<object> pending = new Queue<object>();
+        static int flushedThisTick;
         static readonly TestRunnerApi api;
 
         static LinkTests()
@@ -39,23 +41,27 @@ namespace Prefabric.Unity.Editor.TestRunner
             if (!EditorLink.Enabled)
                 return;
             api = ScriptableObject.CreateInstance<TestRunnerApi>();
+            api.hideFlags = HideFlags.HideAndDontSave;
             api.RegisterCallbacks(new Callbacks());
             EditorLink.Register("tests.run", Run);
             EditorLink.Register("tests.cancel", Cancel);
             try
             {
                 if (Json.Parse(SessionState.GetString(PendingKey, "[]")) is List<object> saved)
-                    pending.AddRange(saved);
+                {
+                    foreach (var item in saved)
+                        pending.Enqueue(item);
+                }
             }
             catch (FormatException)
             {
             }
             SessionState.EraseString(PendingKey);
-            EditorApplication.update += Flush;
+            EditorApplication.update += FlushOnUpdate;
             AssemblyReloadEvents.beforeAssemblyReload += () =>
             {
                 if (pending.Count > 0)
-                    SessionState.SetString(PendingKey, Json.Write(pending));
+                    SessionState.SetString(PendingKey, Json.Write(pending.ToList()));
             };
         }
 
@@ -124,21 +130,20 @@ namespace Prefabric.Unity.Editor.TestRunner
         }
 
         /// <summary>Cancels the open run's job and finishes the run for the IDE: a job cancelled
-        /// before it started never reports RunFinished. Returns whether the job had started, in which
-        /// case its late callbacks are drained.</summary>
+        /// before it started never reports RunFinished. Returns whether late callbacks are still draining.</summary>
         static bool Stop()
         {
             var guid = SessionState.GetString(GuidKey, "");
-            if (guid.Length > 0)
-                TestRunnerApi.CancelTestRun(guid);
+            var started = SessionState.GetInt(StartedKey, 0) == 1;
             var finished = Counts();
             finished["canceled"] = true;
             Send("runFinished", finished);
-            var started = SessionState.GetInt(StartedKey, 0) == 1;
             Finished();
             if (started)
                 SetDouble(DrainKey, EditorApplication.timeSinceStartup);
-            return started;
+            if (guid.Length > 0)
+                TestRunnerApi.CancelTestRun(guid);
+            return Draining();
         }
 
         static bool Draining()
@@ -180,9 +185,15 @@ namespace Prefabric.Unity.Editor.TestRunner
                 return;
             fields["runId"] = runId;
             fields["event"] = kind;
-            if (pending.Count >= MaxPendingEvents)
-                pending.RemoveAt(0);
-            pending.Add(fields);
+            while (pending.Count >= MaxPendingEvents)
+                pending.Dequeue();
+            pending.Enqueue(fields);
+            Flush();
+        }
+
+        static void FlushOnUpdate()
+        {
+            flushedThisTick = 0;
             Flush();
         }
 
@@ -190,9 +201,11 @@ namespace Prefabric.Unity.Editor.TestRunner
         {
             if (pending.Count == 0 || !EditorLink.Connected)
                 return;
-            foreach (var e in pending)
-                EditorLink.Notify("tests/event", e);
-            pending.Clear();
+            while (pending.Count > 0 && flushedThisTick < MaxFlushBatch && EditorLink.Connected)
+            {
+                EditorLink.Notify("tests/event", pending.Dequeue());
+                flushedThisTick++;
+            }
         }
 
         static Dictionary<string, object> Fields(ITestAdaptor test) => new Dictionary<string, object>

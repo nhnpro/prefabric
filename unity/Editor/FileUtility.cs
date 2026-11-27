@@ -28,7 +28,7 @@ namespace Prefabric.Unity.Editor
 		public static string GetPackageAssetFullPath(params string[] components)
 		{
 			// Unity has special IO handling of Packages and will resolve those path to the right package location
-			return GetAbsolutePath(Path.Combine("Packages", "com.unity.ide.visualstudio", Path.Combine(components)));
+			return GetAbsolutePath(Path.Combine("Packages", "dev.prefabric.unity", Path.Combine(components)));
 		}
 
 		public static string GetAssetFullPath(string asset)
@@ -47,7 +47,16 @@ namespace Prefabric.Unity.Editor
 			if (Path.DirectorySeparatorChar == UnixSeparator)
 				path = path.Replace(WinSeparator, UnixSeparator);
 
-			return path.Replace(string.Concat(WinSeparator, WinSeparator), WinSeparator.ToString());
+			if (Path.DirectorySeparatorChar == WinSeparator)
+			{
+				var unc = path.StartsWith(@"\\", StringComparison.Ordinal);
+				var body = unc ? path.Substring(2) : path;
+				while (body.Contains(@"\\"))
+					body = body.Replace(@"\\", @"\");
+				return unc ? @"\\" + body : body;
+			}
+
+			return path;
 		}
 
 		public static string NormalizeWindowsToUnix(this string path)
@@ -77,21 +86,40 @@ namespace Prefabric.Unity.Editor
 			if (string.IsNullOrEmpty(path)) { return string.Empty; }
 			return Path.IsPathRooted(path) ? path : GetAbsolutePath(path);
 		}
-		
+
 		// returns null if outside of the project scope
 		internal static string MakeRelativeToProjectPath(string fileName)
 		{
-			var basePath = GetAbsolutePath(Path.Combine(Application.dataPath, ".."));
+			if (string.IsNullOrEmpty(fileName))
+				return null;
+
+			var basePath = GetAbsolutePath(Path.Combine(Application.dataPath, ".."))
+				.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 			fileName = NormalizePathSeparators(fileName);
 
-			if (!Path.IsPathRooted(fileName))
-				fileName = Path.Combine(basePath, fileName);
+			try
+			{
+				fileName = Path.IsPathRooted(fileName)
+					? GetAbsolutePath(fileName)
+					: GetAbsolutePath(Path.Combine(basePath, fileName));
+			}
+			catch (Exception e) when (e is ArgumentException || e is NotSupportedException || e is PathTooLongException)
+			{
+				return null;
+			}
 
-			if (!fileName.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+			var comparison =
+#if UNITY_EDITOR_WIN || UNITY_EDITOR_OSX
+				StringComparison.OrdinalIgnoreCase;
+#else
+				StringComparison.Ordinal;
+#endif
+			var basePrefix = basePath + Path.DirectorySeparatorChar;
+			if (!fileName.StartsWith(basePrefix, comparison))
 				return null;
 
 			return fileName
-				.Substring(basePath.Length)
+				.Substring(basePrefix.Length)
 				.Trim(Path.DirectorySeparatorChar);
 		}
 
@@ -102,7 +130,7 @@ namespace Prefabric.Unity.Editor
 				if (File.Exists(file))
 					File.Delete(file);
 			}
-			catch (IOException)
+			catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
 			{
 				// ignore
 			}
