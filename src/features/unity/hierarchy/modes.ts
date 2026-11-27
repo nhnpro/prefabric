@@ -15,4 +15,8 @@ export function setHierarchyMode(path: string, mode: HierarchyMode) {
   useHierarchyModes.setState((s) => ({ byPath: { ...s.byPath, [path]: mode } }));
 }
 
+export function clearHierarchyModes() {
+  useHierarchyModes.setState({ byPath: {} });
+}
+
 export const isSceneOrPrefab = (path: string) => /\.(unity|prefab)$/i.test(path);

@@ -606,8 +606,20 @@ function RemotesList({ repo }: { repo: string | null }) {
       })
       .catch((e) => setError(errorMessage(e)));
   useEffect(() => {
-    void reload();
-  }, []);
+    let live = true;
+    void call(commands.vcsRemotes(repo))
+      .then((list) => {
+        if (!live) return;
+        setRemotes(list);
+        setSelected((s) => (s && list.some((r) => r.name === s) ? s : (list[0]?.name ?? null)));
+      })
+      .catch((e) => {
+        if (live) setError(errorMessage(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [repo]);
 
   const apply = async (edit: Parameters<typeof commands.vcsEditRemote>[1]) => {
     try {

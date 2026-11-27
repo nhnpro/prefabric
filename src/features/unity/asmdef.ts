@@ -22,19 +22,21 @@ const isDefinitionFile = (path: string) => /\.asm(def|ref)$/i.test(path);
 export function referenceAt(path: string, text: string, pos: number): AssemblyReference | null {
   if (!isDefinitionFile(path)) return null;
   let start = -1;
+  let end = -1;
   // Find the string around `pos`: scan from the start so escaped quotes are skipped.
   for (let i = 0; i < text.length && i <= pos; i++) {
     if (text[i] !== '"') continue;
     let j = i + 1;
     while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+    if (j >= text.length) break;
     if (i < pos && pos <= j) {
       start = i;
+      end = j;
       break;
     }
     i = j;
   }
-  if (start < 0) return null;
-  const end = text.indexOf('"', start + 1);
+  if (start < 0 || end < 0) return null;
   const before = text.slice(0, start);
   const inReferences = /"references"\s*:\s*\[[^\]]*$/.test(before);
   const isReference = /"reference"\s*:\s*$/.test(before);

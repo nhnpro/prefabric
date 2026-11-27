@@ -20,11 +20,11 @@ import { unityMessageSource } from "./completion";
 import { eventFunctionGutter } from "./gutter";
 import { hierarchyActions, hierarchyWrapper } from "./hierarchy";
 import { showYamlOnNavigation } from "./hierarchy/follow";
-import { isSceneOrPrefab } from "./hierarchy/modes";
+import { clearHierarchyModes, isSceneOrPrefab } from "./hierarchy/modes";
 import { unityLenses } from "./lenses";
 import { trackUnitySearchCategory } from "./searchTab";
 import { unityRename } from "./rename";
-import { unityYamlBanner, unityYamlLock } from "./unityYaml";
+import { clearUnityYaml, unityYamlBanner, unityYamlLock } from "./unityYaml";
 import { ussSupport } from "./uss";
 import { loadMessageData } from "./messages";
 import { trackUnityLink, UnityLinkItem } from "./link";
@@ -58,9 +58,6 @@ export function activate() {
             : ctx.language === "yaml" && !ctx.virtual
               ? [unityYamlLock(ctx.path), isSceneOrPrefab(ctx.path) ? showYamlOnNavigation(ctx.path) : []]
               : [],
-  });
-  const unsubscribe = useProject.subscribe((s, prev) => {
-    if (s.project?.root !== prev.project?.root) clearUnityBases();
   });
   const unregisterBanner = registerEditorBanner(unityYamlBanner);
   const unregisterSearch = trackUnitySearchCategory();
@@ -96,7 +93,11 @@ export function activate() {
   // Collected from the start, so the window shows what was logged before it opened.
   const offConsole = onIdeEvent("unityConsole", (e) => appendEntries(e.entries));
   const offProject = useProject.subscribe((s, prev) => {
-    if (s.project?.root !== prev.project?.root) clearConsole();
+    if (s.project?.root === prev.project?.root) return;
+    clearUnityBases();
+    clearConsole();
+    clearUnityYaml();
+    clearHierarchyModes();
   });
   return () => {
     unregisterShowMenus();
@@ -112,6 +113,5 @@ export function activate() {
     unregisterSearch();
     unregisterBanner();
     unregister();
-    unsubscribe();
   };
 }

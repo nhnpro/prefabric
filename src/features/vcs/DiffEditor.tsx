@@ -750,6 +750,7 @@ export function DiffEditor({
     editableB,
     updateChunkInfo,
     data.annotations,
+    edited,
     includable,
     path,
     left,

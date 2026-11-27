@@ -136,6 +136,7 @@ const REFRESH_DELAY_MS = 300;
 
 /** Context key for `when` clauses, and refresh on save; returns the unsubscribe function. */
 export function trackPlayControls(): () => void {
+  setContext(CONNECTED, useUnityLink.getState().status?.connection === "connected");
   const offStatus = useUnityLink.subscribe((s) => setContext(CONNECTED, s.status?.connection === "connected"));
   let timer: ReturnType<typeof setTimeout> | undefined;
   const offSave = onEditorEvent((e) => {
@@ -154,5 +155,6 @@ export function trackPlayControls(): () => void {
     clearTimeout(timer);
     offStatus();
     offSave();
+    setContext(CONNECTED, false);
   };
 }

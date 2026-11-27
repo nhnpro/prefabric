@@ -14,10 +14,132 @@ export interface ClassInfo {
 /** `text` with comments and string/char literals blanked out (same length), so braces in them don't count. */
 export function codeOnly(text: string): string {
   const out = text.split("");
-  let i = 0;
   const blank = (from: number, to: number) => {
     for (let j = from; j < to && j < out.length; j++) if (out[j] !== "\n") out[j] = " ";
   };
+  const scanInterpolation = (start: number, closeCount: number): number => {
+    // Blank the interpolation expression's delimiters and inner strings/comments while tracking braces.
+    let i = start;
+    let depth = 0;
+    while (i < text.length) {
+      const c = text[i]!;
+      if (c === "/" && text[i + 1] === "/") {
+        const end = text.indexOf("\n", i);
+        const stop = end < 0 ? text.length : end;
+        blank(i, stop);
+        i = stop;
+      } else if (c === "/" && text[i + 1] === "*") {
+        const end = text.indexOf("*/", i + 2);
+        const stop = end < 0 ? text.length : end + 2;
+        blank(i, stop);
+        i = stop;
+      } else if (c === '"' || c === "'") {
+        i = scanLiteral(i);
+      } else if (c === "{") {
+        depth++;
+        blank(i, i + 1);
+        i++;
+      } else if (c === "}") {
+        if (depth === 0) {
+          let run = 0;
+          while (text[i + run] === "}") run++;
+          if (run >= closeCount) {
+            blank(i, i + closeCount);
+            return i + closeCount;
+          }
+          blank(i, i + run);
+          i += run;
+        } else {
+          depth--;
+          blank(i, i + 1);
+          i++;
+        }
+      } else {
+        i++;
+      }
+    }
+    return text.length;
+  };
+  const scanLiteral = (i: number): number => {
+    const c = text[i]!;
+    if (c === "'") {
+      let j = i + 1;
+      while (j < text.length) {
+        if (text[j] === "\\") j += 2;
+        else if (text[j] === "'" || text[j] === "\n") break;
+        else j++;
+      }
+      blank(i + 1, j);
+      return j + 1;
+    }
+    // Count leading `$` / `@` modifiers right before `"`.
+    let dollars = 0;
+    let verbatim = false;
+    let p = i - 1;
+    while (p >= 0 && (text[p] === "$" || text[p] === "@")) {
+      if (text[p] === "$") dollars++;
+      else verbatim = true;
+      p--;
+    }
+    // C# 11 raw string literal: three or more `"` (never verbatim `@`).
+    let quotes = 0;
+    while (text[i + quotes] === '"') quotes++;
+    if (!verbatim && quotes >= 3) {
+      let j = i + quotes;
+      while (j < text.length) {
+        if (text[j] === '"') {
+          let run = 0;
+          while (text[j + run] === '"') run++;
+          if (run >= quotes) {
+            blank(i + quotes, j);
+            return j + run;
+          }
+          j += run;
+        } else if (dollars > 0 && text[j] === "{") {
+          let run = 0;
+          while (text[j + run] === "{") run++;
+          if (run >= dollars) {
+            blank(i + quotes, j + run);
+            j = scanInterpolation(j + run, dollars);
+            i = j - quotes;
+            continue;
+          }
+          j += run;
+        } else {
+          j++;
+        }
+      }
+      blank(i + quotes, text.length);
+      return text.length;
+    }
+    // Regular, verbatim, or interpolated string literal.
+    let segStart = i + 1;
+    let j = i + 1;
+    while (j < text.length) {
+      if (!verbatim && text[j] === "\\") {
+        j += 2;
+      } else if (verbatim && text[j] === '"' && text[j + 1] === '"') {
+        j += 2;
+      } else if (dollars > 0 && text[j] === "{") {
+        if (text[j + 1] === "{") {
+          j += 2;
+        } else {
+          blank(segStart, j + 1);
+          j = scanInterpolation(j + 1, 1);
+          segStart = j;
+        }
+      } else if (dollars > 0 && text[j] === "}" && text[j + 1] === "}") {
+        j += 2;
+      } else if (text[j] === '"' || (!verbatim && text[j] === "\n")) {
+        break;
+      } else {
+        j++;
+      }
+    }
+    blank(segStart, j);
+    return j + 1;
+  };
+  let i = 0;
   while (i < text.length) {
     const c = text[i]!;
     const next = text[i + 1];
@@ -32,16 +154,7 @@ export function codeOnly(text: string): string {
       blank(i, stop);
       i = stop;
     } else if (c === '"' || c === "'") {
-      const verbatim = text[i - 1] === "@" || (text[i - 1] === "$" && text[i - 2] === "@");
-      let j = i + 1;
-      while (j < text.length) {
-        if (!verbatim && text[j] === "\\") j += 2;
-        else if (verbatim && text[j] === '"' && text[j + 1] === '"') j += 2;
-        else if (text[j] === c || (!verbatim && text[j] === "\n")) break;
-        else j++;
-      }
-      blank(i + 1, j);
-      i = j + 1;
+      i = scanLiteral(i);
     } else i++;
   }
   return out.join("");
@@ -63,8 +176,9 @@ export function classes(text: string): ClassInfo[] {
         break;
       }
     }
-    const bases = (m[3] ?? "")
-      .replace(/\bwhere\b[\s\S]*$/, "")
+    let baseList = (m[3] ?? "").replace(/\bwhere\b[\s\S]*$/, "");
+    while (/<[^<>]*>/.test(baseList)) baseList = baseList.replace(/<[^<>]*>/g, "");
+    const bases = baseList
       .split(",")
       .map((b) => b.trim().replace(/<.*$/, ""))
       .filter(Boolean);

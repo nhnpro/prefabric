@@ -12,6 +12,7 @@ import { executeAction } from "@/platform/actions";
 import { editorPrefs } from "@/platform/editorSettings";
 import { formatMessage, tx } from "@/platform/i18n";
 import { call, commands, onIdeEvent } from "@/platform/ipc";
+import { useProject } from "@/platform/project";
 
 const DEBOUNCE_MS = 600;
 
@@ -69,15 +70,19 @@ function toLenses(view: EditorView, found: readonly UnityLens[]): CodeLens[] {
     if (l.line >= doc.lines) continue;
     const line = doc.line(l.line + 1);
     const pos = Math.min(line.from + l.col, line.to);
-    lensTitle(l.summary).forEach((title, i) =>
+    lensTitle(l.summary).forEach((title, i) => {
+      const run: NonNullable<CodeLens["run"]> = (v) => {
+        const current = v.state.facet(codeLenses).find((c) => c.run === run);
+        if (current) showUsages(v, Math.min(current.pos, v.state.doc.length));
+      };
       out.push({
         pos,
         title,
         tooltip: tx("Show usages in Unity assets"),
         order: 15 + i,
-        run: (v) => showUsages(v, Math.min(pos, v.state.doc.length)),
-      }),
-    );
+        run,
+      });
+    });
   }
   return out;
 }
@@ -88,13 +93,21 @@ export function unityLenses(doc: number): Extension {
       private timer: ReturnType<typeof setTimeout> | null = null;
       private generation = 0;
       private revision: number | null = null;
+      private enabled = editorPrefs().inlay.codeVisionUsages;
       private off: () => void;
+      private offSettings: () => void;
 
       constructor(private view: EditorView) {
         this.schedule(0);
         this.off = onIdeEvent("unityIndexState", (e) => {
           if (e.indexing || e.revision === this.revision) return;
           this.revision = e.revision;
+          this.schedule(0);
+        });
+        this.offSettings = useProject.subscribe(() => {
+          const next = editorPrefs().inlay.codeVisionUsages;
+          if (next === this.enabled) return;
+          this.enabled = next;
           this.schedule(0);
         });
       }
@@ -133,6 +146,7 @@ export function unityLenses(doc: number): Extension {
         if (this.timer) clearTimeout(this.timer);
         this.generation++;
         this.off();
+        this.offSettings();
       }
     },
   );

@@ -152,8 +152,9 @@ export function ConsoleView() {
           onScroll={(e) => {
             const el = e.currentTarget;
             const up = el.scrollTop < written.current - 4;
+            const atBottom = el.scrollHeight - el.clientHeight - el.scrollTop <= 4;
             written.current = el.scrollTop;
-            if (up && follow) useUnityConsole.setState({ follow: false });
+            if (up && !atBottom && follow) useUnityConsole.setState({ follow: false });
           }}
         >
           <div className={styles.canvas} style={{ height: totalSize }}>
