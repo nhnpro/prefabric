@@ -41,110 +41,118 @@ impl UnityIndex {
     /// The lenses of a C# file whose syntax outline is `outline`; only declarations assets use.
     pub fn lenses(&self, path: &Path, outline: &[OutlineItem]) -> Vec<UnityLens> {
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { return Vec::new() };
-        let mut out = Vec::new();
-        let mut parents = Vec::new();
-        self.class_lenses(path, stem, outline, &mut parents, &mut out);
-        out.sort_by_key(|l| (l.line, l.col));
-        out
+        let rel = self.rel(path);
+        self.query(|q| {
+            let mut out = Vec::new();
+            let mut parents = Vec::new();
+            class_lenses(q, rel.as_deref(), stem, outline, &mut parents, &mut out);
+            out.sort_by_key(|l| (l.line, l.col));
+            out
+        })
     }
+}
 
-    fn class_lenses<'a>(
-        &self,
-        path: &Path,
-        stem: &str,
-        items: &'a [OutlineItem],
-        parents: &mut Vec<&'a OutlineItem>,
-        out: &mut Vec<UnityLens>,
-    ) {
-        for item in items {
-            match item.kind {
-                SymbolKind::Namespace => {}
-                _ if is_class(item) => {
-                    if let Some(class) = symbol(parents, item, stem) {
-                        self.members(path, item, &class, out);
-                    }
+fn class_lenses<'a>(
+    q: &crate::graph::Query<'_>,
+    rel: Option<&str>,
+    stem: &str,
+    items: &'a [OutlineItem],
+    parents: &mut Vec<&'a OutlineItem>,
+    out: &mut Vec<UnityLens>,
+) {
+    for item in items {
+        match item.kind {
+            SymbolKind::Namespace => {}
+            _ if is_class(item) => {
+                if let Some(class) = symbol(parents, item, stem) {
+                    members(q, rel, item, &class, out);
                 }
-                _ => continue,
             }
-            parents.push(item);
-            self.class_lenses(path, stem, &item.children, parents, out);
-            parents.pop();
+            _ => continue,
+        }
+        parents.push(item);
+        class_lenses(q, rel, stem, &item.children, parents, out);
+        parents.pop();
+    }
+}
+
+/// Lenses of `class` (declared by `item`) and of its methods and fields.
+fn members(
+    q: &crate::graph::Query<'_>,
+    rel: Option<&str>,
+    item: &OutlineItem,
+    class: &crate::usages::CodeSymbol,
+    out: &mut Vec<UnityLens>,
+) {
+    let at = |i: &OutlineItem| (i.selection_range.start.line, i.selection_range.start.col);
+    let script = if class.script_class { rel.and_then(|r| q.graph.guid_of(r)) } else { None };
+    let usages = script.map(|s| q.script_usages(s));
+    if let Some(usages) = usages.as_deref() {
+        let (mut prefabs, mut scenes, mut other) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+        for u in usages {
+            let set = if u.rel.ends_with(".prefab") {
+                &mut prefabs
+            } else if u.rel.ends_with(".unity") {
+                &mut scenes
+            } else {
+                &mut other
+            };
+            set.insert(&*u.rel);
+        }
+        if !(prefabs.is_empty() && scenes.is_empty() && other.is_empty()) {
+            let (line, col) = at(item);
+            let n = |s: BTreeSet<_>| s.len() as u32;
+            out.push(UnityLens {
+                line,
+                col,
+                summary: LensSummary::Class { prefabs: n(prefabs), scenes: n(scenes), other: n(other) },
+            });
         }
     }
-
-    /// Lenses of `class` (declared by `item`) and of its methods and fields.
-    fn members(&self, path: &Path, item: &OutlineItem, class: &crate::usages::CodeSymbol, out: &mut Vec<UnityLens>) {
-        let at = |i: &OutlineItem| (i.selection_range.start.line, i.selection_range.start.col);
-        let script = if class.script_class { self.guid_of(path) } else { None };
-        if let Some(script) = script {
-            let (mut prefabs, mut scenes, mut other) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
-            for u in self.script_usages(script) {
-                let set = if u.rel.ends_with(".prefab") {
-                    &mut prefabs
-                } else if u.rel.ends_with(".unity") {
-                    &mut scenes
-                } else {
-                    &mut other
-                };
-                set.insert(u.rel);
-            }
-            if !(prefabs.is_empty() && scenes.is_empty() && other.is_empty()) {
-                let (line, col) = at(item);
-                let n = |s: BTreeSet<_>| s.len() as u32;
-                out.push(UnityLens {
-                    line,
-                    col,
-                    summary: LensSummary::Class { prefabs: n(prefabs), scenes: n(scenes), other: n(other) },
-                });
-            }
+    for m in item.children.iter().filter(|c| c.kind == SymbolKind::Method) {
+        let bindings = q.method_bindings(&m.name, Some(&class.class));
+        if bindings.is_empty() {
+            continue;
         }
-        for m in item.children.iter().filter(|c| c.kind == SymbolKind::Method) {
-            let bindings = self.method_bindings(&m.name, Some(&class.class));
-            if bindings.is_empty() {
-                continue;
-            }
-            let unity_events =
-                bindings.iter().filter(|b| matches!(b.kind, crate::BindingKind::UnityEvent { .. })).count();
-            let files: BTreeSet<&str> = bindings.iter().map(|b| b.rel.rsplit('/').next().unwrap_or(&b.rel)).collect();
-            let (line, col) = at(m);
-            out.push(UnityLens {
-                line,
-                col,
-                summary: LensSummary::Method {
-                    unity_events: unity_events as u32,
-                    animation_events: (bindings.len() - unity_events) as u32,
-                    file_count: files.len() as u32,
-                    files: files.into_iter().take(NAMED_FILES).map(String::from).collect(),
-                },
-            });
+        let unity_events = bindings.iter().filter(|b| matches!(b.kind, crate::BindingKind::UnityEvent { .. })).count();
+        let files: BTreeSet<&str> = bindings.iter().map(|b| b.rel.rsplit('/').next().unwrap_or(&b.rel)).collect();
+        let (line, col) = at(m);
+        out.push(UnityLens {
+            line,
+            col,
+            summary: LensSummary::Method {
+                unity_events: unity_events as u32,
+                animation_events: (bindings.len() - unity_events) as u32,
+                file_count: files.len() as u32,
+                files: files.into_iter().take(NAMED_FILES).map(String::from).collect(),
+            },
+        });
+    }
+    let Some(usages) = usages.as_deref() else { return };
+    let fields: Vec<&OutlineItem> = item.children.iter().filter(|c| c.kind == SymbolKind::Field).collect();
+    if fields.is_empty() {
+        return;
+    }
+    let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    for (field, values) in fields.iter().zip(q.fields_values_for(usages, &names)) {
+        let overrides =
+            values.iter().filter(|v| v.overridden_at.as_ref().is_some_and(|(f, _)| *f == v.usage.rel)).count() as u32;
+        let own: BTreeSet<&str> = values
+            .iter()
+            .filter(|v| v.usage.through.is_none() && v.overridden_at.is_none())
+            .filter_map(|v| v.value.as_deref())
+            .collect();
+        if own.is_empty() && overrides == 0 {
+            continue;
         }
-        let Some(script) = script else { return };
-        let fields: Vec<&OutlineItem> = item.children.iter().filter(|c| c.kind == SymbolKind::Field).collect();
-        if fields.is_empty() {
-            return;
-        }
-        let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
-        for (field, values) in fields.iter().zip(self.fields_values(script, &names)) {
-            let overrides =
-                values.iter().filter(|v| v.overridden_at.as_ref().is_some_and(|(f, _)| *f == v.usage.rel)).count()
-                    as u32;
-            let own: BTreeSet<&str> = values
-                .iter()
-                .filter(|v| v.usage.through.is_none() && v.overridden_at.is_none())
-                .filter_map(|v| v.value.as_deref())
-                .collect();
-            if own.is_empty() && overrides == 0 {
-                continue;
-            }
-            let (line, col) = at(field);
-            out.push(UnityLens {
-                line,
-                col,
-                summary: LensSummary::Field {
-                    values: own.into_iter().take(NAMED_VALUES + 1).map(String::from).collect(),
-                    overrides,
-                },
-            });
-        }
+        let (line, col) = at(field);
+        out.push(UnityLens {
+            line,
+            col,
+            summary: LensSummary::Field {
+                values: own.into_iter().take(NAMED_VALUES + 1).map(String::from).collect(),
+                overrides,
+            },
+        });
     }
 }

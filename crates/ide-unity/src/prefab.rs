@@ -46,7 +46,7 @@ pub struct Origin<'a> {
 
 impl ScannedFile {
     pub fn object(&self, file_id: i64) -> Option<&Object> {
-        self.objects.iter().find(|o| o.file_id == file_id)
+        self.object_index.get(&self.objects, file_id)
     }
 
     pub fn prefab_instances(&self) -> impl Iterator<Item = &Object> {
@@ -138,6 +138,11 @@ pub struct PropertyValue {
 /// unknown, or nothing sets the property and it isn't one of the values the scanner keeps.
 pub fn property(assets: &impl Assets, file: Guid, file_id: i64, path: &str) -> Option<PropertyValue> {
     let origin = resolve(assets, file, file_id)?;
+    property_of(assets, &origin, path)
+}
+
+/// The value of `path` on an already-resolved [`Origin`].
+pub fn property_of(assets: &impl Assets, origin: &Origin<'_>, path: &str) -> Option<PropertyValue> {
     for hop in &origin.hops {
         if let Some(m) = override_of(assets, hop, path) {
             return Some(PropertyValue {

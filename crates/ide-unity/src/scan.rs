@@ -8,7 +8,9 @@
 
 use memchr::{memchr, memmem};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::OnceLock;
 
 /// An asset's GUID: 32 hex digits in the `.meta` file and in references.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -130,11 +132,49 @@ pub struct Modification {
     pub line: u32,
 }
 
+#[derive(Default)]
+pub(crate) struct ObjectIndex(OnceLock<HashMap<i64, usize>>);
+
+impl ObjectIndex {
+    pub(crate) fn get<'a>(&self, objects: &'a [Object], file_id: i64) -> Option<&'a Object> {
+        let map = self.0.get_or_init(|| {
+            let mut m = HashMap::with_capacity(objects.len());
+            for (i, o) in objects.iter().enumerate() {
+                m.entry(o.file_id).or_insert(i);
+            }
+            m
+        });
+        map.get(&file_id).and_then(|&i| objects.get(i))
+    }
+}
+
+impl Clone for ObjectIndex {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl fmt::Debug for ObjectIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ObjectIndex").finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for ObjectIndex {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for ObjectIndex {}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScannedFile {
     pub objects: Vec<Object>,
     /// Every asset the file refers to (`guid: …` anywhere), sorted, without duplicates.
     pub references: Vec<Guid>,
+    #[serde(skip)]
+    pub(crate) object_index: ObjectIndex,
 }
 
 /// Which top-level list the following `- ` items belong to.
@@ -257,7 +297,17 @@ pub fn scan(bytes: &[u8]) -> ScannedFile {
             b"m_Events" if value.is_empty() && object.class_id == ANIMATION_CLIP => list = List::AnimationEvents,
             b"m_Controller" => object.controller = reference(value),
             b"m_Motion" => object.motion = reference(value),
-            _ if object.class_id == MONO_BEHAVIOUR && !value.is_empty() && !key.starts_with(b"m_") => {
+            _ if object.class_id == MONO_BEHAVIOUR
+                && !value.is_empty()
+                && !matches!(
+                    key,
+                    b"m_ObjectHideFlags"
+                        | b"m_PrefabAsset"
+                        | b"m_Enabled"
+                        | b"m_EditorHideFlags"
+                        | b"m_EditorClassIdentifier"
+                ) =>
+            {
                 if let Some(value) = scalar(value) {
                     object.properties.push((String::from_utf8_lossy(key).into(), value));
                 }

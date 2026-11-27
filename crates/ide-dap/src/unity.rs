@@ -58,6 +58,11 @@ fn project_path(args: &str) -> Option<&str> {
     let lower = args.to_ascii_lowercase();
     let at = lower.find("-projectpath ")? + "-projectpath ".len();
     let rest = args[at..].trim_start();
+    if let Some(quote) = rest.bytes().next().filter(|&b| b == b'"' || b == b'\'') {
+        let inner = &rest[1..];
+        let end = inner.find(quote as char).unwrap_or(inner.len());
+        return Some(inner[..end].trim_end()).filter(|p| !p.is_empty());
+    }
     // The path may contain spaces; it runs up to the next ` -option`.
     let end = rest.find(" -").unwrap_or(rest.len());
     Some(rest[..end].trim_end()).filter(|p| !p.is_empty())
@@ -213,6 +218,14 @@ mod tests {
         assert_eq!(e.name, "Unity Editor — My Game");
         assert_eq!(e.port, Some(56345));
         assert_eq!(e.kind, AttachKind::UnityMono);
+        let q = editor(
+            &raw("C:\\Unity\\Editor\\Unity.exe", "Unity.exe -projectPath \"C:\\Projects\\RPG - Dev\" -useHub"),
+            "Unity.exe",
+        )
+        .unwrap();
+        assert_eq!(q.name, "Unity Editor — RPG - Dev");
+        let sq = editor(&raw(exe, &format!("{exe} -projectPath '/Users/me/RPG - Dev' -useHub")), "Unity").unwrap();
+        assert_eq!(sq.name, "Unity Editor — RPG - Dev");
         let w = raw(exe, &format!("{exe} -batchMode -noUpm -name AssetImportWorker0 -projectPath /p"));
         assert!(editor(&w, "Unity").is_none());
         assert!(editor(&raw("C:\\Unity\\Editor\\Unity.exe", "Unity.exe"), "Unity.exe").is_some());

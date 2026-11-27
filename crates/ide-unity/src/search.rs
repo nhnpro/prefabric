@@ -58,6 +58,17 @@ const EXACT: u32 = 4000;
 const PREFIX: u32 = 600;
 
 fn boost(name: &str, lower_query: &str) -> u32 {
+    if name.is_ascii() {
+        if name.eq_ignore_ascii_case(lower_query) {
+            return EXACT;
+        }
+        if name.len() >= lower_query.len()
+            && name.as_bytes()[..lower_query.len()].eq_ignore_ascii_case(lower_query.as_bytes())
+        {
+            return PREFIX;
+        }
+        return 0;
+    }
     let lower = name.to_lowercase();
     if lower == lower_query {
         EXACT

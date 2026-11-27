@@ -10,22 +10,39 @@ use std::{
     path::Path,
 };
 
+const MAX_DEPTH: usize = 6;
+
 pub(crate) fn detect(root: &Path, out: &mut Vec<RunConfig>) {
-    let mut dirs = vec![root.to_path_buf()];
+    let mut dirs = vec![(root.to_path_buf(), 0usize)];
     let mut projects = BTreeSet::new();
-    while let Some(dir) = dirs.pop() {
+    while let Some((dir, depth)) = dirs.pop() {
         let Ok(entries) = fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
             if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                if !name.starts_with('.')
+                if depth < MAX_DEPTH
+                    && !name.starts_with('.')
                     && !matches!(
                         name.as_str(),
-                        "bin" | "obj" | "node_modules" | "target" | "build" | "dist" | "vendor" | "packages"
+                        "bin"
+                            | "obj"
+                            | "Obj"
+                            | "node_modules"
+                            | "target"
+                            | "build"
+                            | "Build"
+                            | "Builds"
+                            | "dist"
+                            | "vendor"
+                            | "packages"
+                            | "Library"
+                            | "Temp"
+                            | "Logs"
+                            | "UserSettings"
                     )
                 {
-                    dirs.push(path);
+                    dirs.push((path, depth + 1));
                 }
             } else if entry.file_type().is_ok_and(|t| t.is_file()) {
                 match path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
@@ -118,4 +135,30 @@ fn command_args(params: &BTreeMap<String, String>, test: bool) -> Vec<String> {
         }
     }
     args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_unity_generated_directories_and_deep_trees() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let csproj =
+            r#"<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup></Project>"#;
+        std::fs::write(root.join("App.csproj"), csproj).unwrap();
+        let pkg = root.join("Library/PackageCache/com.unity.test/Pkg.csproj");
+        std::fs::create_dir_all(pkg.parent().unwrap()).unwrap();
+        std::fs::write(pkg, csproj).unwrap();
+        let deep = root.join("a/b/c/d/e/f/g/Deep.csproj");
+        std::fs::create_dir_all(deep.parent().unwrap()).unwrap();
+        std::fs::write(deep, csproj).unwrap();
+
+        let mut configs = Vec::new();
+        detect(root, &mut configs);
+        let projects: Vec<&str> =
+            configs.iter().filter_map(|c| c.extras.params.get("project").map(String::as_str)).collect();
+        assert_eq!(projects, ["App.csproj"]);
+    }
 }

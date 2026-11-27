@@ -88,21 +88,52 @@ struct Builder<'a> {
     branch: HashSet<(usize, i64)>,
 }
 
-/// A scanned file with its objects by id.
+/// A scanned file with its objects by id, plus objects parented under `stripped` Transforms of
+/// PrefabInstances in this file (added GameObjects and nested PrefabInstances).
 struct Indexed {
     file: ScannedFile,
     ids: HashMap<i64, usize>,
+    /// `prefab_instance_id` → `(target_guid, target_transform_file_id, child_object_file_id)`.
+    added_children: HashMap<i64, Vec<(Option<Guid>, i64, i64)>>,
 }
 
 impl Indexed {
     fn new(file: ScannedFile) -> Self {
-        let ids = file.objects.iter().enumerate().map(|(i, o)| (o.file_id, i)).collect();
-        Indexed { file, ids }
+        let ids: HashMap<i64, usize> = file.objects.iter().enumerate().map(|(i, o)| (o.file_id, i)).collect();
+        let mut added_children: HashMap<i64, Vec<(Option<Guid>, i64, i64)>> = HashMap::new();
+        for o in &file.objects {
+            let parent_id = if is_transform(o) && !o.stripped {
+                o.father
+            } else if o.source_prefab.is_some() {
+                o.transform_parent
+            } else {
+                None
+            };
+            let Some(parent_id) = parent_id else { continue };
+            let Some(&parent_idx) = ids.get(&parent_id) else { continue };
+            let parent = &file.objects[parent_idx];
+            if !parent.stripped {
+                continue;
+            }
+            if let (Some(inst_id), Some(source)) = (parent.prefab_instance, parent.source) {
+                added_children.entry(inst_id).or_default().push((source.guid, source.file_id, o.file_id));
+            }
+        }
+        Indexed { file, ids, added_children }
     }
 
     fn object(&self, id: i64) -> Option<&Object> {
         self.ids.get(&id).map(|&i| &self.file.objects[i])
     }
+}
+
+/// An object added in an enclosing file as a child of a Transform inside an instanced prefab.
+#[derive(Clone, Copy)]
+struct AddedChild<'f> {
+    owner_level: &'f Level<'f>,
+    target_guid: Option<Guid>,
+    target_transform: i64,
+    child_object: i64,
 }
 
 /// Context carried from an enclosing PrefabInstance into its source prefab.
@@ -113,6 +144,8 @@ struct InstanceCtx<'f> {
     names: &'f [(i64, String)],
     /// Removed GameObjects/components mapped to `(target_guid, target_file_id)` in this prefab.
     removed: &'f [(Option<Guid>, i64)],
+    /// Added children from enclosing files targeting Transforms inside this prefab chain.
+    added: &'f [AddedChild<'f>],
     /// The GUID of this prefab, when known.
     guid: Option<Guid>,
 }
@@ -154,26 +187,62 @@ impl Builder<'_> {
     }
 
     /// Resolves a modification target's display name in `src`, descending through nested
-    /// `PrefabInstance`s for Prefab Variants and nested prefabs.
+    /// `PrefabInstance`s and `stripped` placeholders for Prefab Variants and nested prefabs.
     fn resolve_target_name(
         &mut self,
         src: &Rc<Indexed>,
         id: i64,
         names: &[(i64, String)],
         depth: usize,
+        visited: &mut HashSet<Guid>,
     ) -> Option<String> {
         if let Some((_, n)) = names.iter().find(|(t, _)| *t == id) {
             return Some(n.clone());
         }
         if let Some(obj) = src.object(id) {
-            if let Some(name) = obj.name.as_deref() {
-                return Some(name.to_owned());
-            }
-            if let Some(owner) = obj.game_object
-                && let Some(go) = src.object(owner)
-            {
-                let name = names.iter().find(|(t, _)| *t == owner).map(|(_, n)| n.as_str());
-                return Some(format!("{} ({})", name.or(go.name.as_deref())?, obj.type_name));
+            if obj.stripped {
+                if depth < MAX_NESTING
+                    && let Some(source) = obj.source
+                    && let Some(inner_guid) = source.guid
+                    && visited.insert(inner_guid)
+                {
+                    let found = self.load_prefab(inner_guid).and_then(|inner_src| {
+                        let mut inner_names = Vec::new();
+                        if let Some(inst_id) = obj.prefab_instance {
+                            inner_names.extend(names.iter().map(|(t, n)| (*t ^ inst_id, n.clone())));
+                            if let Some(inst) = src.object(inst_id) {
+                                inner_names.extend(
+                                    inst.modifications
+                                        .iter()
+                                        .filter(|m| &*m.property_path == "m_Name")
+                                        .filter_map(|m| Some((m.target.file_id, m.value.as_deref()?.to_owned()))),
+                                );
+                            }
+                        }
+                        self.resolve_target_name(&inner_src, source.file_id, &inner_names, depth + 1, visited)
+                    });
+                    visited.remove(&inner_guid);
+                    if found.is_some() {
+                        return found;
+                    }
+                }
+            } else {
+                if let Some(name) = obj.name.as_deref() {
+                    return Some(name.to_owned());
+                }
+                if let Some(owner) = obj.game_object {
+                    let go_name = names.iter().find(|(t, _)| *t == owner).map(|(_, n)| n.clone()).or_else(|| {
+                        let go = src.object(owner)?;
+                        if go.stripped {
+                            self.resolve_target_name(src, owner, names, depth, visited)
+                        } else {
+                            go.name.as_deref().map(String::from)
+                        }
+                    });
+                    if let Some(go_name) = go_name {
+                        return Some(format!("{go_name} ({})", obj.type_name));
+                    }
+                }
             }
         }
         if depth >= MAX_NESTING {
@@ -182,20 +251,23 @@ impl Builder<'_> {
         for inst in src.file.prefab_instances() {
             let Some(inner_guid) = inst.source_prefab.and_then(|p| p.guid) else { continue };
             let inner_id = id ^ inst.file_id;
-            if inner_id == 0 {
+            if inner_id == 0 || !visited.insert(inner_guid) {
                 continue;
             }
-            let Some(inner_src) = self.load_prefab(inner_guid) else { continue };
-            let mut inner_names: Vec<(i64, String)> =
-                names.iter().map(|(t, n)| (*t ^ inst.file_id, n.clone())).collect();
-            inner_names.extend(
-                inst.modifications
-                    .iter()
-                    .filter(|m| &*m.property_path == "m_Name")
-                    .filter_map(|m| Some((m.target.file_id, m.value.as_deref()?.to_owned()))),
-            );
-            if let Some(found) = self.resolve_target_name(&inner_src, inner_id, &inner_names, depth + 1) {
-                return Some(found);
+            let found = self.load_prefab(inner_guid).and_then(|inner_src| {
+                let mut inner_names: Vec<(i64, String)> =
+                    names.iter().map(|(t, n)| (*t ^ inst.file_id, n.clone())).collect();
+                inner_names.extend(
+                    inst.modifications
+                        .iter()
+                        .filter(|m| &*m.property_path == "m_Name")
+                        .filter_map(|m| Some((m.target.file_id, m.value.as_deref()?.to_owned()))),
+                );
+                self.resolve_target_name(&inner_src, inner_id, &inner_names, depth + 1, visited)
+            });
+            visited.remove(&inner_guid);
+            if found.is_some() {
+                return found;
             }
         }
         None
@@ -268,6 +340,21 @@ impl Builder<'_> {
             };
             children.extend(node);
         }
+        if let Some(ctx) = &level.instance {
+            for added in ctx.added {
+                if added.target_transform == transform.file_id
+                    && (added.target_guid.is_none() || ctx.guid.is_none() || added.target_guid == ctx.guid)
+                    && let Some(child) = added.owner_level.file.object(added.child_object)
+                {
+                    let node = if child.source_prefab.is_some() {
+                        self.instance(added.owner_level, child, depth)
+                    } else {
+                        self.game_object(added.owner_level, child, depth, nesting + 1)
+                    };
+                    children.extend(node);
+                }
+            }
+        }
         Some(HierarchyNode {
             kind: if own { HierarchyKind::GameObject } else { HierarchyKind::FromPrefab },
             name,
@@ -323,6 +410,16 @@ impl Builder<'_> {
             .map(|ctx| ctx.removed.iter().map(|(_, id)| (None, *id ^ o.file_id)).collect())
             .unwrap_or_default();
         removed.extend(o.removed.iter().map(|r| (r.guid, r.file_id)));
+        // Propagate added children from enclosing files plus those added directly to this instance.
+        let mut added: Vec<AddedChild<'_>> = level.instance.as_ref().map(|ctx| ctx.added.to_vec()).unwrap_or_default();
+        if let Some(entries) = level.file.added_children.get(&o.file_id) {
+            added.extend(entries.iter().map(|&(target_guid, target_transform, child_object)| AddedChild {
+                owner_level: level,
+                target_guid,
+                target_transform,
+                child_object,
+            }));
+        }
 
         let overrides = if level.instance.is_some() {
             Vec::new()
@@ -330,9 +427,10 @@ impl Builder<'_> {
             o.modifications
                 .iter()
                 .map(|m| {
-                    let target = source
-                        .as_ref()
-                        .and_then(|(_, src)| self.resolve_target_name(src, m.target.file_id, &names, depth + 1));
+                    let target = source.as_ref().and_then(|(g, src)| {
+                        let mut visited = HashSet::from([*g]);
+                        self.resolve_target_name(src, m.target.file_id, &names, depth + 1, &mut visited)
+                    });
                     HierarchyOverride {
                         property: m.property_path.to_string(),
                         value: m
@@ -365,13 +463,20 @@ impl Builder<'_> {
         };
         let mut root_name = None;
         if let Some((g, src)) = &source {
+            let had_roots = src.file.objects.iter().any(|obj| {
+                (is_transform(obj) && !obj.stripped && obj.father.is_none())
+                    || (obj.source_prefab.is_some() && obj.transform_parent.is_none())
+            });
             self.open.insert(*g);
             let inner = Level {
                 file: src,
-                instance: Some(InstanceCtx { line, names: &names, removed: &removed, guid: Some(*g) }),
+                instance: Some(InstanceCtx { line, names: &names, removed: &removed, added: &added, guid: Some(*g) }),
             };
             let mut roots = self.roots(&inner, depth + 1);
             self.open.remove(g);
+            if had_roots && roots.is_empty() && self.nodes < MAX_NODES {
+                return None;
+            }
             // The prefab's root becomes the instance; its objects hang below.
             if roots.len() == 1 {
                 let root = roots.pop().expect("one root");
@@ -507,5 +612,104 @@ PrefabInstance:
         let store = tempfile::tempdir().unwrap();
         let index = UnityIndex::open(Path::new(PROJECT), store.path(), Arc::new(NullSink), Box::new(|| true)).unwrap();
         assert!(index.hierarchy(b"UnityFS\0").unreadable);
+    }
+
+    #[test]
+    fn removing_instance_root_omits_ghost_node() {
+        let store = tempfile::tempdir().unwrap();
+        let index = UnityIndex::open(Path::new(PROJECT), store.path(), Arc::new(NullSink), Box::new(|| true)).unwrap();
+        assert!(index.wait_idle(Duration::from_secs(20)));
+        // Instance of Player.prefab whose root GameObject (1354967268023247473) is removed.
+        let yaml = br#"%YAML 1.1
+--- !u!1001 &999
+PrefabInstance:
+  m_Modification:
+    m_TransformParent: {fileID: 0}
+    m_Modifications: []
+    m_RemovedComponents: []
+    m_RemovedGameObjects:
+    - {fileID: 1354967268023247473, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}
+  m_SourcePrefab: {fileID: 100100000, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}
+"#;
+        let h = index.hierarchy(yaml);
+        assert!(h.roots.is_empty(), "{:?}", h.roots);
+    }
+
+    #[test]
+    fn added_child_under_prefab_instance_appears_in_hierarchy() {
+        let store = tempfile::tempdir().unwrap();
+        let index = UnityIndex::open(Path::new(PROJECT), store.path(), Arc::new(NullSink), Box::new(|| true)).unwrap();
+        assert!(index.wait_idle(Duration::from_secs(20)));
+        // Scene adds a GameObject "Hat" under Player.prefab's root Transform (2647960798605896529)
+        // via a stripped placeholder Transform (500).
+        let yaml = br#"%YAML 1.1
+--- !u!1001 &999
+PrefabInstance:
+  m_Modification:
+    m_TransformParent: {fileID: 0}
+    m_Modifications: []
+  m_SourcePrefab: {fileID: 100100000, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}
+--- !u!4 &500 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 2647960798605896529, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}
+  m_PrefabInstance: {fileID: 999}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &600
+GameObject:
+  m_Component:
+  - component: {fileID: 601}
+  m_Name: Hat
+--- !u!4 &601
+Transform:
+  m_GameObject: {fileID: 600}
+  m_Children: []
+  m_Father: {fileID: 500}
+"#;
+        let h = index.hierarchy(yaml);
+        let mut out = Vec::new();
+        outline(&h.roots, 0, &mut out);
+        assert_eq!(
+            out,
+            [
+                "@Player [Transform,CapsuleCollider,Animator,Player] 0",
+                "  ~Model [Transform,MeshFilter,MeshRenderer] 0",
+                "  Hat [Transform] 0",
+            ]
+        );
+        assert_eq!(h.roots[0].children[1].kind, HierarchyKind::GameObject);
+    }
+
+    #[test]
+    fn override_targeting_stripped_placeholder_resolves_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = tempfile::tempdir().unwrap();
+        let assets = dir.path().join("Assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        let base_guid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let nested_guid = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        std::fs::write(assets.join("Base.prefab.meta"), format!("fileFormatVersion: 2\nguid: {base_guid}\n")).unwrap();
+        std::fs::write(
+            assets.join("Base.prefab"),
+            "%YAML 1.1\n--- !u!1 &10\nGameObject:\n  m_Component:\n  - component: {fileID: 11}\n  m_Name: BaseRoot\n--- !u!4 &11\nTransform:\n  m_GameObject: {fileID: 10}\n  m_Children: []\n  m_Father: {fileID: 0}\n",
+        )
+        .unwrap();
+        std::fs::write(assets.join("Nested.prefab.meta"), format!("fileFormatVersion: 2\nguid: {nested_guid}\n"))
+            .unwrap();
+        // Nested.prefab holds a stripped placeholder &777 with an arbitrary fileID (not inst ^ 10).
+        std::fs::write(
+            assets.join("Nested.prefab"),
+            format!(
+                "%YAML 1.1\n--- !u!1001 &200\nPrefabInstance:\n  m_Modification:\n    m_TransformParent: {{fileID: 0}}\n    m_Modifications: []\n  m_SourcePrefab: {{fileID: 100100000, guid: {base_guid}, type: 3}}\n--- !u!1 &777 stripped\nGameObject:\n  m_CorrespondingSourceObject: {{fileID: 10, guid: {base_guid}, type: 3}}\n  m_PrefabInstance: {{fileID: 200}}\n"
+            ),
+        )
+        .unwrap();
+        let index = UnityIndex::open(dir.path(), store.path(), Arc::new(NullSink), Box::new(|| true)).unwrap();
+        assert!(index.wait_idle(Duration::from_secs(20)));
+        let scene = format!(
+            "%YAML 1.1\n--- !u!1001 &300\nPrefabInstance:\n  m_Modification:\n    m_TransformParent: {{fileID: 0}}\n    m_Modifications:\n    - target: {{fileID: 777, guid: {nested_guid}, type: 3}}\n      propertyPath: m_IsActive\n      value: 0\n  m_SourcePrefab: {{fileID: 100100000, guid: {nested_guid}, type: 3}}\n"
+        );
+        let h = index.hierarchy(scene.as_bytes());
+        assert_eq!(h.roots.len(), 1);
+        assert_eq!(h.roots[0].overrides[0].target.as_deref(), Some("BaseRoot"));
     }
 }

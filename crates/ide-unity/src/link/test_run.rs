@@ -4,13 +4,15 @@
 
 use super::{Inner, UnityLink};
 use ide_core::{IdeError, IdeResult};
+use parking_lot::Mutex;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Prefix of the console lines that carry a `tests/event` as JSON (`testing/unity.ts` reads them).
 pub const MARKER: &str = "##unity-test ";
 
-pub(super) type Listener = Box<dyn FnMut(TestUpdate) + Send>;
+pub(super) type Listener = Arc<Mutex<Box<dyn FnMut(TestUpdate) + Send>>>;
 
 pub enum TestUpdate {
     /// A `tests/event` of the run: `runStarted`, `testStarted`, `testFinished` or `runFinished`.
@@ -38,7 +40,7 @@ impl UnityLink {
         run: &TestRun,
         listener: impl FnMut(TestUpdate) + Send + 'static,
     ) -> IdeResult<()> {
-        self.inner.test_runs.lock().insert(id.to_owned(), Box::new(listener));
+        self.inner.test_runs.lock().insert(id.to_owned(), Arc::new(Mutex::new(Box::new(listener))));
         let params = json!({"runId": id, "mode": run.mode, "assembly": run.assembly, "filter": run.filter});
         self.request("tests.run", params, Duration::from_secs(30)).map(drop).map_err(|e| {
             self.inner.test_runs.lock().remove(id);
@@ -69,18 +71,19 @@ impl Inner {
     pub(super) fn test_event(&self, params: &Value) {
         let Some(id) = params.get("runId").and_then(Value::as_str) else { return };
         let finished = params.get("event").and_then(Value::as_str) == Some("runFinished");
-        let mut runs = self.test_runs.lock();
-        let Some(listener) = runs.get_mut(id) else { return };
-        listener(TestUpdate::Event(params.clone()));
-        if finished {
-            runs.remove(id);
+        let listener = {
+            let mut runs = self.test_runs.lock();
+            if finished { runs.remove(id) } else { runs.get(id).cloned() }
+        };
+        if let Some(listener) = listener {
+            (listener.lock())(TestUpdate::Event(params.clone()));
         }
     }
 
     pub(super) fn lose_test_runs(&self) {
         let lost: Vec<_> = self.test_runs.lock().drain().collect();
-        for (_, mut listener) in lost {
-            listener(TestUpdate::Lost);
+        for (_, listener) in lost {
+            (listener.lock())(TestUpdate::Lost);
         }
     }
 }
