@@ -214,7 +214,8 @@ pub fn install(root: &Path) -> io::Result<()> {
     if target.join(".git").exists() {
         return Err(io::Error::other(format!("{} is a git checkout; update it with git", target.display())));
     }
-    let staging = root.join("Packages").join(format!(".{NAME}.installing"));
+    let nonce = uuid::Uuid::new_v4().simple();
+    let staging = root.join("Packages").join(format!(".{NAME}.installing-{nonce}"));
     let _ = std::fs::remove_dir_all(&staging);
     let written = (|| {
         for (path, bytes) in FILES {
@@ -232,7 +233,7 @@ pub fn install(root: &Path) -> io::Result<()> {
     }
     // Swap by renames, so a file held open (Unity, the language server) leaves the old package
     // whole rather than half deleted.
-    let previous = root.join("Packages").join(format!(".{NAME}.previous"));
+    let previous = root.join("Packages").join(format!(".{NAME}.previous-{nonce}"));
     let _ = std::fs::remove_dir_all(&previous);
     if target.exists()
         && let Err(e) = std::fs::rename(&target, &previous)
@@ -247,8 +248,16 @@ pub fn install(root: &Path) -> io::Result<()> {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(e);
     }
-    // Best effort: what can't be deleted now (a file still open) is retried on the next install.
+    // Best effort: clean up our backup and any stale backups left behind by earlier runs.
     let _ = std::fs::remove_dir_all(&previous);
+    if let Ok(entries) = std::fs::read_dir(root.join("Packages")) {
+        let prefix = format!(".{NAME}.previous");
+        for entry in entries.flatten() {
+            if entry.file_name().to_str().is_some_and(|n| n.starts_with(&prefix)) {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
     Ok(())
 }
 

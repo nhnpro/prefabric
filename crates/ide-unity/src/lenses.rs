@@ -125,7 +125,9 @@ impl UnityIndex {
         }
         let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
         for (field, values) in fields.iter().zip(self.fields_values(script, &names)) {
-            let overrides = values.iter().filter(|v| v.overridden_at.is_some()).count() as u32;
+            let overrides =
+                values.iter().filter(|v| v.overridden_at.as_ref().is_some_and(|(f, _)| *f == v.usage.rel)).count()
+                    as u32;
             let own: BTreeSet<&str> = values
                 .iter()
                 .filter(|v| v.usage.through.is_none() && v.overridden_at.is_none())

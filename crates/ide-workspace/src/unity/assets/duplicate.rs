@@ -71,8 +71,8 @@ pub(super) fn regenerate(stage: &Path) -> IdeResult<()> {
         let ext = path.extension().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
         if ext == "asmdef" || ext == "asmref" {
             let text = read_text(&path)?;
-            let mut json: serde_json::Value =
-                serde_json::from_str(&text).map_err(|e| IdeError::invalid(e.to_string()))?;
+            let mut json: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))
+                .map_err(|e| IdeError::invalid(e.to_string()))?;
             if rewrite_json(&mut json, &ids) {
                 fs::write(&path, serde_json::to_string_pretty(&json).map_err(|e| IdeError::internal(e.to_string()))?)?;
             }

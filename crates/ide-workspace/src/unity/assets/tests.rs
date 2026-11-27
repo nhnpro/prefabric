@@ -215,3 +215,35 @@ fn case_only_rename_keeps_metadata() {
     assert_eq!(id(&dst), A);
     assert!(fs::read_dir(dst.parent().unwrap()).unwrap().any(|e| e.unwrap().file_name() == "player.cs.meta"));
 }
+
+#[test]
+fn trailing_slash_paths_are_normalized_and_protected() {
+    let tmp = project();
+    let root = tmp.path();
+    let dir = root.join("Assets/Dir");
+    fs::create_dir(&dir).unwrap();
+    fs::write(root.join("Assets/Dir.meta"), format!("guid: {A}\nfolderAsset: yes\n")).unwrap();
+    let dir_slash = PathBuf::from(format!("{}/", dir.display()));
+    assert_eq!(meta_path(&dir_slash), root.join("Assets/Dir.meta"));
+
+    let assets_slash = PathBuf::from(format!("{}/", root.join("Assets").display()));
+    assert!(validate_asset(&assets_slash).is_err());
+    assert!(copy(&dir_slash, &dir).is_err());
+    assert!(copy(&dir_slash, &dir.join("Nested")).is_err());
+}
+
+#[test]
+fn folder_copy_handles_utf8_bom_asmdef_files() {
+    let tmp = project();
+    let root = tmp.path();
+    asset(root, "Mod/Script.cs", "// ok", B);
+    fs::write(root.join("Assets/Mod.meta"), format!("guid: {A}\nfolderAsset: yes\n")).unwrap();
+    fs::write(root.join("Assets/Mod/Mod.asmdef"), format!("\u{feff}{{\"references\":[\"GUID:{B}\"]}}")).unwrap();
+    fs::write(root.join("Assets/Mod/Mod.asmdef.meta"), format!("guid: {C}\n")).unwrap();
+    let dst = root.join("Assets/Mod Copy");
+    copy(&root.join("Assets/Mod"), &dst).unwrap();
+    let new_script_id = id(&dst.join("Script.cs"));
+    assert_ne!(new_script_id, B);
+    let asmdef = fs::read_to_string(dst.join("Mod.asmdef")).unwrap();
+    assert!(asmdef.contains(&format!("GUID:{new_script_id}")), "{asmdef}");
+}

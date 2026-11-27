@@ -105,11 +105,28 @@ impl Indexed {
     }
 }
 
+/// Context carried from an enclosing PrefabInstance into its source prefab.
+struct InstanceCtx<'f> {
+    /// The outermost instance's line in the shown file.
+    line: u32,
+    /// Name overrides mapped to target IDs in this prefab (outermost first).
+    names: &'f [(i64, String)],
+    /// Removed GameObjects/components mapped to `(target_guid, target_file_id)` in this prefab.
+    removed: &'f [(Option<Guid>, i64)],
+    /// The GUID of this prefab, when known.
+    guid: Option<Guid>,
+}
+
+impl InstanceCtx<'_> {
+    fn is_removed(&self, id: i64) -> bool {
+        self.removed.iter().any(|(g, target)| *target == id && (g.is_none() || self.guid.is_none() || *g == self.guid))
+    }
+}
+
 /// One file being shown: its own objects, or a prefab's under an instance of it.
 struct Level<'f> {
     file: &'f Indexed,
-    /// Inside an instance: the instance's line in the shown file, and its name overrides.
-    instance: Option<(u32, &'f [(i64, String)])>,
+    instance: Option<InstanceCtx<'f>>,
 }
 
 impl UnityIndex {
@@ -126,6 +143,64 @@ impl UnityIndex {
 }
 
 impl Builder<'_> {
+    fn load_prefab(&mut self, guid: Guid) -> Option<Rc<Indexed>> {
+        let path = self.index.path_of(guid)?;
+        self.prefabs
+            .entry(guid)
+            .or_insert_with(|| {
+                std::fs::read(&path).ok().filter(|b| b.starts_with(b"%YAML")).map(|b| Rc::new(Indexed::new(scan(&b))))
+            })
+            .clone()
+    }
+
+    /// Resolves a modification target's display name in `src`, descending through nested
+    /// `PrefabInstance`s for Prefab Variants and nested prefabs.
+    fn resolve_target_name(
+        &mut self,
+        src: &Rc<Indexed>,
+        id: i64,
+        names: &[(i64, String)],
+        depth: usize,
+    ) -> Option<String> {
+        if let Some((_, n)) = names.iter().find(|(t, _)| *t == id) {
+            return Some(n.clone());
+        }
+        if let Some(obj) = src.object(id) {
+            if let Some(name) = obj.name.as_deref() {
+                return Some(name.to_owned());
+            }
+            if let Some(owner) = obj.game_object
+                && let Some(go) = src.object(owner)
+            {
+                let name = names.iter().find(|(t, _)| *t == owner).map(|(_, n)| n.as_str());
+                return Some(format!("{} ({})", name.or(go.name.as_deref())?, obj.type_name));
+            }
+        }
+        if depth >= MAX_NESTING {
+            return None;
+        }
+        for inst in src.file.prefab_instances() {
+            let Some(inner_guid) = inst.source_prefab.and_then(|p| p.guid) else { continue };
+            let inner_id = id ^ inst.file_id;
+            if inner_id == 0 {
+                continue;
+            }
+            let Some(inner_src) = self.load_prefab(inner_guid) else { continue };
+            let mut inner_names: Vec<(i64, String)> =
+                names.iter().map(|(t, n)| (*t ^ inst.file_id, n.clone())).collect();
+            inner_names.extend(
+                inst.modifications
+                    .iter()
+                    .filter(|m| &*m.property_path == "m_Name")
+                    .filter_map(|m| Some((m.target.file_id, m.value.as_deref()?.to_owned()))),
+            );
+            if let Some(found) = self.resolve_target_name(&inner_src, inner_id, &inner_names, depth + 1) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     fn roots(&mut self, level: &Level<'_>, depth: usize) -> Vec<HierarchyNode> {
         let file = level.file;
         let mut roots: Vec<(u32, HierarchyNode)> = Vec::new();
@@ -170,11 +245,19 @@ impl Builder<'_> {
     ) -> Option<HierarchyNode> {
         let file = level.file;
         let go = transform.game_object.and_then(|id| file.object(id))?;
+        if level.instance.as_ref().is_some_and(|ctx| ctx.is_removed(go.file_id)) {
+            return None;
+        }
         let own = level.instance.is_none();
-        let renamed = level.instance.and_then(|(_, names)| names.iter().find(|(id, _)| *id == go.file_id));
+        let renamed = level.instance.as_ref().and_then(|ctx| ctx.names.iter().find(|(id, _)| *id == go.file_id));
         let name = renamed.map(|(_, n)| n.clone()).or_else(|| go.name.as_deref().map(String::from)).unwrap_or_default();
-        let components =
-            go.components.iter().filter_map(|id| file.object(*id)).map(|c| self.component(c, own)).collect();
+        let components = go
+            .components
+            .iter()
+            .filter(|id| !level.instance.as_ref().is_some_and(|ctx| ctx.is_removed(**id)))
+            .filter_map(|id| file.object(*id))
+            .map(|c| self.component(c, own))
+            .collect();
         let mut children = Vec::new();
         for id in &transform.children {
             let Some(child) = file.object(*id) else { continue };
@@ -188,7 +271,7 @@ impl Builder<'_> {
         Some(HierarchyNode {
             kind: if own { HierarchyKind::GameObject } else { HierarchyKind::FromPrefab },
             name,
-            line: level.instance.map_or(go.line, |(line, _)| line),
+            line: level.instance.as_ref().map_or(go.line, |ctx| ctx.line),
             prefab: None,
             components,
             overrides: Vec::new(),
@@ -216,59 +299,56 @@ impl Builder<'_> {
         self.nodes += 1;
         let guid = o.source_prefab.and_then(|p| p.guid);
         let prefab = guid.and_then(|g| self.index.path_of(g));
-        let line = level.instance.map_or(o.line, |(line, _)| line);
-        let source = match (guid, &prefab) {
-            (Some(g), Some(p)) if depth < MAX_NESTING && !self.open.contains(&g) => self
-                .prefabs
-                .entry(g)
-                .or_insert_with(|| {
-                    std::fs::read(p).ok().filter(|b| b.starts_with(b"%YAML")).map(|b| Rc::new(Indexed::new(scan(&b))))
-                })
-                .clone()
-                .map(|src| (g, src)),
+        let line = level.instance.as_ref().map_or(o.line, |ctx| ctx.line);
+        let source = match guid {
+            Some(g) if depth < MAX_NESTING && !self.open.contains(&g) => self.load_prefab(g).map(|src| (g, src)),
             _ => None,
         };
-        // Renamings of the prefab's objects, by their id in the prefab.
-        let names: Vec<(i64, String)> = o
-            .modifications
-            .iter()
-            .filter(|m| &*m.property_path == "m_Name")
-            .filter_map(|m| Some((m.target.file_id, m.value.as_deref()?.to_owned())))
-            .collect();
-        let target_name = |id: i64| -> Option<String> {
-            let (_, src) = source.as_ref()?;
-            names
+        // Propagate outer renamings into this nested instance (outermost wins), then this instance's own.
+        let mut names: Vec<(i64, String)> = level
+            .instance
+            .as_ref()
+            .map(|ctx| ctx.names.iter().map(|(t, n)| (*t ^ o.file_id, n.clone())).collect())
+            .unwrap_or_default();
+        names.extend(
+            o.modifications
                 .iter()
-                .find(|(t, _)| *t == id)
-                .map(|(_, n)| n.clone())
-                .or_else(|| src.object(id)?.name.as_deref().map(String::from))
-                .or_else(|| {
-                    let owner = src.object(id)?.game_object?;
-                    let go = src.object(owner)?;
-                    let name = names.iter().find(|(t, _)| *t == owner).map(|(_, n)| n.as_str());
-                    Some(format!("{} ({})", name.or(go.name.as_deref())?, src.object(id)?.type_name))
-                })
-        };
+                .filter(|m| &*m.property_path == "m_Name")
+                .filter_map(|m| Some((m.target.file_id, m.value.as_deref()?.to_owned()))),
+        );
+        // Propagate outer removals (XORed into this prefab's ID space) plus this instance's own removals.
+        let mut removed: Vec<(Option<Guid>, i64)> = level
+            .instance
+            .as_ref()
+            .map(|ctx| ctx.removed.iter().map(|(_, id)| (None, *id ^ o.file_id)).collect())
+            .unwrap_or_default();
+        removed.extend(o.removed.iter().map(|r| (r.guid, r.file_id)));
+
         let overrides = if level.instance.is_some() {
             Vec::new()
         } else {
             o.modifications
                 .iter()
-                .map(|m| HierarchyOverride {
-                    property: m.property_path.to_string(),
-                    value: m
-                        .value
-                        .as_deref()
-                        .map(String::from)
-                        .or_else(|| {
-                            m.object_reference.map(|r| match r.guid {
-                                Some(g) => format!("{{fileID: {}, guid: {g}}}", r.file_id),
-                                None => format!("{{fileID: {}}}", r.file_id),
+                .map(|m| {
+                    let target = source
+                        .as_ref()
+                        .and_then(|(_, src)| self.resolve_target_name(src, m.target.file_id, &names, depth + 1));
+                    HierarchyOverride {
+                        property: m.property_path.to_string(),
+                        value: m
+                            .value
+                            .as_deref()
+                            .map(String::from)
+                            .or_else(|| {
+                                m.object_reference.map(|r| match r.guid {
+                                    Some(g) => format!("{{fileID: {}, guid: {g}}}", r.file_id),
+                                    None => format!("{{fileID: {}}}", r.file_id),
+                                })
                             })
-                        })
-                        .unwrap_or_default(),
-                    target: target_name(m.target.file_id),
-                    line: m.line,
+                            .unwrap_or_default(),
+                        target,
+                        line: m.line,
+                    }
                 })
                 .collect()
         };
@@ -286,7 +366,10 @@ impl Builder<'_> {
         let mut root_name = None;
         if let Some((g, src)) = &source {
             self.open.insert(*g);
-            let inner = Level { file: src, instance: Some((line, &names)) };
+            let inner = Level {
+                file: src,
+                instance: Some(InstanceCtx { line, names: &names, removed: &removed, guid: Some(*g) }),
+            };
             let mut roots = self.roots(&inner, depth + 1);
             self.open.remove(g);
             // The prefab's root becomes the instance; its objects hang below.
@@ -363,8 +446,14 @@ mod tests {
         );
         assert_eq!(main[0], "@Squad [Transform] 11");
         assert_eq!(main[2], "    ~Model [Transform,MeshFilter,MeshRenderer] 0");
+        assert!(main.contains(&"@Hero [Transform,CapsuleCollider,Animator,Player] 12".to_string()), "{main:?}");
         assert!(main.contains(&"Trigger Zone [Transform,BoxCollider,Trigger] 0".to_string()));
         assert_eq!(variant[0], "@Player Variant [Transform,CapsuleCollider,Animator,Player] 12");
+
+        let main_h = read(&index, &Path::new(PROJECT).join("Assets/Scenes/Main.unity")).unwrap();
+        let hero = main_h.roots.iter().find(|n| n.name == "Hero").expect("Hero node in Main.unity");
+        let speed = hero.overrides.iter().find(|o| o.property == "speed").expect("Hero speed override");
+        assert_eq!((speed.value.as_str(), speed.target.as_deref()), ("7", Some("Hero (MonoBehaviour)")));
 
         let h = read(&index, &Path::new(PROJECT).join("Assets/Prefabs/Squad.prefab")).unwrap();
         let follower = &h.roots[0].children[1];
@@ -375,6 +464,30 @@ mod tests {
         assert_eq!(follower.children[0].line, follower.line);
         let player = &follower.components[3];
         assert_eq!(player.script.as_ref().map(|p| p.ends_with("Player.cs")), Some(true));
+    }
+
+    #[test]
+    fn removed_objects_and_components_are_hidden() {
+        let store = tempfile::tempdir().unwrap();
+        let index = UnityIndex::open(Path::new(PROJECT), store.path(), Arc::new(NullSink), Box::new(|| true)).unwrap();
+        assert!(index.wait_idle(Duration::from_secs(20)));
+        // Instance of Player.prefab with its Player MonoBehaviour (8815640413858057345) and Model child (3702032423359520893) removed.
+        let yaml = br#"%YAML 1.1
+--- !u!1001 &999
+PrefabInstance:
+  m_Modification:
+    m_TransformParent: {fileID: 0}
+    m_Modifications: []
+    m_RemovedComponents:
+    - {fileID: 8815640413858057345, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}
+    m_RemovedGameObjects:
+    - {fileID: 3702032423359520893, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}
+  m_SourcePrefab: {fileID: 100100000, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}
+"#;
+        let h = index.hierarchy(yaml);
+        let mut out = Vec::new();
+        outline(&h.roots, 0, &mut out);
+        assert_eq!(out, ["@Player [Transform,CapsuleCollider,Animator] 0"]);
     }
 
     #[test]

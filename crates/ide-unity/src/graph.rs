@@ -18,6 +18,10 @@ struct FileNode {
     record: Record,
     /// The file's GameObjects and prefab instances, by name (for search).
     named: Box<[Named]>,
+    /// Root GameObject of this file (when it defines its own root Transform).
+    root_go: Option<i64>,
+    /// Root PrefabInstance `(file_id, source_prefab_guid)` when the root is itself an instance (Prefab Variant).
+    root_instance: Option<(i64, Guid)>,
     /// Removed since the last full scan (its index isn't reused until then).
     removed: bool,
 }
@@ -41,11 +45,29 @@ pub(crate) struct Graph {
 
 /// A GameObject, or a prefab instance (whose GameObject the file doesn't hold), by name.
 pub(crate) struct Named {
-    /// Empty for an instance that keeps its prefab's name.
+    /// Own name of a GameObject; empty for a prefab instance (whose renamings live in `name_overrides`).
     pub name: Box<str>,
     pub file_id: i64,
     /// The prefab of an instance.
     pub instance_of: Option<Guid>,
+    /// `(target_file_id, value)` of `m_Name` overrides on a prefab instance.
+    pub name_overrides: Box<[(i64, Box<str>)]>,
+}
+
+fn prefab_root_info(scan: &ScannedFile) -> (Option<i64>, Option<(i64, Guid)>) {
+    let own = scan.objects.iter().find_map(|o| {
+        (matches!(o.class_id, TRANSFORM | RECT_TRANSFORM) && !o.stripped && o.father.is_none())
+            .then_some(o.game_object)
+            .flatten()
+    });
+    if own.is_some() {
+        return (own, None);
+    }
+    let inst = scan
+        .prefab_instances()
+        .find(|i| i.transform_parent.is_none())
+        .and_then(|i| Some((i.file_id, i.source_prefab?.guid?)));
+    (None, inst)
 }
 
 fn named_of(scan: &ScannedFile) -> Box<[Named]> {
@@ -54,17 +76,21 @@ fn named_of(scan: &ScannedFile) -> Box<[Named]> {
     for o in &scan.objects {
         if o.class_id == GAME_OBJECT && !o.stripped {
             if let Some(name) = o.name.clone().filter(|n| !n.is_empty()) {
-                out.push(Named { name, file_id: o.file_id, instance_of: None });
+                out.push(Named { name, file_id: o.file_id, instance_of: None, name_overrides: Box::default() });
             }
         } else if let Some(prefab) = o.source_prefab.and_then(|p| p.guid) {
-            // The root's renaming, when the instance has one.
-            let name = o
+            let overrides: Box<[(i64, Box<str>)]> = o
                 .modifications
                 .iter()
-                .find(|m| &*m.property_path == "m_Name")
-                .and_then(|m| m.value.clone())
-                .unwrap_or_default();
-            out.push(Named { name, file_id: o.file_id, instance_of: Some(prefab) });
+                .filter(|m| &*m.property_path == "m_Name")
+                .filter_map(|m| Some((m.target.file_id, m.value.clone()?)))
+                .collect();
+            out.push(Named {
+                name: Box::default(),
+                file_id: o.file_id,
+                instance_of: Some(prefab),
+                name_overrides: overrides,
+            });
         }
     }
     out.into_boxed_slice()
@@ -102,7 +128,14 @@ impl Graph {
                 let idx = FileIdx::try_from(self.files.len()).unwrap_or(FileIdx::MAX);
                 let rel: Arc<str> = rel.into();
                 self.by_rel.insert(rel.clone(), idx);
-                self.files.push(FileNode { rel, record, named: Box::default(), removed: false });
+                self.files.push(FileNode {
+                    rel,
+                    record,
+                    named: Box::default(),
+                    root_go: None,
+                    root_instance: None,
+                    removed: false,
+                });
                 self.live_files += 1;
                 idx
             }
@@ -110,6 +143,9 @@ impl Graph {
         let Some(node) = self.files.get_mut(idx as usize) else { return };
         node.record = record;
         node.named = scan.map(named_of).unwrap_or_default();
+        let (root_go, root_instance) = scan.map(prefab_root_info).unwrap_or((None, None));
+        node.root_go = root_go;
+        node.root_instance = root_instance;
         if let Some(guid) = record.guid {
             self.by_guid.insert(guid, idx);
         }
@@ -244,6 +280,37 @@ impl Graph {
         self.rel(*self.by_guid.get(&guid)?)
     }
 
+    /// Root GameObject ID of `prefab`, walking through nested root instances (Prefab Variants).
+    fn root_go_of(&self, mut prefab: Guid) -> Option<i64> {
+        let mut offset = 0i64;
+        for _ in 0..MAX_NESTING {
+            let idx = *self.by_guid.get(&prefab)?;
+            let node = self.files.get(idx as usize).filter(|f| !f.removed)?;
+            if let Some(go) = node.root_go {
+                return Some(offset ^ go);
+            }
+            let (inst_id, next) = node.root_instance?;
+            offset ^= inst_id;
+            prefab = next;
+        }
+        None
+    }
+
+    /// The name of a `Named` entry: for a GameObject its own name; for a prefab instance only an
+    /// `m_Name` override targeting the prefab's root GameObject (ignoring child renamings).
+    pub(crate) fn instance_root_name<'a>(&self, named: &'a Named) -> Option<&'a str> {
+        let Some(prefab) = named.instance_of else {
+            return (!named.name.is_empty()).then_some(&*named.name);
+        };
+        if named.name_overrides.is_empty() {
+            return None;
+        }
+        match self.root_go_of(prefab) {
+            Some(root_go) => named.name_overrides.iter().find(|(t, _)| *t == root_go).map(|(_, n)| &**n),
+            None => named.name_overrides.first().map(|(_, n)| &**n),
+        }
+    }
+
     pub(crate) fn referrers(&self, guid: Guid) -> impl Iterator<Item = &Arc<str>> {
         self.referrers.get(&guid).into_iter().flatten().filter_map(|&f| self.rel(f))
     }
@@ -257,7 +324,21 @@ impl Graph {
         };
         self.files
             .iter()
-            .map(|f| f.rel.len() + 16 + f.named.iter().map(|n| n.name.len() + size_of::<Named>()).sum::<usize>())
+            .map(|f| {
+                f.rel.len()
+                    + 16
+                    + f.named
+                        .iter()
+                        .map(|n| {
+                            n.name.len()
+                                + n.name_overrides
+                                    .iter()
+                                    .map(|(_, s)| s.len() + size_of::<(i64, Box<str>)>())
+                                    .sum::<usize>()
+                                + size_of::<Named>()
+                        })
+                        .sum::<usize>()
+            })
             .sum::<usize>()
             + self.files.capacity() * size_of::<FileNode>()
             + self.by_guid.capacity() * (size_of::<Guid>() + size_of::<FileIdx>() + 8)
@@ -307,6 +388,12 @@ impl Cache {
         }
         let file = Arc::new(source.load(rel)?);
         let mut entries = self.entries.lock();
+        if let Some(at) = entries.iter().position(|(r, _)| r == rel) {
+            let entry = entries.remove(at)?;
+            let existing = entry.1.clone();
+            entries.push_back(entry);
+            return Some(existing);
+        }
         if entries.len() >= CACHE {
             entries.pop_front();
         }
@@ -390,20 +477,23 @@ impl Query<'_> {
         self.cache.get(self.graph.rel(idx)?, self.source)
     }
 
-    /// `files` and, transitively, the prefabs their instances come from.
-    fn load(&self, files: impl IntoIterator<Item = FileIdx>) -> Loaded {
+    /// Loads `root` and, when `through` is given, only the transitive prefab chain starting at
+    /// `through` (never every unrelated prefab in a large scene).
+    fn load_for(&self, root: FileIdx, through: Option<Guid>) -> Loaded {
         let mut loaded = HashMap::new();
-        let mut queue: Vec<FileIdx> = files.into_iter().collect();
+        if let (Some(guid), Some(file)) = (file_guid(self.graph, root), self.file(root)) {
+            loaded.insert(guid, file);
+        }
+        let Some(start) = through.and_then(|g| self.graph.by_guid.get(&g).copied()) else {
+            return Loaded(loaded);
+        };
+        let mut queue = vec![start];
         let mut seen = HashSet::new();
         while let Some(idx) = queue.pop() {
-            if !seen.insert(idx) || seen.len() > 512 {
+            if !seen.insert(idx) {
                 continue;
             }
-            let (Some(guid), Some(file)) =
-                (self.graph.files.get(idx as usize).filter(|f| !f.removed).and_then(|f| f.record.guid), self.file(idx))
-            else {
-                continue;
-            };
+            let (Some(guid), Some(file)) = (file_guid(self.graph, idx), self.file(idx)) else { continue };
             for o in &file.objects {
                 if let Some(prefab) = o.source_prefab.and_then(|p| p.guid)
                     && let Some(&source) = self.graph.by_guid.get(&prefab)
@@ -457,7 +547,7 @@ impl Query<'_> {
             else {
                 continue;
             };
-            let loaded = self.load([idx]);
+            let loaded = self.load_for(idx, Some(prefab_guid));
             let root = prefab_root(&loaded, prefab_guid);
             for instance in
                 file.prefab_instances().filter(|i| i.source_prefab.and_then(|p| p.guid) == Some(prefab_guid))
@@ -465,13 +555,16 @@ impl Query<'_> {
                 if out.len() >= MAX_RESULTS {
                     return;
                 }
+                let here = instance.file_id ^ component;
+                if !instance.removed.is_empty() && prefab::resolve(&loaded, guid, here).is_none() {
+                    continue;
+                }
                 let mut path = instance.transform_parent.map(|t| transform_path(&file, t)).unwrap_or_default();
                 let name = root
                     .and_then(|go| prefab::property(&loaded, guid, instance.file_id ^ go, "m_Name"))
                     .and_then(|v| v.value);
                 path.push(name.or_else(|| inner.first().cloned()).unwrap_or_default());
                 path.extend(below_root.iter().cloned());
-                let here = instance.file_id ^ component;
                 out.push(ScriptUsage {
                     rel: rel.clone(),
                     component: here,
@@ -539,12 +632,15 @@ impl Query<'_> {
     /// [`Self::field_values`] of several fields, finding the script's components once.
     pub(crate) fn fields_values(&self, script: Guid, fields: &[&str]) -> Vec<Vec<FieldValue>> {
         let usages = self.script_usages(script);
-        let mut by_file: HashMap<Arc<str>, Loaded> = HashMap::new();
+        let mut by_pair: HashMap<(Arc<str>, Option<Arc<str>>), Loaded> = HashMap::new();
         let mut out = vec![Vec::new(); fields.len()];
         for usage in usages {
             let Some(&idx) = self.graph.by_rel.get(&usage.rel) else { continue };
             let Some(guid) = file_guid(self.graph, idx) else { continue };
-            let loaded = by_file.entry(usage.rel.clone()).or_insert_with(|| self.load([idx]));
+            let through_guid = usage.through.as_deref().and_then(|rel| self.graph.guid_of(rel));
+            let loaded = by_pair
+                .entry((usage.rel.clone(), usage.through.clone()))
+                .or_insert_with(|| self.load_for(idx, through_guid));
             for (field, values) in fields.iter().zip(&mut out) {
                 let Some(value) = prefab::property(loaded, guid, usage.component, field) else { continue };
                 let overridden_at =

@@ -104,9 +104,11 @@ impl UnityIndex {
                 .map(|g| self.field_values(g, name))
                 .unwrap_or_default()
                 .into_iter()
-                // Where the value is set: the script's own components and the overrides, not
-                // every instance inheriting it.
-                .filter(|v| v.usage.through.is_none() || v.overridden_at.is_some())
+                // Where the value is set: the script's own components and overrides defined in this
+                // file, not downstream instances merely inheriting an inner prefab's override.
+                .filter(|v| {
+                    v.usage.through.is_none() || v.overridden_at.as_ref().is_some_and(|(f, _)| *f == v.usage.rel)
+                })
                 .map(|v| {
                     let (rel, line) = v.overridden_at.clone().unwrap_or((v.usage.rel.clone(), v.usage.line));
                     AssetUsage {

@@ -54,10 +54,31 @@ impl ScannedFile {
     }
 }
 
+/// Whether `instance` removes `(target_file, target_id)`.
+fn removes(instance: &Object, target_file: Guid, target_id: i64) -> bool {
+    instance.removed.iter().any(|r| r.file_id == target_id && (r.guid.is_none() || r.guid == Some(target_file)))
+}
+
+/// Whether any hop in `hops` removes the owning GameObject of `object`.
+fn owner_removed(assets: &impl Assets, hops: &[Hop], object: &Object) -> bool {
+    let Some(mut go_id) = object.game_object else { return false };
+    for hop in hops.iter().rev() {
+        let Some(instance) = assets.file(hop.file).and_then(|f| f.object(hop.instance)) else { return false };
+        if removes(instance, hop.source, go_id) {
+            return true;
+        }
+        go_id ^= hop.instance;
+    }
+    false
+}
+
 /// Where the object `file_id` of `file` comes from.
 pub fn resolve(assets: &impl Assets, file: Guid, file_id: i64) -> Option<Origin<'_>> {
     let mut hops = Vec::new();
     let (file, object) = walk(assets, file, file_id, &mut hops, &mut HashSet::new())?;
+    if owner_removed(assets, &hops, object) {
+        return None;
+    }
     Some(Origin { file, object, hops })
 }
 
@@ -79,13 +100,18 @@ fn walk<'a>(
         }
         let (instance, source) = (object.prefab_instance?, object.source?);
         let source_file = source.guid?;
+        if let Some(inst) = scanned.object(instance)
+            && removes(inst, source_file, source.file_id)
+        {
+            return None;
+        }
         hops.push(Hop { file, instance, source: source_file, source_id: source.file_id });
         return walk(assets, source_file, source.file_id, hops, seen);
     }
     for instance in scanned.prefab_instances() {
         let Some(source_file) = instance.source_prefab.and_then(|p| p.guid) else { continue };
         let source_id = file_id ^ instance.file_id;
-        if source_id <= 0 {
+        if source_id == 0 || removes(instance, source_file, source_id) {
             continue;
         }
         hops.push(Hop { file, instance: instance.file_id, source: source_file, source_id });

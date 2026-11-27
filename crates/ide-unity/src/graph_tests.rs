@@ -355,3 +355,114 @@ fn searches_game_objects_instances_and_assets() {
     assert_eq!(index.search("plyr", 1).hits[0].indices, [0, 1, 3, 5]);
     assert!(index.search("  ", 10).hits.is_empty());
 }
+
+#[test]
+fn nested_field_overrides_are_not_duplicated_in_usages_or_lenses() {
+    let store = tempfile::tempdir().unwrap();
+    let index = open(store.path());
+    let root = dunce::canonicalize(PROJECT).unwrap();
+    let player_cs = root.join("Assets/Scripts/Player.cs");
+
+    // `coins` is only overridden in Squad.prefab, never in Main.unity.
+    let coins_sym = crate::usages::CodeSymbol {
+        class: "Game.Player".into(),
+        script_class: true,
+        member: crate::usages::Member::Field("coins".into()),
+    };
+    let coins_usages: Vec<_> = index
+        .asset_usages(&player_cs, &coins_sym)
+        .into_iter()
+        .map(|u| (u.path.strip_prefix(&root).unwrap().to_string_lossy().into_owned(), u.usage))
+        .collect();
+    assert_eq!(
+        coins_usages,
+        [
+            (
+                "Assets/Prefabs/Player.prefab".into(),
+                crate::usages::AssetUsageKind::FieldValue { value: Some("0".into()), overridden: false }
+            ),
+            (
+                "Assets/Prefabs/Squad.prefab".into(),
+                crate::usages::AssetUsageKind::FieldValue { value: Some("10".into()), overridden: true }
+            ),
+        ]
+    );
+
+    let item = |name: &str, kind: ide_core::SymbolKind, line: u32, children: Vec<ide_core::OutlineItem>| {
+        let range = ide_core::Range { start: ide_core::Pos { line, col: 0 }, end: ide_core::Pos { line, col: 1 } };
+        ide_core::OutlineItem {
+            name: name.into(),
+            detail: None,
+            kind,
+            visibility: None,
+            range,
+            selection_range: range,
+            children,
+        }
+    };
+    let outline = vec![item(
+        "Game",
+        ide_core::SymbolKind::Namespace,
+        0,
+        vec![item(
+            "Player",
+            ide_core::SymbolKind::Class,
+            1,
+            vec![
+                item("speed", ide_core::SymbolKind::Field, 2, Vec::new()),
+                item("coins", ide_core::SymbolKind::Field, 3, Vec::new()),
+            ],
+        )],
+    )];
+    let lenses = index.lenses(&player_cs, &outline);
+    let field_overrides = |line: u32| {
+        lenses.iter().find(|l| l.line == line).and_then(|l| match &l.summary {
+            crate::lenses::LensSummary::Field { overrides, .. } => Some(*overrides),
+            _ => None,
+        })
+    };
+    assert_eq!(field_overrides(2), Some(2)); // Player Variant.prefab + Main.unity
+    assert_eq!(field_overrides(3), Some(1)); // Squad.prefab only, not Main.unity
+}
+
+#[test]
+fn child_name_override_does_not_rename_root_instance_in_search() {
+    let (_project, _store, index, root) = copied();
+    let variant = root.join("Assets/Prefabs/Player Variant.prefab");
+    let yaml = std::fs::read_to_string(&variant).unwrap();
+    // Replace the root m_Name override with an override targeting child GameObject `Model`.
+    let patched = yaml.replace(
+        "target: {fileID: 1354967268023247473, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}\n      propertyPath: m_Name\n      value: Player Variant",
+        "target: {fileID: 3702032423359520893, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}\n      propertyPath: m_Name\n      value: RenamedChildModel",
+    );
+    assert_ne!(patched, yaml);
+    let rev = index.status().revision;
+    std::fs::write(&variant, patched).unwrap();
+    index.update(std::slice::from_ref(&variant), &[]);
+    until(|| index.status().revision > rev);
+    // The PrefabInstance in Player Variant.prefab must still inherit its root name "Player", not "RenamedChildModel".
+    let hits = index.search("Player", 20).hits;
+    assert!(
+        hits.iter().any(|h| h.kind == crate::search::UnityHitKind::PrefabInstance
+            && h.name == "Player"
+            && h.path.ends_with("Player Variant.prefab")),
+        "{hits:?}"
+    );
+    assert!(index.search("RenamedChildModel", 10).hits.is_empty());
+}
+
+#[test]
+fn removed_components_are_excluded_from_script_usages() {
+    let (_project, _store, index, root) = copied();
+    let variant = root.join("Assets/Prefabs/Player Variant.prefab");
+    let yaml = std::fs::read_to_string(&variant).unwrap();
+    let patched = yaml.replace(
+        "m_RemovedComponents: []",
+        "m_RemovedComponents:\n    - {fileID: 8815640413858057345, guid: 79cb0651700894f0a8e50458c76fa759, type: 3}",
+    );
+    assert_ne!(patched, yaml);
+    std::fs::write(&variant, patched).unwrap();
+    index.update(std::slice::from_ref(&variant), &[]);
+    until(|| usages(&index).len() == 5);
+    assert!(usages(&index).iter().all(|(rel, go, _)| rel != "Assets/Prefabs/Player Variant.prefab" && go != "Hero"));
+}

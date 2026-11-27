@@ -57,7 +57,9 @@ pub fn merge(tool: &Path, name: &str, base: &str, ours: &str, theirs: &str) -> I
     let (base, ours, theirs) = (file("base", base)?, file("yours", ours)?, file("theirs", theirs)?);
     let dest = dir.path().join(format!("merged.{ext}"));
     // Left is theirs and right is yours. Headless, no fallback tool: conflicts are reported.
-    let out = Command::new(tool)
+    let mut cmd = Command::new(tool);
+    ide_core::process::prepare(&mut cmd);
+    let out = cmd
         .args(["merge", "-h", "-p", "--fallback", "none"])
         .args([&base, &theirs, &ours, &dest])
         .current_dir(dir.path())

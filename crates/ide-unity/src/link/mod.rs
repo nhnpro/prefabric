@@ -92,7 +92,11 @@ fn read_link_file(path: &Path) -> Option<LinkFile> {
 
 type Reply = mpsc::Sender<IdeResult<Value>>;
 
+const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+const SHRINK_LINE_CAPACITY: usize = 64 * 1024;
+
 struct Connection {
+    generation: u64,
     stream: TcpStream,
     next_id: u64,
     pending: HashMap<u64, Reply>,
@@ -106,6 +110,7 @@ struct Inner {
     sink: SharedSink,
     status: Mutex<UnityLinkStatus>,
     connection: Mutex<Option<Connection>>,
+    next_generation: std::sync::atomic::AtomicU64,
     /// Listeners of the test runs in progress, by the IDE's run id.
     test_runs: Mutex<HashMap<String, test_run::Listener>>,
     stopped: Mutex<bool>,
@@ -126,6 +131,7 @@ impl UnityLink {
             sink,
             status: Mutex::default(),
             connection: Mutex::new(None),
+            next_generation: std::sync::atomic::AtomicU64::new(0),
             test_runs: Mutex::default(),
             stopped: Mutex::new(false),
             wake: Condvar::new(),
@@ -175,18 +181,21 @@ impl UnityLink {
     /// Sends a request to the Editor and waits for its result. Blocking.
     pub fn request(&self, method: &str, params: Value, timeout: Duration) -> IdeResult<Value> {
         let (tx, rx) = mpsc::channel();
-        let id = {
+        let (generation, id) = {
             let mut guard = self.inner.connection.lock();
             let connection = guard.as_mut().ok_or_else(|| IdeError::unavailable("Unity Editor is not connected"))?;
             connection.next_id += 1;
             let id = connection.next_id;
+            let generation = connection.generation;
             let line = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
             writeln!(connection.stream, "{line}").map_err(|e| IdeError::unavailable(format!("Unity link: {e}")))?;
             connection.pending.insert(id, tx);
-            id
+            (generation, id)
         };
         rx.recv_timeout(timeout).unwrap_or_else(|_| {
-            if let Some(c) = self.inner.connection.lock().as_mut() {
+            if let Some(c) = self.inner.connection.lock().as_mut()
+                && c.generation == generation
+            {
                 c.pending.remove(&id);
             }
             Err(IdeError::unavailable(format!("Unity didn't answer {method}")))
@@ -315,11 +324,11 @@ impl Inner {
         if stream.set_read_timeout(Some(HELLO_TIMEOUT)).is_err() || writeln!(&stream, "{hello}").is_err() {
             return Ended::Failed;
         }
-        let mut line = String::new();
-        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+        let mut line = Vec::new();
+        if read_bounded_line(&mut reader, &mut line, MAX_LINE_BYTES).unwrap_or(0) == 0 {
             return Ended::Failed;
         }
-        let Ok(reply) = serde_json::from_str::<Value>(&line) else { return Ended::Failed };
+        let Ok(reply) = serde_json::from_slice::<Value>(&line) else { return Ended::Failed };
         if reply.pointer("/error/code").and_then(Value::as_i64) == Some(REFUSED_OLDER_PROTOCOL) {
             return Ended::Incompatible;
         }
@@ -333,7 +342,8 @@ impl Inner {
             self.publish_compile(messages);
         }
         let Ok(writer) = stream.try_clone() else { return Ended::Failed };
-        *self.connection.lock() = Some(Connection { stream: writer, next_id: 0, pending: HashMap::new() });
+        let generation = self.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        *self.connection.lock() = Some(Connection { generation, stream: writer, next_id: 0, pending: HashMap::new() });
         if self.stopped() {
             let _ = stream.shutdown(Shutdown::Both);
         }
@@ -348,8 +358,7 @@ impl Inner {
         });
 
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
+            match read_bounded_line(&mut reader, &mut line, MAX_LINE_BYTES) {
                 Ok(0) | Err(_) => break,
                 Ok(_) => self.handle(&line),
             }
@@ -362,8 +371,8 @@ impl Inner {
         Ended::Closed
     }
 
-    fn handle(&self, line: &str) {
-        let Ok(message) = serde_json::from_str::<Value>(line) else { return };
+    fn handle(&self, line: &[u8]) {
+        let Ok(message) = serde_json::from_slice::<Value>(line) else { return };
         if let Some(id) = message.get("id").and_then(Value::as_u64) {
             let reply = self.connection.lock().as_mut().and_then(|c| c.pending.remove(&id));
             if let Some(reply) = reply {
@@ -425,6 +434,38 @@ impl Inner {
     }
 }
 
+fn read_bounded_line(reader: &mut impl BufRead, buf: &mut Vec<u8>, limit: usize) -> std::io::Result<usize> {
+    buf.clear();
+    if buf.capacity() > SHRINK_LINE_CAPACITY {
+        buf.shrink_to(SHRINK_LINE_CAPACITY);
+    }
+    let mut total = 0;
+    loop {
+        let available = match reader.fill_buf() {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if available.is_empty() {
+            return Ok(total);
+        }
+        let (take, done) = match available.iter().position(|&b| b == b'\n') {
+            Some(pos) => (pos + 1, true),
+            None => (available.len(), false),
+        };
+        if total + take > limit {
+            reader.consume(take);
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unity link line too long"));
+        }
+        buf.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        total += take;
+        if done {
+            return Ok(total);
+        }
+    }
+}
+
 fn parse_state(v: &Value) -> Option<UnityEditorState> {
     let play_mode = match v.get("playMode")?.as_str()? {
         "playing" => UnityPlayMode::Playing,
@@ -480,7 +521,9 @@ fn split_message(message: &str) -> (Option<&str>, &str) {
 const PREFAB_INSTANCE: u32 = 1001;
 
 fn is_yaml_asset(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()).is_some_and(|e| matches!(e, "unity" | "prefab" | "asset"))
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        e.eq_ignore_ascii_case("unity") || e.eq_ignore_ascii_case("prefab") || e.eq_ignore_ascii_case("asset")
+    })
 }
 
 /// A serialized object of a Unity YAML file: `--- !u!<class> &<fileID>[ stripped]`.
@@ -493,21 +536,24 @@ struct YamlObject {
     stripped: bool,
 }
 
+fn parse_header(line: &str) -> Option<(u32, &str, bool)> {
+    let rest = line.strip_prefix("--- !u!")?;
+    let (class, rest) = rest.split_once(" &")?;
+    let mut words = rest.split_whitespace();
+    let file_id = words.next()?;
+    if file_id.starts_with('+') || file_id.parse::<i64>().is_err() {
+        return None;
+    }
+    Some((class.parse().ok()?, file_id, words.any(|w| w == "stripped")))
+}
+
 /// The object whose block holds 0-based `line`.
 fn object_at(text: &str, line: u32) -> Option<YamlObject> {
-    let lines: Vec<&str> = text.lines().take(line as usize + 1).collect();
-    lines.into_iter().rev().find_map(|l| {
-        let rest = l.strip_prefix("--- !u!")?;
-        let (class, rest) = rest.split_once(" &")?;
-        let mut words = rest.split_whitespace();
-        let file_id = words.next()?;
-        if !file_id.trim_start_matches('-').chars().all(|c| c.is_ascii_digit()) || file_id.is_empty() {
-            return None;
+    let mut last = None;
+    for l in text.lines().take(line as usize + 1) {
+        if let Some(header) = parse_header(l) {
+            last = Some(header);
         }
-        Some(YamlObject {
-            class: class.parse().ok()?,
-            file_id: file_id.to_owned(),
-            stripped: words.any(|w| w == "stripped"),
-        })
-    })
+    }
+    last.map(|(class, file_id, stripped)| YamlObject { class, file_id: file_id.to_owned(), stripped })
 }

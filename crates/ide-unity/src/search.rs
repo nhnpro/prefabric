@@ -137,10 +137,12 @@ fn search(q: &Query<'_>, query: &str, limit: usize, root: &std::path::Path) -> U
     UnitySearch { hits, more }
 }
 
-/// An object's name; an instance without its own takes its prefab's.
+/// An object's name; an instance without its own root renaming takes its prefab's name.
 fn instance_name<'a>(q: &'a Query<'_>, n: &'a crate::graph::Named) -> &'a str {
-    if !n.name.is_empty() {
-        return &n.name;
+    if let Some(name) = q.graph.instance_root_name(n)
+        && !name.is_empty()
+    {
+        return name;
     }
     n.instance_of
         .and_then(|g| q.graph.rel_of(g))
