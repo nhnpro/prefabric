@@ -35,18 +35,18 @@ namespace Prefabric.Unity.Editor
 			};
 		}
 
-		public static void Start(string filename, string arguments)
+		public static bool Start(string filename, string arguments)
 		{
-			Start(ProcessStartInfoFor(filename, arguments, false));
+			return Start(ProcessStartInfoFor(filename, arguments, false));
 		}
 
-		public static void Start(ProcessStartInfo processStartInfo)
+		public static bool Start(ProcessStartInfo processStartInfo)
 		{
 			var process = new Process { StartInfo = processStartInfo };
 
 			using (process)
 			{
-				process.Start();
+				return process.Start();
 			}
 		}
 
@@ -61,52 +61,75 @@ namespace Prefabric.Unity.Editor
 
 			using (process)
 			{
+				var outputLock = new object();
+				var errorLock = new object();
 				var sbOutput = new StringBuilder();
 				var sbError = new StringBuilder();
 
-				var outputSource = new TaskCompletionSource<bool>();
-				var errorSource = new TaskCompletionSource<bool>();
-				
+				var outputSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+				var errorSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
 				process.OutputDataReceived += (_, e) =>
 				{
-					Append(sbOutput, e.Data, outputSource);
+					Append(sbOutput, outputLock, e.Data, outputSource);
 					if (onOutputReceived != null && e.Data != null)
 						onOutputReceived(e.Data);
 				};
-				process.ErrorDataReceived += (_, e) => Append(sbError, e.Data, errorSource);
+				process.ErrorDataReceived += (_, e) => Append(sbError, errorLock, e.Data, errorSource);
 
-				process.Start();
+				if (!process.Start())
+					return new ProcessRunnerResult { Success = false, Error = string.Empty, Output = string.Empty };
 				process.BeginOutputReadLine();
 				process.BeginErrorReadLine();
-				
-				var run = Task.Run(() => process.WaitForExit(timeoutms));
-				var processTask = Task.WhenAll(run, outputSource.Task, errorSource.Task);
 
-				if (Task.WhenAny(Task.Delay(timeoutms), processTask).Result == processTask && run.Result)
-					return new ProcessRunnerResult {Success = true, Error = sbError.ToString(), Output = sbOutput.ToString()};
+				var exited = process.WaitForExit(timeoutms);
+				if (exited)
+				{
+					using (var cts = new CancellationTokenSource())
+					{
+						var drained = Task.WhenAll(outputSource.Task, errorSource.Task);
+						Task.WhenAny(drained, Task.Delay(5000, cts.Token)).Wait();
+						cts.Cancel();
+					}
+					string output, error;
+					lock (outputLock) output = sbOutput.ToString();
+					lock (errorLock) error = sbError.ToString();
+					return new ProcessRunnerResult { Success = process.ExitCode == 0, Error = error, Output = output };
+				}
 
 				try
 				{
 					process.Kill();
+					process.WaitForExit(5000);
 				}
 				catch
 				{
 					/* ignore */
 				}
-				
-				return new ProcessRunnerResult {Success = false, Error = sbError.ToString(), Output = sbOutput.ToString()};
+				using (var cts = new CancellationTokenSource())
+				{
+					var drained = Task.WhenAll(outputSource.Task, errorSource.Task);
+					Task.WhenAny(drained, Task.Delay(1000, cts.Token)).Wait();
+					cts.Cancel();
+				}
+
+				string timedOutOutput, timedOutError;
+				lock (outputLock) timedOutOutput = sbOutput.ToString();
+				lock (errorLock) timedOutError = sbError.ToString();
+				return new ProcessRunnerResult { Success = false, Error = timedOutError, Output = timedOutOutput };
 			}
 		}
 
-		private static void Append(StringBuilder sb, string data, TaskCompletionSource<bool> taskSource)
+		private static void Append(StringBuilder sb, object sync, string data, TaskCompletionSource<bool> taskSource)
 		{
 			if (data == null)
 			{
-				taskSource.SetResult(true);
+				taskSource.TrySetResult(true);
 				return;
 			}
 
-			sb?.Append(data);
+			lock (sync)
+				sb?.AppendLine(data);
 		}
 	}
 }

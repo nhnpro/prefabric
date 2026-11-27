@@ -70,22 +70,61 @@ namespace Prefabric.Unity.Editor.Link
                     sb.Append(']');
                     break;
                 case float f:
-                    sb.Append(f.ToString("R", CultureInfo.InvariantCulture));
+                    if (float.IsNaN(f) || float.IsInfinity(f))
+                        sb.Append("null");
+                    else
+                        sb.Append(f.ToString("R", CultureInfo.InvariantCulture));
                     break;
                 case double d:
-                    sb.Append(d.ToString("R", CultureInfo.InvariantCulture));
+                    if (double.IsNaN(d) || double.IsInfinity(d))
+                        sb.Append("null");
+                    else
+                        sb.Append(d.ToString("R", CultureInfo.InvariantCulture));
                     break;
-                case IFormattable n:
-                    sb.Append(n.ToString(null, CultureInfo.InvariantCulture));
+                case sbyte n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case byte n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case short n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case ushort n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case int n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case uint n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case long n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case ulong n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case decimal n:
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
                     break;
                 default:
-                    WriteString(sb, value.ToString());
+                    var text = value.ToString();
+                    if (text == null)
+                        sb.Append("null");
+                    else
+                        WriteString(sb, text);
                     break;
             }
         }
 
         static void WriteString(StringBuilder sb, string s)
         {
+            if (s == null)
+            {
+                sb.Append("null");
+                return;
+            }
             sb.Append('"');
             foreach (var c in s)
             {
@@ -220,6 +259,14 @@ namespace Prefabric.Unity.Editor.Link
                 }
             }
 
+            static int HexDigit(char c)
+            {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                throw new FormatException("bad \\u escape");
+            }
+
             string String()
             {
                 if (Next() != '"')
@@ -249,7 +296,11 @@ namespace Prefabric.Unity.Editor.Link
                         case 'u':
                             if (pos + 4 > text.Length)
                                 throw new FormatException("bad \\u escape");
-                            sb.Append((char)Convert.ToInt32(text.Substring(pos, 4), 16));
+                            var code = (HexDigit(text[pos]) << 12)
+                                | (HexDigit(text[pos + 1]) << 8)
+                                | (HexDigit(text[pos + 2]) << 4)
+                                | HexDigit(text[pos + 3]);
+                            sb.Append((char)code);
                             pos += 4;
                             break;
                         default:
@@ -265,7 +316,18 @@ namespace Prefabric.Unity.Editor.Link
                     pos++;
                 if (start == pos)
                     throw new FormatException($"unexpected '{text[pos]}' at {pos}");
-                return double.Parse(text.Substring(start, pos - start), NumberStyles.Float, CultureInfo.InvariantCulture);
+                double value;
+                try
+                {
+                    value = double.Parse(text.Substring(start, pos - start), NumberStyles.Float, CultureInfo.InvariantCulture);
+                }
+                catch (OverflowException e)
+                {
+                    throw new FormatException("number out of range", e);
+                }
+                if (double.IsNaN(value) || double.IsInfinity(value))
+                    throw new FormatException("number out of range");
+                return value;
             }
         }
     }

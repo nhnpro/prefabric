@@ -12,8 +12,10 @@ namespace Prefabric.Unity.Editor
 		public static void Generate()
 		{
 #if UNITY_MSBUILD_ENABLED
-			MSBuildProjectIntegration.Update(PrefabricEditor.GenerationInstallation);
-			Debug.Log("Prefabric: updated the MSBuild integration; Unity generates the projects.");
+			if (MSBuildProjectIntegration.Update(PrefabricEditor.GenerationInstallation))
+				Debug.Log("Prefabric: updated the MSBuild integration; Unity generates the projects.");
+			else
+				Debug.LogError("Prefabric: failed to update the MSBuild integration.");
 #else
 			AssetDatabase.Refresh();
 			PrefabricEditor.Generator.Sync();

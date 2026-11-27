@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using UnityEditor;
@@ -27,8 +28,8 @@ namespace Prefabric.Unity.Editor.Link
 
         static Link()
         {
-            // Asset import workers load editor code too; batch runs (builds, CI) aren't driven by the IDE.
-            if (AssetDatabase.IsAssetImportWorkerProcess() || (Application.isBatchMode && !HasArg("-prefabricLink")))
+            // Asset import workers and secondary MPE processes load editor code too; batch runs aren't driven by the IDE.
+            if (!UnityInstallation.IsMainUnityEditorProcess || (Application.isBatchMode && !HasArg("-prefabricLink")))
                 return;
 
             var token = SessionState.GetString(TokenKey, "");
@@ -37,20 +38,33 @@ namespace Prefabric.Unity.Editor.Link
                 token = LinkServer.NewToken();
                 SessionState.SetString(TokenKey, token);
             }
+            // Populate cachedHello before starting the server so an immediate hello never sees an empty payload.
+            PublishState(State(), force: true, notify: false);
+            LinkServer started;
             try
             {
-                server = new LinkServer(SessionState.GetInt(PortKey, 0), token, handlers, Hello);
+                started = new LinkServer(SessionState.GetInt(PortKey, 0), token, handlers, Hello);
             }
             catch (Exception e)
             {
                 Debug.LogWarning($"Prefabric: the Editor link could not start: {e.Message}");
                 return;
             }
-            SessionState.SetInt(PortKey, server.Port);
+            SessionState.SetInt(PortKey, started.Port);
 
             var project = Directory.GetParent(Application.dataPath)!.FullName;
             linkFile = Path.Combine(project, "Library", "Prefabric", "link.json");
-            WriteLinkFile(token);
+            try
+            {
+                WriteLinkFile(started.Port, token);
+            }
+            catch (Exception e)
+            {
+                started.Dispose();
+                Debug.LogWarning($"Prefabric: could not write {linkFile}: {e.Message}");
+                return;
+            }
+            server = started;
 
             EditorApplication.update += Update;
             Application.logMessageReceivedThreaded += OnLog;
@@ -80,7 +94,6 @@ namespace Prefabric.Unity.Editor.Link
             };
             CompilationPipeline.assemblyCompilationFinished += (_, messages) => Collect(messages);
             CompilationPipeline.compilationFinished += _ => CompileFinished();
-            PublishState();
         }
 
         /// <summary>Whether the link runs in this Editor (not in batch runs or import workers).</summary>
@@ -101,13 +114,16 @@ namespace Prefabric.Unity.Editor.Link
 
         static bool HasArg(string name) => Array.IndexOf(Environment.GetCommandLineArgs(), name) >= 0;
 
-        static void WriteLinkFile(string token)
+        static void WriteLinkFile(int port, string token)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(linkFile)!);
+            var dir = Path.GetDirectoryName(linkFile)!;
+            Directory.CreateDirectory(dir);
+            // Restrict the directory before creating the temp file so the token is never world-readable.
+            OwnerOnly(dir, 0x1C0); // 0700
             var json = Json.Write(new Dictionary<string, object>
             {
                 ["protocol"] = LinkServer.Protocol,
-                ["port"] = server.Port,
+                ["port"] = port,
                 ["token"] = token,
                 ["pid"] = System.Diagnostics.Process.GetCurrentProcess().Id,
                 ["unityVersion"] = Application.unityVersion,
@@ -115,24 +131,37 @@ namespace Prefabric.Unity.Editor.Link
             // Write then rename over the old file, so the IDE never reads half a file or finds none.
             var temp = linkFile + ".tmp";
             File.WriteAllText(temp, json);
-            OwnerOnly(temp);
-            if (File.Exists(linkFile))
-                File.Replace(temp, linkFile, null);
-            else
-                File.Move(temp, linkFile);
+            OwnerOnly(temp, 0x180); // 0600
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    if (File.Exists(linkFile))
+                        File.Replace(temp, linkFile, null);
+                    else
+                        File.Move(temp, linkFile);
+                    return;
+                }
+                catch (Exception e) when (attempt < 3 && (e is IOException || e is UnauthorizedAccessException))
+                {
+                    // On Windows, a concurrent read by the IDE or antivirus can cause a brief sharing violation.
+                    Thread.Sleep(25 * (attempt + 1));
+                }
+            }
         }
 
         [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
         static extern int chmod(string path, int mode);
 
-        /// <summary>The token is for this user only (mode 0600; Windows keeps the profile's ACLs).</summary>
-        static void OwnerOnly(string path)
+        /// <summary>The token is for this user only (mode 0600/0700; Windows keeps the profile's ACLs).</summary>
+        static void OwnerOnly(string path, int mode)
         {
             if (Application.platform == RuntimePlatform.WindowsEditor)
                 return;
             try
             {
-                chmod(path, Convert.ToInt32("600", 8));
+                if (chmod(path, mode) != 0)
+                    Debug.LogWarning($"Prefabric: chmod failed on {path} (errno {System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
             }
             catch (Exception e)
             {
@@ -217,7 +246,9 @@ namespace Prefabric.Unity.Editor.Link
 
         /// <summary>YAML writes file IDs signed; <c>GlobalObjectId</c> parses them unsigned.</summary>
         static string UnsignedFileId(string fileId) =>
-            long.TryParse(fileId, out var signed) ? unchecked((ulong)signed).ToString() : fileId;
+            long.TryParse(fileId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var signed)
+                ? unchecked((ulong)signed).ToString(CultureInfo.InvariantCulture)
+                : fileId;
 
         /// <summary>The state the IDE shows: play mode, compiling, importing.</summary>
         public static Dictionary<string, object> State() => new Dictionary<string, object>
@@ -253,16 +284,26 @@ namespace Prefabric.Unity.Editor.Link
             var result = new Dictionary<string, object> { ["messages"] = new List<object>(compiling) };
             compiling.Clear();
             SessionState.SetString(CompileKey, Json.Write(result));
-            cachedHello = null;
-            PublishState();
+            PublishState(State(), force: true, notify: true);
             server.Notify("compile/finished", result);
         }
 
-        static Dictionary<string, object> LastCompile() =>
-            Json.Parse(SessionState.GetString(CompileKey, "{\"messages\":[]}")) as Dictionary<string, object>;
+        static Dictionary<string, object> LastCompile()
+        {
+            try
+            {
+                if (Json.Parse(SessionState.GetString(CompileKey, "{\"messages\":[]}")) is Dictionary<string, object> parsed)
+                    return parsed;
+            }
+            catch (FormatException)
+            {
+            }
+            return new Dictionary<string, object> { ["messages"] = new List<object>() };
+        }
 
         /// <summary>Called on a socket thread: answers from what the main thread last saw.</summary>
-        static Dictionary<string, object> Hello() => new Dictionary<string, object>(cachedHello ?? new Dictionary<string, object>());
+        static Dictionary<string, object> Hello() =>
+            new Dictionary<string, object>(Volatile.Read(ref cachedHello) ?? new Dictionary<string, object>());
 
         const int MaxLogBatch = 500;
         const double LogInterval = 0.1;
@@ -292,11 +333,11 @@ namespace Prefabric.Unity.Editor.Link
                 },
                 ["message"] = message,
                 ["stackTrace"] = stackTrace ?? "",
-                ["time"] = DateTime.Now.ToString("HH:mm:ss.fff"),
+                ["time"] = DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
             });
-            var count = Interlocked.Increment(ref queued);
+            Interlocked.Increment(ref queued);
             var limit = server.ClientCount == 0 ? MaxQueuedLogs : MaxBacklog;
-            if (count > limit && logs.TryDequeue(out _))
+            while (Volatile.Read(ref queued) > limit && logs.TryDequeue(out _))
                 Interlocked.Decrement(ref queued);
         }
 
@@ -332,24 +373,26 @@ namespace Prefabric.Unity.Editor.Link
             // Polled as well: `isCompiling`/`isUpdating` change without an event.
             var state = State();
             if (lastState == null || !SameState(state, lastState))
-                PublishState(state);
+                PublishState(state, force: false, notify: true);
         }
 
-        static void PublishState() => PublishState(State());
+        static void PublishState() => PublishState(State(), force: false, notify: true);
 
-        static void PublishState(Dictionary<string, object> state)
+        static void PublishState(Dictionary<string, object> state, bool force, bool notify)
         {
-            if (lastState != null && cachedHello != null && SameState(state, lastState))
+            if (!force && lastState != null && Volatile.Read(ref cachedHello) != null && SameState(state, lastState))
                 return;
             lastState = state;
-            cachedHello = new Dictionary<string, object>
+            var snapshot = new Dictionary<string, object>
             {
                 ["unityVersion"] = Application.unityVersion,
                 ["projectPath"] = Directory.GetParent(Application.dataPath)!.FullName,
                 ["state"] = state,
                 ["compile"] = LastCompile(),
             };
-            server.Notify("editor/stateChanged", state);
+            Volatile.Write(ref cachedHello, snapshot);
+            if (notify)
+                server?.Notify("editor/stateChanged", state);
         }
 
         static bool SameState(Dictionary<string, object> a, Dictionary<string, object> b)

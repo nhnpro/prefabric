@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
@@ -27,6 +28,7 @@ namespace Prefabric.Unity.Editor.TestRunner
         /// until its RunFinished, or for <see cref="DrainSeconds"/> at most.</summary>
         const string DrainKey = "Prefabric.Tests.Drain";
         const double DrainSeconds = 15;
+        const int MaxPendingEvents = 50000;
         static readonly string[] CountKeys = { "passed", "failed", "skipped" };
 
         static readonly List<object> pending = new List<object>();
@@ -40,17 +42,28 @@ namespace Prefabric.Unity.Editor.TestRunner
             api.RegisterCallbacks(new Callbacks());
             EditorLink.Register("tests.run", Run);
             EditorLink.Register("tests.cancel", Cancel);
-            if (Json.Parse(SessionState.GetString(PendingKey, "[]")) is List<object> saved)
-                pending.AddRange(saved);
+            try
+            {
+                if (Json.Parse(SessionState.GetString(PendingKey, "[]")) is List<object> saved)
+                    pending.AddRange(saved);
+            }
+            catch (FormatException)
+            {
+            }
             SessionState.EraseString(PendingKey);
             EditorApplication.update += Flush;
             AssemblyReloadEvents.beforeAssemblyReload += () =>
             {
-                Flush();
                 if (pending.Count > 0)
                     SessionState.SetString(PendingKey, Json.Write(pending));
             };
         }
+
+        static void SetDouble(string key, double value) =>
+            SessionState.SetString(key, value.ToString("R", CultureInfo.InvariantCulture));
+
+        static bool TryGetDouble(string key, out double value) =>
+            double.TryParse(SessionState.GetString(key, ""), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
 
         /// <summary><c>runId</c> (the IDE's), <c>mode</c>, <c>assembly?</c>, <c>filter?</c> (full names of tests or fixtures).</summary>
         static object Run(Dictionary<string, object> p)
@@ -62,8 +75,12 @@ namespace Prefabric.Unity.Editor.TestRunner
                 throw new InvalidOperationException("The previous test run is still stopping; try again in a moment");
             // A run still open here is one the IDE lost track of (a restart, a reload during Stop):
             // this run replaces it.
-            if (SessionState.GetString(RunKey, "").Length > 0 && Stop())
-                throw new InvalidOperationException("Stopping the previous test run; try again in a moment");
+            if (SessionState.GetString(RunKey, "").Length > 0)
+            {
+                pending.Clear();
+                if (Stop())
+                    throw new InvalidOperationException("Stopping the previous test run; try again in a moment");
+            }
             var filter = new Filter
             {
                 testMode = p.TryGetValue("mode", out var m) && m as string == "playMode" ? TestMode.PlayMode : TestMode.EditMode,
@@ -78,17 +95,20 @@ namespace Prefabric.Unity.Editor.TestRunner
             }
             // Before Execute: RunStarted may come before it returns.
             SessionState.SetString(RunKey, runId);
-            SessionState.SetFloat(StartKey, (float)EditorApplication.timeSinceStartup);
+            SetDouble(StartKey, EditorApplication.timeSinceStartup);
             SessionState.EraseInt(StartedKey);
             foreach (var key in CountKeys)
                 SessionState.EraseInt(CountKey(key));
             try
             {
-                SessionState.SetString(GuidKey, api.Execute(new ExecutionSettings(filter)) ?? "");
+                var guid = api.Execute(new ExecutionSettings(filter)) ?? "";
+                // Do not restore GuidKey if Execute finished synchronously and cleared RunKey.
+                if (SessionState.GetString(RunKey, "") == runId)
+                    SessionState.SetString(GuidKey, guid);
             }
             catch
             {
-                SessionState.EraseString(RunKey);
+                Finished();
                 throw;
             }
             return null;
@@ -117,18 +137,17 @@ namespace Prefabric.Unity.Editor.TestRunner
             var started = SessionState.GetInt(StartedKey, 0) == 1;
             Finished();
             if (started)
-                SessionState.SetFloat(DrainKey, (float)EditorApplication.timeSinceStartup);
+                SetDouble(DrainKey, EditorApplication.timeSinceStartup);
             return started;
         }
 
         static bool Draining()
         {
-            var since = SessionState.GetFloat(DrainKey, -1);
-            if (since < 0)
+            if (!TryGetDouble(DrainKey, out var since))
                 return false;
             if (EditorApplication.timeSinceStartup - since < DrainSeconds)
                 return true;
-            SessionState.EraseFloat(DrainKey);
+            SessionState.EraseString(DrainKey);
             return false;
         }
 
@@ -139,7 +158,8 @@ namespace Prefabric.Unity.Editor.TestRunner
             var counts = new Dictionary<string, object>();
             foreach (var key in CountKeys)
                 counts[key] = SessionState.GetInt(CountKey(key), 0);
-            counts["durationMs"] = (EditorApplication.timeSinceStartup - SessionState.GetFloat(StartKey, 0)) * 1000;
+            var start = TryGetDouble(StartKey, out var s) ? s : EditorApplication.timeSinceStartup;
+            counts["durationMs"] = Math.Max(0.0, (EditorApplication.timeSinceStartup - start) * 1000.0);
             return counts;
         }
 
@@ -150,6 +170,8 @@ namespace Prefabric.Unity.Editor.TestRunner
             SessionState.EraseInt(StartedKey);
         }
 
+        static bool HasActiveRun => SessionState.GetString(RunKey, "").Length > 0 && !Draining();
+
         static void Send(string kind, Dictionary<string, object> fields)
         {
             // Runs started from Unity's own Test Runner window aren't the IDE's.
@@ -158,6 +180,8 @@ namespace Prefabric.Unity.Editor.TestRunner
                 return;
             fields["runId"] = runId;
             fields["event"] = kind;
+            if (pending.Count >= MaxPendingEvents)
+                pending.RemoveAt(0);
             pending.Add(fields);
             Flush();
         }
@@ -183,7 +207,7 @@ namespace Prefabric.Unity.Editor.TestRunner
         {
             public void RunStarted(ITestAdaptor testsToRun)
             {
-                if (Draining())
+                if (!HasActiveRun)
                     return;
                 SessionState.SetInt(StartedKey, 1);
                 Send("runStarted", new Dictionary<string, object> { ["count"] = testsToRun.TestCaseCount });
@@ -194,28 +218,31 @@ namespace Prefabric.Unity.Editor.TestRunner
                 // The end of a cancelled job: the run it belonged to is finished already.
                 if (Draining())
                 {
-                    SessionState.EraseFloat(DrainKey);
+                    SessionState.EraseString(DrainKey);
                     return;
                 }
+                if (!HasActiveRun || SessionState.GetInt(StartedKey, 0) != 1)
+                    return;
                 Send("runFinished", new Dictionary<string, object>
                 {
                     ["passed"] = result.PassCount,
                     ["failed"] = result.FailCount,
                     ["skipped"] = result.SkipCount + result.InconclusiveCount,
-                    ["durationMs"] = result.Duration * 1000,
+                    ["durationMs"] = Math.Max(0.0, result.Duration * 1000.0),
                 });
                 Finished();
             }
 
             public void TestStarted(ITestAdaptor test)
             {
-                if (!test.IsSuite)
-                    Send("testStarted", Fields(test));
+                if (test.IsSuite || !HasActiveRun || SessionState.GetInt(StartedKey, 0) != 1)
+                    return;
+                Send("testStarted", Fields(test));
             }
 
             public void TestFinished(ITestResultAdaptor result)
             {
-                if (result.Test.IsSuite)
+                if (result.Test.IsSuite || !HasActiveRun || SessionState.GetInt(StartedKey, 0) != 1)
                     return;
                 var fields = Fields(result.Test);
                 fields["status"] = result.TestStatus switch
@@ -225,7 +252,7 @@ namespace Prefabric.Unity.Editor.TestRunner
                     TestStatus.Skipped => "skipped",
                     _ => "inconclusive",
                 };
-                fields["durationMs"] = result.Duration * 1000;
+                fields["durationMs"] = Math.Max(0.0, result.Duration * 1000.0);
                 fields["message"] = result.Message ?? "";
                 fields["stackTrace"] = result.StackTrace ?? "";
                 fields["output"] = result.Output ?? "";
