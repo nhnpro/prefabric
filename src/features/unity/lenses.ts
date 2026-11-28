@@ -7,7 +7,7 @@
 import { EditorSelection, MapMode, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import type { LensSummary, UnityLens } from "@/bindings";
-import { codeLenses, type CodeLens } from "@/editor/api";
+import { codeLenses, shownAgain, type CodeLens } from "@/editor/api";
 import { executeAction } from "@/platform/actions";
 import { editorPrefs } from "@/platform/editorSettings";
 import { formatMessage, tx } from "@/platform/i18n";
@@ -94,6 +94,7 @@ export function unityLenses(doc: number): Extension {
       private generation = 0;
       private revision: number | null = null;
       private enabled = editorPrefs().inlay.codeVisionUsages;
+      private skipped = false;
       private off: () => void;
       private offSettings: () => void;
 
@@ -114,6 +115,10 @@ export function unityLenses(doc: number): Extension {
 
       update(u: ViewUpdate) {
         if (u.docChanged) this.schedule(DEBOUNCE_MS);
+        else if (this.skipped && shownAgain(u)) {
+          this.skipped = false;
+          this.schedule(0);
+        }
       }
 
       private schedule(ms: number) {
@@ -123,6 +128,11 @@ export function unityLenses(doc: number): Extension {
 
       private async run() {
         this.timer = null;
+        if (!this.view.dom.isConnected) {
+          this.skipped = true;
+          return;
+        }
+        this.skipped = false;
         const gen = ++this.generation;
         const text = this.view.state.doc;
         let found: UnityLens[] = [];
@@ -133,7 +143,11 @@ export function unityLenses(doc: number): Extension {
           console.debug("[unity] lenses", e);
           return;
         }
-        if (gen !== this.generation || this.view.state.doc !== text || !this.view.dom.isConnected) return;
+        if (gen !== this.generation || this.view.state.doc !== text) return;
+        if (!this.view.dom.isConnected) {
+          this.skipped = true;
+          return;
+        }
         const lenses = toLenses(this.view, found);
         const current = this.view.state.field(lensField);
         const same =

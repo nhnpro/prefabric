@@ -97,6 +97,7 @@ export function StatusBar({ lightEdit = false }: { lightEdit?: boolean }) {
   };
   const slot = (slots: Map<string, HTMLElement>, id: string) => (el: HTMLElement | null) => {
     if (el) slots.set(id, el);
+    else slots.delete(id);
   };
   const anyHidden = shownRight.some((i) => overflow.has(i.id));
   // Everything fits again: the popup doesn't reopen by itself the next time something overflows.
@@ -140,6 +141,14 @@ export function StatusBar({ lightEdit = false }: { lightEdit?: boolean }) {
       setOverflow((prev) => (sameSet(prev, next) ? prev : next));
     };
     const ro = observer.current;
+    const activeIds = new Set(shownRight.map((i) => i.id));
+    for (const [id, el] of hosts) {
+      if (!activeIds.has(id)) {
+        ro?.unobserve(el);
+        el.remove();
+        hosts.delete(id);
+      }
+    }
     for (const i of shownRight) {
       const el = host(i.id);
       const target = (showMore && overflow.has(i.id) && popupSlots.get(i.id)) || barSlots.get(i.id);
@@ -149,7 +158,8 @@ export function StatusBar({ lightEdit = false }: { lightEdit?: boolean }) {
     // The spacer changes width whenever an item comes or goes; the bar, when the window resizes.
     for (const el of [spacerRef.current, barRef.current, moreRef.current]) if (el) ro?.observe(el);
     for (const el of leftHosts) ro?.observe(el);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left, shownRight, overflow, showMore]);
 
   const renderLeft = (item: StatusItemContribution) => {
     const C = item.component;

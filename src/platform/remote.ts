@@ -22,7 +22,7 @@ import {
 import { isClientSetting, overlayClientSettings } from "./clientSettings";
 import type { Settings } from "./ipc";
 import { usePlatform } from "./platformInfo";
-import { useProject } from "./project";
+import { loadSettings, useProject } from "./project";
 
 interface RemoteState {
   session: RemoteSession | null;
@@ -61,7 +61,7 @@ export function encodeArgs(args: unknown): { json: string; channels: Map<number,
 
 async function remoteInvoke(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<unknown> {
   const { json, channels } = encodeArgs(args);
-  if (cmd === "db_execute_stream") {
+  if (channels.size > 0) {
     // These callbacks are reached through onChannel; their own Tauri registrations are unused.
     const runtime = "__TAURI_INTERNALS__" in window ? window.__TAURI_INTERNALS__ : undefined;
     if (
@@ -276,6 +276,7 @@ export async function disconnectRemote() {
   await commands.closeProject();
   disableRemote();
   useProject.setState({ project: null });
+  await loadSettings().catch(() => {});
 }
 
 // ---------------------------------------------------------------------------

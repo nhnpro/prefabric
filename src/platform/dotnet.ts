@@ -47,6 +47,7 @@ export function dotnetConfig(args: string[], cwd: string): RunConfig {
 export async function dotnet(args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
   signal?.throwIfAborted();
   await ideEventsReady();
+  signal?.throwIfAborted();
   let id: RunId | undefined;
   let output = "";
   let overflow = false;
@@ -65,8 +66,10 @@ export async function dotnet(args: string[], cwd: string, signal?: AbortSignal):
   const channel = new Channel<OutputChunk>();
   channel.onmessage = (chunk) => {
     if (output.length + chunk.text.length > 8_000_000) {
-      overflow = true;
-      stop();
+      if (!overflow) {
+        overflow = true;
+        stop();
+      }
     } else output += chunk.text;
   };
   signal?.addEventListener("abort", stop);
@@ -157,8 +160,12 @@ export async function evaluateProject(
     ),
   );
   const p = data.Properties ?? {};
-  if (!framework && p.TargetFrameworks)
-    return evaluateProject(path, configuration, p.TargetFrameworks.split(";")[0], signal);
+  const frameworks = (p.TargetFrameworks || p.TargetFramework || "")
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!framework && p.TargetFrameworks && frameworks[0])
+    return evaluateProject(path, configuration, frameworks[0], signal);
   const packages = (data.Items?.PackageReference ?? []).map((x) => ({
     id: String(x.Identity),
     version: String(x.Version ?? ""),
@@ -182,8 +189,11 @@ export async function evaluateProject(
   return {
     path,
     name: p.MSBuildProjectName || path.split("/").at(-1) || path,
-    frameworks: (p.TargetFrameworks || p.TargetFramework || "").split(";").filter(Boolean),
-    configurations: (p.Configurations || "Debug;Release").split(";"),
+    frameworks,
+    configurations: (p.Configurations || "Debug;Release")
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean),
     references: (data.Items?.ProjectReference ?? []).map((x) => absolute(dirname(path), x.Identity!)),
     packages,
     test:
@@ -220,7 +230,7 @@ export async function dotnetWorkspace(root: string, signal?: AbortSignal): Promi
       else if (/\.slnx?$/i.test(entry.name)) {
         const projects = solutionPaths(
           await call(commands.fsReadText(entry.path)),
-          entry.name.endsWith(".slnx"),
+          /\.slnx$/i.test(entry.name),
           dirname(entry.path),
         );
         solutions.push({ path: entry.path, projects });

@@ -191,4 +191,25 @@ describe("real dotnet discovery output", () => {
       { id: "Child", version: "2.0", transitive: true, latest: undefined },
     ]);
   });
+
+  it("keys packages by effective version across resolved and requested entries", () => {
+    expect(
+      packageList({
+        projects: [
+          {
+            frameworks: [
+              { topLevelPackages: [{ id: "A", resolvedVersion: "1.0.0" }] },
+              { topLevelPackages: [{ id: "A", requestedVersion: "1.0.0" }] },
+              { topLevelPackages: [{ id: "B", requestedVersion: "2.0.0" }] },
+              { topLevelPackages: [{ id: "B", requestedVersion: "3.0.0" }] },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([
+      { id: "A", version: "1.0.0", transitive: false, latest: undefined },
+      { id: "B", version: "2.0.0", transitive: false, latest: undefined },
+      { id: "B", version: "3.0.0", transitive: false, latest: undefined },
+    ]);
+  });
 });

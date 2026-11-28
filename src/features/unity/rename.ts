@@ -47,6 +47,22 @@ export function withTextEdits(edit: WorkspaceEdit, path: string, edits: TextEdit
   return { ...edit, files };
 }
 
+const FIELD_MODIFIERS = new Set([
+  "public",
+  "private",
+  "protected",
+  "internal",
+  "new",
+  "volatile",
+  "unsafe",
+  "ref",
+  "required",
+  "static",
+  "const",
+  "readonly",
+  "event",
+]);
+
 /**
  * Whether the field declared at `pos` (its name) is serialized: `[SerializeField]` or
  * `[SerializeReference]`, or public; not static, const or readonly, and not a property.
@@ -56,20 +72,21 @@ export function serializedFieldAt(text: string, pos: number): { declarationStart
   // The declaration: back to the previous `;`, `{` or `}` at this level, forward past the name.
   let start = pos;
   while (start > 0 && !";{}".includes(code[start - 1]!)) start--;
-  const after = code.slice(pos).match(/^\w+\s*(=>|[=;,[{(])/);
-  if (!after || after[1] === "{" || after[1] === "(" || after[1] === "=>") return null;
+  const after = /^\w+\s*(?:=(?!>)|;)/.exec(code.slice(pos));
+  if (!after) return null;
   const head = code.slice(start, pos);
   // Not a parameter or a name in an initializer (`(` or `=` before it), and one field per
   // declaration: an attribute on `int a, b;` would apply to both.
   let type = head.replace(/\[[^\]]*\]/g, " ");
   while (/<[^<>]*>/.test(type)) type = type.replace(/<[^<>]*>/g, " ");
-  if (/[(=,]/.test(type) || after[1] === ",") return null;
+  if (/[(=,]/.test(type)) return null;
   const attributes = [...head.matchAll(/\[([^\]]*)\]/g)].map((m) => m[1]!).join(",");
   const words = head
     .replace(/\[[^\]]*\]/g, " ")
     .split(/[^\w.<>[\],?]+/)
     .filter(Boolean);
   if (words.some((w) => w === "static" || w === "const" || w === "readonly" || w === "event")) return null;
+  if (!words.some((w) => !FIELD_MODIFIERS.has(w))) return null;
   const marked = /\b(?:UnityEngine\.)?Serialize(?:Field|Reference)(?:Attribute)?\b/.test(attributes);
   if (!marked && !words.includes("public")) return null;
   if (/\bNonSerialized\b/.test(attributes)) return null;

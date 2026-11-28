@@ -11,8 +11,12 @@ export interface ClassInfo {
   bodyEnd: number;
 }
 
+let lastCodeInput: string | null = null;
+let lastCodeOutput = "";
+
 /** `text` with comments and string/char literals blanked out (same length), so braces in them don't count. */
 export function codeOnly(text: string): string {
+  if (text === lastCodeInput) return lastCodeOutput;
   const out = text.split("");
   const blank = (from: number, to: number) => {
     for (let j = from; j < to && j < out.length; j++) if (out[j] !== "\n") out[j] = " ";
@@ -157,7 +161,10 @@ export function codeOnly(text: string): string {
       i = scanLiteral(i);
     } else i++;
   }
-  return out.join("");
+  const result = out.join("");
+  lastCodeInput = text;
+  lastCodeOutput = result;
+  return result;
 }
 
 /** Every class or struct of the file with its body range. */

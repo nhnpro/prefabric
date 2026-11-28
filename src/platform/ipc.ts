@@ -89,7 +89,12 @@ function dispatch(event: IdeEvent) {
 function ensureListening() {
   if (unlisten || !isTauri()) return;
   // Window-scoped: a global `listen` also receives events emitted to other windows.
-  unlisten = getCurrentWebviewWindow().listen<IdeEvent>(IDE_EVENT, ({ payload }) => dispatch(payload));
+  unlisten = getCurrentWebviewWindow()
+    .listen<IdeEvent>(IDE_EVENT, ({ payload }) => dispatch(payload))
+    .catch((e) => {
+      unlisten = null;
+      throw e;
+    });
 }
 
 /** Resolves once backend events reach this window's handlers. */

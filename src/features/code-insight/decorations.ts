@@ -16,13 +16,12 @@ export function problemDecorations(map: ProblemsMap): Map<string, FileDecoration
 }
 
 export function installProblemDecorations(): () => void {
-  let scheduled = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const push = () => {
-    if (scheduled) return;
-    scheduled = true;
+    if (timer !== null) return;
     // Diagnostics often arrive in bursts (one event per file); coalesce.
-    setTimeout(() => {
-      scheduled = false;
+    timer = setTimeout(() => {
+      timer = null;
       setFileDecorations("problems", problemDecorations(useProblems.getState().map));
     }, 50);
   };
@@ -30,6 +29,10 @@ export function installProblemDecorations(): () => void {
     if (s.map !== prev.map) push();
   });
   return () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
     unsub();
     setFileDecorations("problems", new Map());
   };

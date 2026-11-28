@@ -114,11 +114,20 @@ export function reloadDotnet() {
 export function selectDotnet(path: string, configuration?: string, framework?: string) {
   const state = useDotnet.getState();
   return task(async (signal) => {
-    const project = await evaluateProject(path, configuration ?? state.configuration, framework ?? "", signal);
+    let config = configuration ?? state.configuration;
+    let project = await evaluateProject(path, config, framework ?? "", signal);
+    if (project.configurations.length > 0 && !project.configurations.includes(config)) {
+      config = project.configurations.includes("Debug") ? "Debug" : project.configurations[0]!;
+      project = await evaluateProject(path, config, framework ?? "", signal);
+    }
+    const nextFramework =
+      framework && (!project.frameworks.length || project.frameworks.includes(framework))
+        ? framework
+        : (project.frameworks[0] ?? "");
     return {
       selected: path,
-      configuration: configuration ?? state.configuration,
-      framework: framework ?? project.frameworks[0] ?? "",
+      configuration: config,
+      framework: nextFramework,
       model: {
         ...state.model,
         projects: state.model.projects.some((p) => p.path === path)
@@ -175,13 +184,16 @@ export function packageList(data: PackagesJson): Package[] {
         ["topLevelPackages", false],
         ["transitivePackages", true],
       ] as const)
-        for (const pkg of f[key] ?? [])
-          result.set(`${pkg.id}:${pkg.resolvedVersion}`, {
+        for (const pkg of f[key] ?? []) {
+          const version = pkg.resolvedVersion ?? pkg.requestedVersion ?? "";
+          const mapKey = `${pkg.id}:${version}`;
+          result.set(mapKey, {
             id: pkg.id,
-            version: pkg.resolvedVersion ?? pkg.requestedVersion ?? "",
+            version,
             latest: pkg.latestVersion,
-            transitive: transitive && result.get(`${pkg.id}:${pkg.resolvedVersion}`)?.transitive !== false,
+            transitive: transitive && result.get(mapKey)?.transitive !== false,
           });
+        }
     }
   return [...result.values()];
 }

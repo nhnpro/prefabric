@@ -35,7 +35,12 @@ export function loadMessageData(editorVersion: string | null | undefined): Promi
   const version = dataVersion(editorVersion);
   let data = loaded.get(version);
   if (!data) {
-    data = LOADERS[version]().then((m) => m.default as MessageData);
+    data = LOADERS[version]()
+      .then((m) => m.default as MessageData)
+      .catch((e) => {
+        loaded.delete(version);
+        throw e;
+      });
     loaded.set(version, data);
   }
   return data;

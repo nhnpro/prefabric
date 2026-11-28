@@ -88,7 +88,7 @@ export function ussContext(
   // Back to the start of the declaration.
   let j = from;
   while (j > 0 && !";{}".includes(text[j - 1]!)) j--;
-  const head = text.slice(j, from);
+  const head = text.slice(j, from).replace(/\/\*[\s\S]*?\*\//g, " ");
   if (j === 0 || text[j - 1] === "}") return null;
   if (/^\s*$/.test(head)) return { kind: "property", from };
   const value = /^\s*(-?[\w-]+)\s*:\s*(?:[\w-]+\s+)*$/.exec(head);

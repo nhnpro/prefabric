@@ -1113,6 +1113,8 @@ export interface FileDecoration {
 interface FileDecorationsState {
   /** provider id → (path → decoration). Later providers win per field. */
   providers: Map<string, Map<string, FileDecoration>>;
+  /** Sorted provider ids in merge order. */
+  providerIds: string[];
   /** Folder paths that contain decorated descendants, per provider. */
   folders: Map<string, Map<string, FileDecoration>>;
   /** `subtree` decorations per provider: folder → decoration for everything below it. */
@@ -1121,30 +1123,50 @@ interface FileDecorationsState {
 
 export const useFileDecorations = create<FileDecorationsState>(() => ({
   providers: new Map(),
+  providerIds: [],
   folders: new Map(),
   subtrees: new Map(),
 }));
 
 const providerOrder = ["vcs", "problems"];
 
+function definedDecoration(d: FileDecoration): FileDecoration {
+  const out: FileDecoration = {};
+  if (d.color !== undefined) out.color = d.color;
+  if (d.tooltip !== undefined) out.tooltip = d.tooltip;
+  if (d.faded !== undefined) out.faded = d.faded;
+  if (d.error) out.error = true;
+  return out;
+}
+
 /** Replaces all decorations of one provider. */
 export function setFileDecorations(provider: string, decorations: Map<string, FileDecoration>) {
   const folders = new Map<string, FileDecoration>();
   const subtrees = new Map<string, FileDecoration>();
   for (const [path, d] of decorations) {
-    if (d.subtree) subtrees.set(path, { color: d.color, tooltip: d.tooltip, faded: d.faded, error: d.error });
+    if (d.subtree) subtrees.set(path, definedDecoration(d));
     if (!d.propagate) continue;
     for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
       const dir = path.slice(0, i);
       const prev = folders.get(dir);
-      folders.set(dir, { color: prev?.color ?? d.color, error: prev?.error || d.error });
+      const color = prev?.color ?? d.color;
+      const error = prev?.error || d.error;
+      const entry: FileDecoration = {};
+      if (color !== undefined) entry.color = color;
+      if (error) entry.error = true;
+      folders.set(dir, entry);
     }
   }
-  useFileDecorations.setState((s) => ({
-    providers: new Map(s.providers).set(provider, decorations),
-    folders: new Map(s.folders).set(provider, folders),
-    subtrees: new Map(s.subtrees).set(provider, subtrees),
-  }));
+  useFileDecorations.setState((s) => {
+    const providers = new Map(s.providers).set(provider, decorations);
+    const providerIds = [...providers.keys()].sort((a, b) => providerOrder.indexOf(a) - providerOrder.indexOf(b));
+    return {
+      providers,
+      providerIds,
+      folders: new Map(s.folders).set(provider, folders),
+      subtrees: new Map(s.subtrees).set(provider, subtrees),
+    };
+  });
 }
 
 /** Nearest `subtree` decoration of an ancestor folder of `path`. */
@@ -1157,12 +1179,22 @@ function inherited(path: string, subtrees: Map<string, FileDecoration> | undefin
   return undefined;
 }
 
+function mergeDefined(base: FileDecoration, next: FileDecoration): FileDecoration {
+  const out: FileDecoration = { ...base };
+  if (next.color !== undefined) out.color = next.color;
+  if (next.tooltip !== undefined) out.tooltip = next.tooltip;
+  if (next.faded !== undefined) out.faded = next.faded;
+  if (next.error !== undefined) out.error = next.error;
+  if (next.propagate !== undefined) out.propagate = next.propagate;
+  if (next.subtree !== undefined) out.subtree = next.subtree;
+  return out;
+}
+
 function merged(path: string, s: FileDecorationsState): FileDecoration | undefined {
   let out: FileDecoration | undefined;
-  const ids = [...s.providers.keys()].sort((a, b) => providerOrder.indexOf(a) - providerOrder.indexOf(b));
-  for (const id of ids) {
+  for (const id of s.providerIds) {
     const d = s.providers.get(id)?.get(path) ?? s.folders.get(id)?.get(path) ?? inherited(path, s.subtrees.get(id));
-    if (d) out = { ...out, ...d };
+    if (d) out = out ? mergeDefined(out, d) : d;
   }
   return out;
 }

@@ -361,6 +361,12 @@ describe("Unity-aware rename: what isn't a serialized field", () => {
     expect(ext?.label).toBe("Rename file to Hero.cs");
   });
 
+  it("does not misclassify array element types as serialized fields", async () => {
+    const text = "public class Enemy : MonoBehaviour {\n  public Enemy[] allies;\n}";
+    const [ext] = await rename(text, "Enemy[] allies", "Enemy", "Foe", "/p/Enemy.cs");
+    expect(ext?.label).toBe("Rename file to Foe.cs");
+  });
+
   it("offers FormerlySerializedAs when a field shares a sibling class name and coalesces line-0 edits", async () => {
     const text = "class Stats {} class Player : MonoBehaviour { public Stats Stats; }";
     const fieldPos = text.lastIndexOf("Stats");
@@ -444,6 +450,13 @@ describe("USS completion", () => {
     const result = await complete(".title { -unity-font-style: bo| }");
     expect(result!.options.map((o) => o.label)).toEqual(["normal", "italic", "bold", "bold-and-italic"]);
     expect(await complete(".title { color: re| }")).toBeNull();
+  });
+
+  it("offers properties and values after block comments", async () => {
+    const prop = await complete(".btn { /* align */ -unity-t| }");
+    expect(prop!.options.map((o) => o.label)).toContain("-unity-text-align");
+    const val = await complete(".btn { -unity-font-style: /* bold */ bo| }");
+    expect(val!.options.map((o) => o.label)).toContain("bold");
   });
 
   it("stays out of selectors", async () => {

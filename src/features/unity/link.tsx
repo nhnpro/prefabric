@@ -54,15 +54,15 @@ export function trackUnityLink(): () => void {
   let generation = 0;
   const load = () => {
     const current = ++generation;
-    if (!useProject.getState().project?.unity) {
-      useUnityLink.setState({ status: null });
-      return;
-    }
+    useUnityLink.setState({ status: null });
+    if (!useProject.getState().project?.unity) return;
     void call(commands.unityLinkStatus())
       .then((status) => {
         if (current === generation) useUnityLink.setState({ status });
       })
-      .catch(() => {});
+      .catch(() => {
+        if (current === generation) useUnityLink.setState({ status: null });
+      });
   };
   load();
   const offEvent = onIdeEvent("unityLink", (e) => {
@@ -73,7 +73,9 @@ export function trackUnityLink(): () => void {
     if (s.project?.root !== prev.project?.root) load();
   });
   return () => {
+    generation++;
     offEvent();
     offProject();
+    useUnityLink.setState({ status: null });
   };
 }

@@ -32,8 +32,17 @@ const resolvedBases = new Map<string, { base: string | null; at: number }>();
 const RETRY_NO_AFTER_MS = 30_000;
 const RETRY_YES_AFTER_MS = 5 * 60_000;
 
+let cacheGeneration = 0;
+
 export function clearUnityBases() {
+  cacheGeneration++;
   resolvedBases.clear();
+}
+
+function isPartialClass(source: string, cls: ClassInfo): boolean {
+  let start = cls.nameAt;
+  while (start > 0 && !";{}".includes(source[start - 1]!)) start--;
+  return /\bpartial\b/.test(source.slice(start, cls.nameAt));
 }
 
 /**
@@ -48,6 +57,7 @@ async function unityBaseFromServer(
   unityTypes: ReadonlySet<string>,
   deps: UnityDeps,
 ): Promise<string | null> {
+  const gen = cacheGeneration;
   const key = `${path}#${cls.name}(${cls.bases.join(",")})`;
   const known = resolvedBases.get(key);
   if (known && Date.now() - known.at < (known.base ? RETRY_YES_AFTER_MS : RETRY_NO_AFTER_MS)) return known.base;
@@ -64,14 +74,14 @@ async function unityBaseFromServer(
       const declared = classes(source).find((c) => c.name === name);
       const inFile = declared ? unityBaseInFile(source, declared, unityTypes) : undefined;
       if (inFile) return inFile;
-      if (inFile === null) continue;
+      if (inFile === null && !(declared && isPartialClass(source, declared))) continue;
       const found = await walk(s.uri ?? s.path, s.selectionRange.start, depth + 1);
       if (found) return found;
     }
     return null;
   };
   const found = await walk(path, posOf(text, cls.nameAt), 0);
-  resolvedBases.set(key, { base: found, at: Date.now() });
+  if (gen === cacheGeneration) resolvedBases.set(key, { base: found, at: Date.now() });
   return found;
 }
 

@@ -5,7 +5,7 @@
  */
 import { Compartment, RangeSet, StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
 import { EditorView, GutterMarker, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { iconAreaSource, mapLineStart } from "@/editor/api";
+import { iconAreaSource, mapLineStart, shownAgain } from "@/editor/api";
 import { openExternalUrl } from "@/platform/openUrl";
 import { tx } from "@/platform/i18n";
 import { gutterIconMarkup } from "@/ui";
@@ -116,6 +116,7 @@ class EventFunctionsPlugin {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
   private shown = false;
+  private skipped = false;
 
   constructor(
     private view: EditorView,
@@ -128,6 +129,10 @@ class EventFunctionsPlugin {
 
   update(u: ViewUpdate) {
     if (u.docChanged) this.schedule(DEBOUNCE_MS);
+    else if (this.skipped && shownAgain(u)) {
+      this.skipped = false;
+      this.schedule(0);
+    }
   }
 
   private schedule(delay: number) {
@@ -137,13 +142,31 @@ class EventFunctionsPlugin {
 
   private async run() {
     this.timer = null;
+    if (!this.view.dom.isConnected) {
+      this.skipped = true;
+      return;
+    }
+    this.skipped = false;
     const gen = ++this.generation;
     const doc = this.view.state.doc;
     try {
       const found = await eventFunctions(this.path, doc.toString(), this.deps);
-      if (gen !== this.generation || this.view.state.doc !== doc || !this.view.dom.isConnected) return;
+      if (gen !== this.generation || this.view.state.doc !== doc) return;
+      if (!this.view.dom.isConnected) {
+        this.skipped = true;
+        return;
+      }
       const placed = placeEventFunctions(doc, found);
-      if (!placed.length && !this.view.state.field(placedField).length) return;
+      const current = this.view.state.field(placedField);
+      const same =
+        current.length === placed.length &&
+        current.every(
+          (p, i) =>
+            p.pos === placed[i]!.pos &&
+            p.message.name === placed[i]!.message.name &&
+            p.message.owner === placed[i]!.message.owner,
+        );
+      if (same && placed.length > 0 === this.shown) return;
       const effects: StateEffect<unknown>[] = [setPlaced.of(placed)];
       if (placed.length > 0 !== this.shown) {
         this.shown = placed.length > 0;

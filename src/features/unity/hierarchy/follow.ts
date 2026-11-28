@@ -11,11 +11,19 @@ export function showYamlOnNavigation(path: string): Extension {
     if (hierarchyModeOf(useHierarchyModes.getState(), path) === "hierarchy") setHierarchyMode(path, "yaml");
   };
   return ViewPlugin.define((view) => {
-    // Opened at a line: the caret is already there.
-    if (view.state.selection.main.head > 0) queueMicrotask(show);
+    let destroyed = false;
+    // Opened at a line for the first time: switch to YAML unless the user explicitly chose Hierarchy.
+    if (view.state.selection.main.head > 0 && useHierarchyModes.getState().byPath[path] === undefined) {
+      queueMicrotask(() => {
+        if (!destroyed) show();
+      });
+    }
     return {
       update(u: ViewUpdate) {
         if (u.selectionSet && u.state.selection.main.head !== u.startState.selection.main.head) show();
+      },
+      destroy() {
+        destroyed = true;
       },
     };
   });
