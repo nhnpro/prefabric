@@ -25,12 +25,17 @@ describe("Unity debugger variable visualizers", () => {
       label: "{Vector3Int}",
       text: "(1, 2, 3)",
     });
+    expect(shownValue("float3(1.5f, -2f, 0f)", "Unity.Mathematics.float3")).toEqual({
+      label: "{float3}",
+      text: "(1.5, -2, 0)",
+    });
   });
 
   it("converts Unity Quaternions to Euler degrees and displays both", () => {
     expect(quaternionToEuler(0, Math.SQRT1_2, 0, Math.SQRT1_2)).toEqual([0, 90, 0]);
     expect(quaternionToEuler(Math.SQRT1_2, 0, 0, Math.SQRT1_2)).toEqual([90, 0, 0]);
     expect(quaternionToEuler(0, 0, Math.SQRT1_2, Math.SQRT1_2)).toEqual([0, 0, 90]);
+    expect(quaternionToEuler(Number.POSITIVE_INFINITY, 0, 0, 1)).toEqual([0, 0, 0]);
     expect(shownValue("(0.00000, 0.70711, 0.00000, 0.70711)", "UnityEngine.Quaternion")).toEqual({
       label: "{Quaternion}",
       text: "(0, 0.707, 0, 0.707)  euler(0°, 90°, 0°)",
@@ -50,7 +55,7 @@ describe("Unity debugger variable visualizers", () => {
     });
   });
 
-  it("formats Rect, Bounds, and LayerMask", () => {
+  it("formats Rect, Bounds, BoundsInt, and LayerMask", () => {
     expect(shownValue("(x:10.00, y:20.00, width:100.00, height:50.00)", "UnityEngine.Rect")).toEqual({
       label: "{Rect}",
       text: "(10, 20, 100 × 50)",
@@ -58,6 +63,10 @@ describe("Unity debugger variable visualizers", () => {
     expect(shownValue("Center: (0.00, 1.00, 0.00), Extents: (0.50, 1.50, 2.00)", "UnityEngine.Bounds")).toEqual({
       label: "{Bounds}",
       text: "center (0, 1, 0), size (1, 3, 4)",
+    });
+    expect(shownValue("Position: (1, 2, 3), Size: (4, 5, 6)", "UnityEngine.BoundsInt")).toEqual({
+      label: "{BoundsInt}",
+      text: "pos (1, 2, 3), size (4, 5, 6)",
     });
     expect(shownValue("0", "UnityEngine.LayerMask")).toEqual({
       label: "{LayerMask}",
@@ -70,6 +79,10 @@ describe("Unity debugger variable visualizers", () => {
     expect(shownValue("{m_Bits: 5}", "UnityEngine.LayerMask")).toEqual({
       label: "{LayerMask}",
       text: "5 (bits 0, 2)",
+    });
+    expect(shownValue("5}", "UnityEngine.LayerMask")).toEqual({
+      label: "{LayerMask}",
+      text: "5}",
     });
   });
 

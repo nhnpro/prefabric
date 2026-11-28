@@ -38,7 +38,7 @@ function hexByte(n: number): string {
 /** Converts a Unity Quaternion `(x, y, z, w)` to Unity Euler angles `(x, y, z)` in degrees. */
 export function quaternionToEuler(x: number, y: number, z: number, w: number): [number, number, number] {
   const len = Math.hypot(x, y, z, w);
-  if (len < 1e-8) return [0, 0, 0];
+  if (!Number.isFinite(len) || len < 1e-8) return [0, 0, 0];
   const nx = x / len;
   const ny = y / len;
   const nz = z / len;
@@ -96,7 +96,7 @@ const VECTOR_TYPES = new Set([
   "half4",
 ]);
 
-const TUPLE_RE = new RegExp(`^\\(\\s*(${NUM}(?:\\s*,\\s*${NUM})*)\\s*\\)$`);
+const TUPLE_RE = new RegExp(`^(?:[A-Za-z]+\\d)?\\(\\s*(${NUM}[fFhH]?(?:\\s*,\\s*${NUM}[fFhH]?)*)\\s*\\)$`);
 const RGBA_RE = new RegExp(`^RGBA\\(\\s*(${NUM})\\s*,\\s*(${NUM})\\s*,\\s*(${NUM})\\s*,\\s*(${NUM})\\s*\\)$`, "i");
 const RECT_RE = new RegExp(
   `^\\(\\s*x\\s*:\\s*(${NUM})\\s*,\\s*y\\s*:\\s*(${NUM})\\s*,\\s*width\\s*:\\s*(${NUM})\\s*,\\s*height\\s*:\\s*(${NUM})\\s*\\)$`,
@@ -106,7 +106,11 @@ const BOUNDS_RE = new RegExp(
   `^Center\\s*:\\s*\\(\\s*(${NUM})\\s*,\\s*(${NUM})\\s*,\\s*(${NUM})\\s*\\)\\s*,\\s*Extents\\s*:\\s*\\(\\s*(${NUM})\\s*,\\s*(${NUM})\\s*,\\s*(${NUM})\\s*\\)$`,
   "i",
 );
-const LAYER_MASK_RE = /^(?:\{\s*(?:m_Bits|value)\s*[:=]\s*)?(-?\d+)\s*\}?$/i;
+const BOUNDS_INT_RE = new RegExp(
+  `^Position\\s*:\\s*\\(\\s*(${NUM})\\s*,\\s*(${NUM})\\s*,\\s*(${NUM})\\s*\\)\\s*,\\s*Size\\s*:\\s*\\(\\s*(${NUM})\\s*,\\s*(${NUM})\\s*,\\s*(${NUM})\\s*\\)$`,
+  "i",
+);
+const LAYER_MASK_RE = /^(?:\{\s*(?:m_Bits|value)\s*[:=]\s*(-?\d+)\s*\}|(-?\d+))$/i;
 
 function formatColor(r: number, g: number, b: number, a: number, isByte: boolean): { text: string; swatch: string } {
   const rb = isByte ? clampByte(r) : clampByte(r * 255);
@@ -177,7 +181,7 @@ export function unityShownValue(value: string, typeName: string | null | undefin
   if (VECTOR_TYPES.has(short)) {
     const m = TUPLE_RE.exec(v);
     if (m) {
-      const nums = m[1]!.split(",").map((part) => trimNum(part.trim()));
+      const nums = m[1]!.split(",").map((part) => trimNum(part.trim().replace(/[fFhH]$/, "")));
       return shown(label, `(${nums.join(", ")})`);
     }
     return shown(label, v);
@@ -187,7 +191,7 @@ export function unityShownValue(value: string, typeName: string | null | undefin
   if (short === "Quaternion") {
     const m = TUPLE_RE.exec(v);
     if (m) {
-      const parts = m[1]!.split(",").map((p) => Number(p.trim()));
+      const parts = m[1]!.split(",").map((p) => Number(p.trim().replace(/[fFhH]$/, "")));
       if (parts.length === 4 && parts.every(Number.isFinite)) {
         const [ex, ey, ez] = quaternionToEuler(parts[0]!, parts[1]!, parts[2]!, parts[3]!);
         const q = parts.map((n) => trimNum(String(n), 3)).join(", ");
@@ -228,6 +232,13 @@ export function unityShownValue(value: string, typeName: string | null | undefin
       const sz = trimNum(String(Number(m[6]) * 2));
       return shown(label, `center (${cx}, ${cy}, ${cz}), size (${sx}, ${sy}, ${sz})`);
     }
+    const bi = BOUNDS_INT_RE.exec(v);
+    if (bi) {
+      return shown(
+        label,
+        `pos (${trimNum(bi[1]!)}, ${trimNum(bi[2]!)}, ${trimNum(bi[3]!)}), size (${trimNum(bi[4]!)}, ${trimNum(bi[5]!)}, ${trimNum(bi[6]!)})`,
+      );
+    }
     return shown(label, v);
   }
 
@@ -235,7 +246,7 @@ export function unityShownValue(value: string, typeName: string | null | undefin
   if (short === "LayerMask") {
     const m = LAYER_MASK_RE.exec(v);
     if (m) {
-      return shown(label, formatLayerMask(Number(m[1])));
+      return shown(label, formatLayerMask(Number(m[1] ?? m[2])));
     }
     return shown(label, v);
   }

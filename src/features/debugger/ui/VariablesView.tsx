@@ -614,6 +614,7 @@ function VarRow({
   onResolve: (node: VarNode) => void;
 }) {
   const valueRef = useRef<HTMLSpanElement>(null);
+  const swatchRef = useRef<HTMLSpanElement>(null);
   const [overflow, setOverflow] = useState(false);
   useLayoutEffect(() => {
     const text = valueRef.current;
@@ -622,8 +623,11 @@ function VarRow({
       setOverflow(false);
       return;
     }
-    // The group measures the space available before the Show button takes any of it.
-    const update = () => setOverflow(text.scrollWidth > group.clientWidth + 1);
+    // The group measures the space available before the Show button takes any of it (minus any swatch chip).
+    const update = () => {
+      const swatchSpace = swatchRef.current ? swatchRef.current.offsetWidth + 4 : 0;
+      setOverflow(text.scrollWidth > group.clientWidth - swatchSpace + 1);
+    };
     update();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(update);
@@ -672,7 +676,12 @@ function VarRow({
           )}
           <span className={styles.valueGroup}>
             {shown.swatch && (
-              <span className={styles.colorSwatch} style={{ backgroundColor: shown.swatch }} aria-hidden="true" />
+              <span
+                ref={swatchRef}
+                className={styles.colorSwatch}
+                style={{ backgroundColor: shown.swatch }}
+                aria-hidden="true"
+              />
             )}
             <span ref={valueRef} className={clsx(styles.value, kind && styles[kind])} title={node.value}>
               {oneLine(shown.text)}
