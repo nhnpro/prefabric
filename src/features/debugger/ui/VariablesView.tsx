@@ -671,6 +671,9 @@ function VarRow({
             </span>
           )}
           <span className={styles.valueGroup}>
+            {shown.swatch && (
+              <span className={styles.colorSwatch} style={{ backgroundColor: shown.swatch }} aria-hidden="true" />
+            )}
             <span ref={valueRef} className={clsx(styles.value, kind && styles[kind])} title={node.value}>
               {oneLine(shown.text)}
             </span>
