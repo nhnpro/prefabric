@@ -66,6 +66,10 @@ pub fn prepare(root: &Path, config: &RunConfig, out: &Path) -> CoveragePrepared 
     let first = config.args.first().map(String::as_str).unwrap_or_default();
     match program.as_str() {
         "cargo" => cargo(config, &dir, out),
+        "dotnet" if first == "test" => dotnet(config, &dir, out),
+        "dotnet" => unsupported(
+            "Coverage of .NET projects runs `dotnet test` configurations (with the coverlet.collector package).",
+        ),
         "go" if first == "test" => go(config, &dir, out),
         "go" => unsupported("Go coverage is collected by `go test`; run a test configuration with coverage."),
         "mvn" | "mvnw" => maven(config, &dir),
@@ -109,6 +113,17 @@ fn cargo(config: &RunConfig, dir: &Path, out: &Path) -> CoveragePrepared {
     let report =
         CoverageReportSpec::Lcov { runner: s("cargo-llvm-cov"), path: lcov.into(), base: dir.to_path_buf().into() };
     ready("cargo-llvm-cov", config, config.command.clone(), args, report)
+}
+
+fn dotnet(config: &RunConfig, dir: &Path, out: &Path) -> CoveragePrepared {
+    let mut args = vec![s("test"), s("--collect:XPlat Code Coverage"), s("--results-directory"), path(out)];
+    args.extend(config.args[1..].iter().cloned());
+    let report = CoverageReportSpec::Cobertura {
+        runner: s("dotnet test (Coverlet)"),
+        dir: out.to_path_buf().into(),
+        base: dir.to_path_buf().into(),
+    };
+    ready("dotnet test (Coverlet)", config, config.command.clone(), args, report)
 }
 
 fn go(config: &RunConfig, dir: &Path, out: &Path) -> CoveragePrepared {
@@ -532,6 +547,23 @@ mod tests {
         assert!(
             matches!(report, CoverageReportSpec::SimpleCov { path, .. } if (path.as_ref() as &Path).ends_with("coverage/.resultset.json"))
         );
+    }
+
+    #[test]
+    fn dotnet_test_uses_cobertura() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        let p = prepare(dir.path(), &cfg("dotnet", "dotnet", &["test", "--filter", "CalcTests"]), &out);
+        let (l, report) = launch(&p);
+        assert_eq!(l.command, "dotnet");
+        assert_eq!(&l.args[..3], ["test", "--collect:XPlat Code Coverage", "--results-directory"]);
+        assert_eq!(l.args[3], out.to_string_lossy());
+        assert_eq!(&l.args[4..], ["--filter", "CalcTests"]);
+        assert!(matches!(report, CoverageReportSpec::Cobertura { runner, .. } if runner.contains("Coverlet")));
+        assert!(matches!(
+            prepare(dir.path(), &cfg("dotnet", "dotnet", &["run"]), &out),
+            CoveragePrepared::Unsupported { .. }
+        ));
     }
 
     #[test]

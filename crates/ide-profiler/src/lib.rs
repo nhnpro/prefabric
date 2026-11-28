@@ -9,12 +9,14 @@
 //! | Node.js (scripts, npm scripts) | `node --cpu-prof` (via `NODE_OPTIONS`) | `.cpuprofile` JSON |
 //! | Python | `py-spy record --format raw` | collapsed stacks |
 //! | JVM applications | async-profiler agent (`JAVA_TOOL_OPTIONS`) | collapsed stacks |
+//! | .NET (`dotnet run` / `dotnet test`) | `dotnet-trace collect --format Speedscope` | Speedscope JSON |
 //! | native / `cargo run` (Linux) | `perf record -g`, then `perf script` | perf script text |
 
 mod formats;
 mod jvm;
 mod live;
 mod plan;
+mod speedscope;
 mod tree;
 
 pub use live::gc_before_stop;
@@ -115,6 +117,8 @@ pub enum ProfileSpec {
     Folded { profiler: String, dir: IpcPath, ext: String, base: IpcPath, jvm_root: Option<IpcPath>, mode: ProfileMode },
     /// `perf script -i <data>` output.
     Perf { perf: String, data: IpcPath, cwd: IpcPath, env: BTreeMap<String, String> },
+    /// Speedscope JSON files (`*.speedscope.json` / `*.json`) written by `dotnet-trace`.
+    Speedscope { profiler: String, dir: IpcPath, base: IpcPath },
 }
 
 /// A command line that installs a missing profiler.
@@ -212,6 +216,20 @@ pub fn collect(spec: &ProfileSpec) -> IdeResult<Profile> {
                 return Err(nothing_recorded("perf recorded no samples"));
             }
             Ok(b.finish("perf", "samples", ProfileMode::Cpu))
+        }
+        ProfileSpec::Speedscope { profiler, dir, base } => {
+            let mut time_based = false;
+            for f in files_with_ext(dir, "json") {
+                let text = std::fs::read_to_string(&f)?;
+                match speedscope::add_speedscope(&mut b, &text, base) {
+                    Ok(t) => time_based |= t,
+                    Err(e) => tracing::debug!("{}: {e}", f.display()),
+                }
+            }
+            if b.is_empty() {
+                return Err(nothing_recorded(&format!("{profiler} recorded no samples")));
+            }
+            Ok(b.finish(profiler, if time_based { "ms" } else { "samples" }, ProfileMode::Cpu))
         }
     }
 }

@@ -2,7 +2,7 @@
 //! content (lcov, Go cover profile, JaCoCo XML, SimpleCov resultset) and paths recorded on another
 //! machine are mapped into the project by their longest existing suffix.
 
-use crate::{Accumulator, CoverageSuite, goprofile, jacoco, lcov, simplecov};
+use crate::{Accumulator, CoverageSuite, cobertura, goprofile, jacoco, lcov, simplecov};
 use ide_core::{IdeError, IdeResult};
 use std::path::{Component, Path, PathBuf};
 
@@ -11,13 +11,20 @@ pub(crate) enum Format {
     Lcov,
     GoProfile,
     Jacoco,
+    Cobertura,
     SimpleCov,
 }
 
 pub(crate) fn detect(text: &str) -> Option<Format> {
     let head = text.trim_start_matches('\u{feff}').trim_start();
     if head.starts_with('<') {
-        return head.contains("<report").then_some(Format::Jacoco);
+        if head.contains("<report") {
+            return Some(Format::Jacoco);
+        }
+        if head.contains("<coverage") {
+            return Some(Format::Cobertura);
+        }
+        return None;
     }
     if head.starts_with('{') {
         return head.contains("\"coverage\"").then_some(Format::SimpleCov);
@@ -53,9 +60,15 @@ pub fn import(path: &Path, root: &Path) -> IdeResult<CoverageSuite> {
                 .map_err(|e| IdeError::invalid(format!("{}: {e}", path.display())))?;
             acc.finish("JaCoCo")
         }
+        Some(Format::Cobertura) => {
+            let mut acc = Accumulator::default();
+            cobertura::parse_into(&text, root, &mut acc)
+                .map_err(|e| IdeError::invalid(format!("{}: {e}", path.display())))?;
+            acc.finish("Cobertura")
+        }
         None => {
             return Err(IdeError::invalid(format!(
-                "{} is not an lcov tracefile, Go cover profile, JaCoCo XML report or SimpleCov resultset",
+                "{} is not an lcov tracefile, Go cover profile, JaCoCo XML, Cobertura XML or SimpleCov resultset",
                 path.display()
             )));
         }
@@ -129,7 +142,8 @@ mod tests {
             detect("<?xml version=\"1.0\"?><!DOCTYPE report><report name=\"x\"></report>"),
             Some(Format::Jacoco)
         );
-        assert_eq!(detect("<?xml version=\"1.0\"?><coverage/>"), None);
+        assert_eq!(detect("<?xml version=\"1.0\"?><coverage/>"), Some(Format::Cobertura));
+        assert_eq!(detect("<?xml version=\"1.0\"?><other/>"), None);
         assert_eq!(detect("{\"RSpec\": {\"coverage\": {}}}"), Some(Format::SimpleCov));
         assert_eq!(detect("{\"name\": \"package.json\"}"), None);
         assert_eq!(detect("hello"), None);
@@ -194,5 +208,21 @@ mod tests {
         let suite = import(&report, &root).unwrap();
         assert_eq!(suite.files[0].path.as_ref() as &Path, root.join("src/main/java/com/x/A.java"));
         assert!(suite.has_branches);
+    }
+
+    #[test]
+    fn imports_cobertura_with_foreign_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("app");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/Calc.cs"), "").unwrap();
+        let report = tmp.path().join("coverage.cobertura.xml");
+        let xml = r#"<coverage><sources><source>/ci/work/app</source></sources><packages><package name="App"><classes><class name="App.Calc" filename="src/Calc.cs"><lines><line number="4" hits="2" branch="true" condition-coverage="50% (1/2)"/></lines></class></classes></package></packages></coverage>"#;
+        std::fs::write(&report, xml).unwrap();
+        let suite = import(&report, &root).unwrap();
+        assert_eq!(suite.runner, "Cobertura");
+        assert_eq!(suite.files[0].path.as_ref() as &Path, root.join("src/Calc.cs"));
+        assert!(suite.has_branches);
+        assert_eq!((suite.files[0].branches_total, suite.files[0].branches_covered), (2, 1));
     }
 }
