@@ -255,3 +255,13 @@
 .runToCursor:hover {
   background: var(--bg-hover);
 }
+
+.valueColorSwatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: var(--space-1);
+  border-radius: var(--radius-small);
+  border: 1px solid var(--border-strong);
+  vertical-align: -1px;
+}

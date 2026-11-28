@@ -145,6 +145,13 @@ export function valueHint(
   };
   dom.append(name);
   if (leading) dom.append(type(`${shown.label} `));
+  if (shown.swatch) {
+    const swatch = document.createElement("span");
+    swatch.className = styles.valueColorSwatch!;
+    swatch.style.backgroundColor = shown.swatch;
+    swatch.setAttribute("aria-hidden", "true");
+    dom.append(swatch);
+  }
   dom.append(max === null ? shown.text : inlineValue(shown.text, max));
   if (shown.label && !leading) dom.append(type(`  ${shown.label}`));
   return { dom, destroy: () => tree?.unmount() };

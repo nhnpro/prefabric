@@ -190,3 +190,13 @@
   min-height: 0;
   padding-block: var(--space-1);
 }
+
+.colorSwatch {
+  flex: none;
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-small);
+  border: 1px solid var(--border-strong);
+  vertical-align: middle;
+}

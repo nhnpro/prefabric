@@ -1,4 +1,5 @@
 /** Presentation helpers for debugger values. */
+import { unityShownValue } from "./unityValues";
 
 export type ValueKind = "number" | "string" | "keyword" | "object" | "plain";
 
@@ -76,6 +77,8 @@ export interface ShownValue {
   text: string;
   /** A map entry: the row shows `key -> value` alone, without its index. */
   entry?: true;
+  /** Optional CSS color (`rgba(...)`) for rendering an inline swatch preview (e.g. Unity Color). */
+  swatch?: string;
 }
 
 // `HashMap@10 size=1`, `String[0]@9`: a JVM object as the Java debugger writes it (type, then the object id).
@@ -85,9 +88,12 @@ const ENTRY_KEY = /^("(?:[^"\\]|\\.)*"|[^:"]+?):(.*)$/s;
 
 /**
  * JVM objects read as `{HashMap@10} size = 1` and a map entry as `"a" -> "b"`; strings show without
- * a type. Values in other forms keep the adapter's text under `{type}`.
+ * a type; Unity types use compact visualizers (Euler angles, color swatches, short labels).
+ * Values in other forms keep the adapter's text under `{type}`.
  */
 export function shownValue(value: string, typeName: string | null | undefined): ShownValue {
+  const unity = unityShownValue(value, typeName);
+  if (unity) return unity;
   const plain = { label: typeName ? `{${typeName}}` : null, text: value };
   if (!typeName) return plain;
   if (typeName === "String" && /^".*"$/s.test(value)) return { label: null, text: value };
