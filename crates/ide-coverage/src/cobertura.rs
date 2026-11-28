@@ -10,6 +10,7 @@
 //!     <package name="MyApp">
 //!       <classes>
 //!         <class name="MyApp.Calc" filename="src/Calc.cs">
+//!           <methods>...</methods>
 //!           <lines>
 //!             <line number="10" hits="3" branch="true" condition-coverage="50% (1/2)"/>
 //! ```
@@ -17,16 +18,25 @@
 use crate::Accumulator;
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const MAX_DEPTH: usize = 5;
 
 /// Cobertura XML reports below `dir` (`dotnet test --results-directory` writes `<guid>/coverage.cobertura.xml`).
+/// Ignores non-Cobertura XML attachments (e.g. test runner XML logs) by checking the header for `<coverage`.
 pub(crate) fn find_reports(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     walk(dir, 0, &mut out);
     out.sort();
     out
+}
+
+fn looks_like_cobertura(path: &Path) -> bool {
+    let Ok(mut f) = std::fs::File::open(path) else { return false };
+    let mut buf = [0u8; 512];
+    let Ok(n) = f.read(&mut buf) else { return false };
+    String::from_utf8_lossy(&buf[..n]).contains("<coverage")
 }
 
 fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
@@ -38,7 +48,7 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
             if depth < MAX_DEPTH {
                 walk(&path, depth + 1, out);
             }
-        } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")) {
+        } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")) && looks_like_cobertura(&path) {
             out.push(path);
         }
     }
@@ -57,24 +67,27 @@ fn parse_condition_coverage(raw: &str) -> Option<(u32, u32)> {
     Some((covered.trim().parse().ok()?, total.trim().parse().ok()?))
 }
 
+fn normalize_path(raw: &str) -> PathBuf {
+    if cfg!(windows) { PathBuf::from(raw) } else { PathBuf::from(raw.replace('\\', "/")) }
+}
+
 /// Resolves a Cobertura `filename` against `<sources>` and `base`.
 fn resolve_file(filename: &str, sources: &[PathBuf], base: &Path) -> PathBuf {
-    let normalized = if cfg!(windows) { filename.to_owned() } else { filename.replace('\\', "/") };
-    let rel = Path::new(&normalized);
+    let rel = normalize_path(filename);
     if rel.is_absolute() {
-        return rel.to_path_buf();
+        return rel;
     }
     for src in sources {
-        let candidate = src.join(rel);
+        let candidate = src.join(&rel);
         if candidate.is_file() {
             return candidate;
         }
     }
-    let from_base = base.join(rel);
+    let from_base = base.join(&rel);
     if from_base.is_file() {
         return from_base;
     }
-    sources.first().map(|s| s.join(rel)).unwrap_or(from_base)
+    sources.first().map(|s| s.join(&rel)).unwrap_or(from_base)
 }
 
 /// Parses one Cobertura XML report into `acc`, resolving relative paths against `<sources>` and `base`.
@@ -82,6 +95,7 @@ pub(crate) fn parse_into(xml: &str, base: &Path, acc: &mut Accumulator) -> Resul
     let mut reader = Reader::from_str(xml);
     let mut sources: Vec<PathBuf> = Vec::new();
     let mut in_source = false;
+    let mut in_methods = false;
     let mut source_buf = String::new();
     let mut file: Option<PathBuf> = None;
 
@@ -92,6 +106,11 @@ pub(crate) fn parse_into(xml: &str, base: &Path, acc: &mut Accumulator) -> Resul
                     in_source = true;
                     source_buf.clear();
                 }
+                "methods" => {
+                    // Cobertura repeats method lines under both `<methods><method><lines>` and `<class><lines>`;
+                    // only count `<class><lines>` so hit counts are never doubled.
+                    in_methods = true;
+                }
                 "class" => {
                     if let Some(filename) = attr(&e, "filename").filter(|s| !s.is_empty()) {
                         let resolved = resolve_file(&filename, &sources, base);
@@ -101,7 +120,7 @@ pub(crate) fn parse_into(xml: &str, base: &Path, acc: &mut Accumulator) -> Resul
                         file = None;
                     }
                 }
-                "line" => record_line(&e, file.as_deref(), acc),
+                "line" if !in_methods => record_line(&e, file.as_deref(), acc),
                 _ => {}
             },
             Event::Empty(e) => match e.name().as_ref() {
@@ -111,7 +130,7 @@ pub(crate) fn parse_into(xml: &str, base: &Path, acc: &mut Accumulator) -> Resul
                         acc.file(&resolved);
                     }
                 }
-                "line" => record_line(&e, file.as_deref(), acc),
+                "line" if !in_methods => record_line(&e, file.as_deref(), acc),
                 _ => {}
             },
             Event::Text(e) if in_source => {
@@ -122,11 +141,15 @@ pub(crate) fn parse_into(xml: &str, base: &Path, acc: &mut Accumulator) -> Resul
                     in_source = false;
                     let trimmed = source_buf.trim();
                     if !trimmed.is_empty() {
-                        sources.push(PathBuf::from(trimmed));
+                        sources.push(normalize_path(trimmed));
                     }
                     source_buf.clear();
                 }
-                "class" => file = None,
+                "methods" => in_methods = false,
+                "class" => {
+                    file = None;
+                    in_methods = false;
+                }
                 _ => {}
             },
             Event::Eof => break,
@@ -169,6 +192,15 @@ mod tests {
     <package name="MyApp">
       <classes>
         <class name="MyApp.Calc" filename="src/Calc.cs">
+          <methods>
+            <method name="Add" signature="(System.Int32,System.Int32)">
+              <lines>
+                <line number="5" hits="3" branch="false"/>
+                <line number="6" hits="1" branch="true" condition-coverage="50% (1/2)"/>
+                <line number="9" hits="0" branch="false"/>
+              </lines>
+            </method>
+          </methods>
           <lines>
             <line number="5" hits="3" branch="false"/>
             <line number="6" hits="1" branch="true" condition-coverage="50% (1/2)"/>
@@ -181,7 +213,7 @@ mod tests {
 </coverage>"#;
 
     #[test]
-    fn parses_lines_branches_and_sources() {
+    fn parses_lines_branches_and_sources_without_double_counting_methods() {
         let mut acc = Accumulator::default();
         parse_into(COBERTURA, Path::new("/fallback"), &mut acc).unwrap();
         let suite = acc.finish("dotnet test (Coverlet)");
@@ -192,17 +224,18 @@ mod tests {
         assert_eq!((calc.lines_total, calc.lines_covered), (3, 2));
         assert_eq!((calc.branches_total, calc.branches_covered), (2, 1));
         assert_eq!(calc.lines[0].line, 4);
-        assert_eq!(calc.lines[0].hits, 3);
+        assert_eq!(calc.lines[0].hits, 3, "method lines must not double-count class lines");
         assert!(calc.lines[1].partial());
         assert_eq!(calc.lines[2].hits, 0);
     }
 
     #[test]
-    fn finds_nested_coverlet_reports() {
+    fn finds_nested_coverlet_reports_and_skips_other_xml() {
         let dir = tempfile::tempdir().unwrap();
         let guid = dir.path().join("abc-123");
         std::fs::create_dir_all(&guid).unwrap();
         std::fs::write(guid.join("coverage.cobertura.xml"), COBERTURA).unwrap();
+        std::fs::write(guid.join("other.xml"), "<TestRun><Results/></TestRun>").unwrap();
         std::fs::write(guid.join("notes.txt"), "ignore").unwrap();
         let found = find_reports(dir.path());
         assert_eq!(found, vec![guid.join("coverage.cobertura.xml")]);
