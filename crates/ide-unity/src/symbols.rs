@@ -44,7 +44,7 @@ pub fn collect(root: &Path) -> UnityProjectSymbols {
     if assets.is_dir() {
         let mut controllers_left = MAX_SCANNED_FILES;
         let mut shaders_left = MAX_SCANNED_FILES;
-        walk_assets(&assets, &mut controllers_left, &mut shaders_left, &mut animator_params, &mut shader_properties);
+        walk_assets(&assets, 0, &mut controllers_left, &mut shaders_left, &mut animator_params, &mut shader_properties);
     }
     UnityProjectSymbols {
         tags,
@@ -216,29 +216,23 @@ pub(crate) fn parse_shader_properties(text: &str, out: &mut BTreeSet<String>) {
                 && rest.trim_start().chars().next().is_none_or(|c| c == '{')
             {
                 in_props = true;
-                depth = rest.chars().filter(|&c| c == '{').count() as i32
-                    - rest.chars().filter(|&c| c == '}').count() as i32;
+                let opens = rest.chars().filter(|&c| c == '{').count() as i32;
+                let closes = rest.chars().filter(|&c| c == '}').count() as i32;
+                depth = opens - closes;
+                // Handle single-line `Properties { _Foo ("Foo", Float) = 1 }` or `Properties {}`.
+                if let Some(body) = rest.split_once('{').map(|(_, tail)| tail) {
+                    extract_shader_prop(body.trim(), out);
+                }
+                if opens > 0 && depth <= 0 {
+                    break;
+                }
             }
             continue;
         }
         let opens = trimmed.chars().filter(|&c| c == '{').count() as i32;
         let closes = trimmed.chars().filter(|&c| c == '}').count() as i32;
         if depth > 0 || opens > 0 {
-            // Skip leading `[Attr(...)]` brackets before `_PropName ("Label", Type) = ...`
-            let mut s = trimmed;
-            while let Some(rest) = s.strip_prefix('[') {
-                let Some(end) = rest.find(']') else { break };
-                s = rest[end + 1..].trim_start();
-            }
-            if let Some(paren) = s.find('(') {
-                let name = s[..paren].trim();
-                if !name.is_empty()
-                    && name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-                    && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                {
-                    out.insert(name.to_owned());
-                }
-            }
+            extract_shader_prop(trimmed, out);
         }
         depth += opens - closes;
         if depth <= 0 && closes > 0 {
@@ -247,14 +241,35 @@ pub(crate) fn parse_shader_properties(text: &str, out: &mut BTreeSet<String>) {
     }
 }
 
+fn extract_shader_prop(trimmed: &str, out: &mut BTreeSet<String>) {
+    // Skip leading `[Attr(...)]` brackets before `_PropName ("Label", Type) = ...`
+    let mut s = trimmed;
+    while let Some(rest) = s.strip_prefix('[') {
+        let Some(end) = rest.find(']') else { break };
+        s = rest[end + 1..].trim_start();
+    }
+    if let Some(paren) = s.find('(') {
+        let name = s[..paren].trim();
+        if !name.is_empty()
+            && name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            out.insert(name.to_owned());
+        }
+    }
+}
+
+const MAX_WALK_DEPTH: usize = 12;
+
 fn walk_assets(
     dir: &Path,
+    depth: usize,
     controllers_left: &mut usize,
     shaders_left: &mut usize,
     animator_params: &mut BTreeSet<String>,
     shader_properties: &mut BTreeSet<String>,
 ) {
-    if *controllers_left == 0 && *shaders_left == 0 {
+    if depth > MAX_WALK_DEPTH || (*controllers_left == 0 && *shaders_left == 0) {
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -266,7 +281,7 @@ fn walk_assets(
             if name.to_str().is_some_and(crate::walk::ignored) {
                 continue;
             }
-            walk_assets(&path, controllers_left, shaders_left, animator_params, shader_properties);
+            walk_assets(&path, depth + 1, controllers_left, shaders_left, animator_params, shader_properties);
         } else if ft.is_file() {
             let Some(ext) = path.extension().and_then(|e| e.to_str()) else { continue };
             if ext.eq_ignore_ascii_case("controller") && *controllers_left > 0 {
@@ -372,5 +387,12 @@ EditorBuildSettings:
         let mut props = BTreeSet::new();
         parse_shader_properties(shader, &mut props);
         assert_eq!(props.into_iter().collect::<Vec<_>>(), vec!["_BaseMap", "_TintColor", "_WaveSpeed"]);
+
+        let mut empty_props = BTreeSet::new();
+        parse_shader_properties(
+            "Shader \"S\" { Properties {} SubShader { Pass { float foo(float x) { return x; } } } }",
+            &mut empty_props,
+        );
+        assert!(empty_props.is_empty());
     }
 }

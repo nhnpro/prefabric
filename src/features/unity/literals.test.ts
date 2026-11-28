@@ -31,6 +31,8 @@ describe("Unity string-literal completion", () => {
     expect(check('material.SetFloat("_Dis", 0.5f);', "_Dis")).toBe("shaderProperty");
     expect(check('Invoke("Explode", 2f);', "Explode")).toBe("method");
     expect(check('StartCoroutine("FadeOut");', "FadeOut")).toBe("method");
+    expect(check('if (ch == \'"\' && other.CompareTag("En"))', "En")).toBe("tag");
+    expect(check('SceneManager.LoadScene(@"Lev");', "Lev")).toBe("scene");
     expect(check('Debug.Log("hello");', "hello")).toBeNull();
   });
 

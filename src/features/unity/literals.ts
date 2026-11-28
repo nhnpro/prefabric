@@ -50,10 +50,28 @@ export function unityLiteralContext(line: string, lineFrom: number, pos: number)
   let close = -1;
   for (let i = 0; i < line.length && i <= col; i++) {
     if (line[i] === "/" && line[i + 1] === "/") break;
+    // Skip C# character literals (`'"'`, `'\''`) so quotes inside them don't desync scanning.
+    if (line[i] === "'") {
+      let j = i + 1;
+      while (j < line.length && line[j] !== "'") {
+        j += line[j] === "\\" ? 2 : 1;
+      }
+      i = j;
+      continue;
+    }
     if (line[i] !== '"') continue;
+    const verbatim = i > 0 && line[i - 1] === "@";
     let j = i + 1;
-    while (j < line.length && line[j] !== '"') {
-      j += line[j] === "\\" ? 2 : 1;
+    while (j < line.length) {
+      if (verbatim && line[j] === '"' && line[j + 1] === '"') {
+        j += 2;
+      } else if (!verbatim && line[j] === "\\") {
+        j += 2;
+      } else if (line[j] === '"') {
+        break;
+      } else {
+        j++;
+      }
     }
     if (i < col && col <= j) {
       open = i;
@@ -63,7 +81,7 @@ export function unityLiteralContext(line: string, lineFrom: number, pos: number)
     i = j;
   }
   if (open < 0) return null;
-  const before = line.slice(0, open);
+  const before = line.slice(0, open > 0 && line[open - 1] === "@" ? open - 1 : open);
   const from = lineFrom + open + 1;
   const to = lineFrom + Math.min(close, line.length);
   if (TAG_CALL.test(before) || TAG_OP.test(before)) return { kind: "tag", from, to };
@@ -84,10 +102,12 @@ export function unityLiteralContext(line: string, lineFrom: number, pos: number)
 }
 
 const CACHE_TTL_MS = 10_000;
+let cacheGen = 0;
 let cached: { root: string; at: number; symbols: UnityProjectSymbols } | null = null;
 let inflight: Promise<UnityProjectSymbols | null> | null = null;
 
 export function clearUnitySymbolsCache() {
+  cacheGen++;
   cached = null;
   inflight = null;
 }
@@ -99,15 +119,19 @@ async function loadProjectSymbols(): Promise<UnityProjectSymbols | null> {
   const now = Date.now();
   if (cached && cached.root === root && now - cached.at < CACHE_TTL_MS) return cached.symbols;
   if (!inflight) {
-    inflight = call(commands.unityProjectSymbols())
+    const gen = cacheGen;
+    const req = call(commands.unityProjectSymbols())
       .then((symbols) => {
-        cached = { root, at: Date.now(), symbols };
+        if (gen === cacheGen && useProject.getState().project?.root === root) {
+          cached = { root, at: Date.now(), symbols };
+        }
         return symbols;
       })
       .catch(() => null)
       .finally(() => {
-        inflight = null;
+        if (inflight === req) inflight = null;
       });
+    inflight = req;
   }
   return inflight;
 }
