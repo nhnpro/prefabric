@@ -52,7 +52,10 @@ export function copyProject(repoRoot: string, name: string, dest: string) {
   const src = p ? checkout(repoRoot, name, p) : fixture;
   rmSync(dest, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
   mkdirSync(join(dest, ".."), { recursive: true });
-  cpSync(src, dest, { recursive: true, filter: (f) => !/[\\/](\.git|target|build|\.gradle|\.openidea)$/.test(f) });
+  cpSync(src, dest, {
+    recursive: true,
+    filter: (f) => !/[\\/](\.git|target|build|\.gradle|\.prefabric|\.openidea)$/.test(f),
+  });
   for (const r of p?.remove ?? []) rmSync(join(dest, r), { recursive: true, force: true });
   const env = {
     ...process.env,

@@ -50,7 +50,7 @@ fn install_dir(version: &str) -> String {
 }
 
 /// Under the remote home: where the server builds are kept, one folder per version.
-pub(crate) const SERVER_DIR: &str = ".openidea/server";
+pub(crate) const SERVER_DIR: &str = ".prefabric/server";
 
 /// File name of the server binary on every host.
 pub(crate) const SERVER_BIN: &str = "openidea-server";
