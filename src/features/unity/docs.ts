@@ -62,7 +62,7 @@ export async function resolveUnityDocsUrl(
   editorVersion: string | null | undefined,
   deps: UnityDeps,
 ): Promise<string | null> {
-  const lineStart = text.lastIndexOf("\n", Math.max(0, pos - 1)) + 1;
+  const lineStart = pos <= 0 ? 0 : text.lastIndexOf("\n", pos - 1) + 1;
   const lineEndIdx = text.indexOf("\n", pos);
   const lineEnd = lineEndIdx < 0 ? text.length : lineEndIdx;
   const lineText = text.slice(lineStart, lineEnd);

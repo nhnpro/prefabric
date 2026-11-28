@@ -201,15 +201,22 @@ const RULES: readonly RuleSpec[] = [
     pattern:
       /\.\s*(?:SetFloat|GetFloat|SetInt|GetInt|SetColor|GetColor|SetVector|GetVector|SetTexture|GetTexture|SetMatrix|GetMatrix|HasProperty|HasFloat|HasColor|HasTexture|HasInt|HasVector)\s*\(\s*"/g,
     accept: (bodyCode, m) => {
-      // Avoid flagging `animator.SetFloat("Speed", ...)` as a shader lookup.
+      // Avoid flagging `animator.SetFloat("Speed", ...)` or `PlayerPrefs`/`EditorPrefs` as shader lookups.
       const before = bodyCode.slice(Math.max(0, m.index - 24), m.index);
-      return !/\b(?:anim|animator)\s*$/i.test(before);
+      return !/\b(?:anim|animator|PlayerPrefs|EditorPrefs)\s*$/i.test(before);
     },
   },
   {
     id: "animator-string",
     kind: "expensive",
-    pattern: /\.\s*(?:SetBool|GetBool|SetInteger|GetInteger|SetTrigger|ResetTrigger|Play|CrossFade)\s*\(\s*"/g,
+    pattern:
+      /\.\s*(?:SetBool|GetBool|SetInteger|GetInteger|SetFloat|GetFloat|SetTrigger|ResetTrigger|Play|CrossFade)\s*\(\s*"/g,
+    accept: (bodyCode, m) => {
+      // Only treat SetFloat/GetFloat as Animator lookups when the receiver looks like an Animator.
+      if (!/^\.\s*(?:SetFloat|GetFloat)\b/.test(m[0])) return true;
+      const before = bodyCode.slice(Math.max(0, m.index - 24), m.index);
+      return /\b(?:anim|animator)\s*$/i.test(before);
+    },
   },
   {
     id: "physics-alloc",
@@ -237,7 +244,7 @@ const RULES: readonly RuleSpec[] = [
   {
     id: "string-alloc",
     kind: "allocation",
-    pattern: /\b(?:string|String)\s*\.\s*(?:Format|Concat|Join)\s*\(|\$"/g,
+    pattern: /\b(?:string|String)\s*\.\s*(?:Format|Concat|Join)\s*\(|(?:\$@?|@\$)"/g,
   },
 ];
 
@@ -299,15 +306,19 @@ export async function analyzeUnityHotPaths(path: string, text: string, deps: Uni
     const base = await unityBaseOf(path, text, cls, unityTypes, deps);
     if (!base) continue;
 
-    const methodNames = new Set(methods.map((m) => m.name));
-    const byName = new Map<string, MethodBody[]>();
+    // Fast path: skip call-graph construction when the class declares no per-frame Unity callback.
+    const chainByName = new Map<string, string[]>();
+    const queue: string[] = [];
     for (const m of methods) {
-      const list = byName.get(m.name);
-      if (list) list.push(m);
-      else byName.set(m.name, [m]);
+      if (HOT_PATH_ROOTS.has(m.name) && !chainByName.has(m.name)) {
+        chainByName.set(m.name, [m.name]);
+        queue.push(m.name);
+      }
     }
+    if (!queue.length) continue;
 
     // Build intra-class adjacency list: caller name -> callee names.
+    const methodNames = new Set(methods.map((m) => m.name));
     const edges = new Map<string, Set<string>>();
     for (const m of methods) {
       const slice = code.slice(m.bodyStart, m.bodyEnd);
@@ -322,14 +333,6 @@ export async function analyzeUnityHotPaths(path: string, text: string, deps: Uni
     }
 
     // BFS from every per-frame Unity callback in this class.
-    const chainByName = new Map<string, string[]>();
-    const queue: string[] = [];
-    for (const m of methods) {
-      if (HOT_PATH_ROOTS.has(m.name) && !chainByName.has(m.name)) {
-        chainByName.set(m.name, [m.name]);
-        queue.push(m.name);
-      }
-    }
     while (queue.length > 0) {
       const cur = queue.shift()!;
       const chain = chainByName.get(cur)!;
@@ -358,9 +361,8 @@ export async function analyzeUnityHotPaths(path: string, text: string, deps: Uni
           const from = m.bodyStart + match.index;
           if (seenOffsets.has(from)) continue;
           seenOffsets.add(from);
-          let to = from + match[0].length;
-          // Trim trailing `(` or `"` from the highlight span when cleaner.
-          if (match[0].endsWith("(") && to > from + 1) to--;
+          const trimmed = match[0].replace(/\s*\(\s*"?$/, "");
+          const to = from + (trimmed.length || match[0].length);
           issues.push({ from, to, rule: rule.id, kind: rule.kind, chain });
         }
       }
@@ -531,8 +533,26 @@ class UnityPerformancePlugin {
         return;
       }
       const methods = placeHotMethods(doc, analysis.transitiveMethods);
-      const effects: StateEffect<unknown>[] = [setPerfState.of({ methods, issues: analysis.issues })];
+      const current = this.view.state.field(perfField);
       const shouldShow = methods.length > 0;
+      const sameMethods =
+        current.methods.length === methods.length &&
+        current.methods.every(
+          (p, i) =>
+            p.pos === methods[i]!.pos &&
+            p.method.name === methods[i]!.method.name &&
+            p.method.chain.join(">") === methods[i]!.method.chain.join(">"),
+        );
+      const sameIssues =
+        current.issues.length === analysis.issues.length &&
+        current.issues.every(
+          (it, i) =>
+            it.from === analysis.issues[i]!.from &&
+            it.to === analysis.issues[i]!.to &&
+            it.rule === analysis.issues[i]!.rule,
+        );
+      if (sameMethods && sameIssues && shouldShow === this.shown) return;
+      const effects: StateEffect<unknown>[] = [setPerfState.of({ methods, issues: analysis.issues })];
       if (shouldShow !== this.shown) {
         this.shown = shouldShow;
         effects.push(this.column.reconfigure(shouldShow ? hotPathColumn : []));

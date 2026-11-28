@@ -125,4 +125,19 @@ describe("Unity hot-path performance & allocation analysis", () => {
     expect(res.transitiveMethods.map((m) => m.name)).toEqual(["Refresh"]);
     expect(res.issues.map((i) => i.rule)).toEqual(["string-alloc"]);
   });
+
+  it("ignores PlayerPrefs/EditorPrefs for shader-string and catches animator.SetFloat and $@ strings", async () => {
+    const code = [
+      "public class Settings : MonoBehaviour {",
+      "  void Update() {",
+      '    var vol = PlayerPrefs.GetFloat("vol");',
+      '    animator.SetFloat("Speed", 1f);',
+      '    var path = $@"hp={vol}";',
+      "  }",
+      "}",
+    ].join("\n");
+
+    const res = await analyzeUnityHotPaths("/proj/Assets/Settings.cs", code, deps);
+    expect(res.issues.map((i) => i.rule)).toEqual(["animator-string", "string-alloc"]);
+  });
 });
