@@ -1828,6 +1828,11 @@ export const commands = {
 	/**  The properties changed on both sides (`<fileID>.<Type>.<property>`), when `merged` is `None`. */
 	conflicts: string[],
 } | null, IdeError>(__TAURI_INVOKE("unity_merge_asset", { path })),
+	/**
+	 *  Unity project string symbols (tags, layers, sorting layers, build scenes, input axes,
+	 *  Animator parameters, and ShaderLab properties) for C# string-literal completion.
+	 */
+	unityProjectSymbols: () => typedError<UnityProjectSymbols, IdeError>(__TAURI_INVOKE("unity_project_symbols")),
 	/**  Search Everywhere's Unity tab: GameObjects, prefab instances and assets matching `query`. */
 	unitySearch: (query: string, limit: number) => typedError<UnitySearch, IdeError>(__TAURI_INVOKE("unity_search", { query, limit })),
 	/**
@@ -12812,6 +12817,16 @@ export type UnityProjectInfo = {
 	projects: string[],
 	/**  Prefabric's Unity package in this project. */
 	package?: UnityPackageStatus | null,
+};
+
+export type UnityProjectSymbols = {
+	tags: string[],
+	layers: string[],
+	sortingLayers: string[],
+	scenes: string[],
+	inputAxes: string[],
+	animatorParams: string[],
+	shaderProperties: string[],
 };
 
 export type UnitySearch = {

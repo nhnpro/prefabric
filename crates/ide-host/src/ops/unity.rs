@@ -281,6 +281,18 @@ pub async fn unity_hierarchy(host: &Host, window: &str, path: ide_core::IpcPath)
     .await
 }
 
+/// Unity project string symbols (tags, layers, sorting layers, build scenes, input axes,
+/// Animator parameters, and ShaderLab properties) for C# string-literal completion.
+#[command(trust = always)]
+pub async fn unity_project_symbols(host: &Host, window: &str) -> IdeResult<ide_unity::symbols::UnityProjectSymbols> {
+    let project = host.project(window)?;
+    if project.unity.is_none() && !unity::is_project(&project.root) {
+        return Ok(ide_unity::symbols::UnityProjectSymbols::default());
+    }
+    let root = project.root.clone();
+    blocking(move || Ok(ide_unity::symbols::collect(&root))).await
+}
+
 ide_command::domain!(
     unity:
     unity_assembly_definitions,
@@ -293,6 +305,7 @@ ide_command::domain!(
     unity_lenses,
     unity_link_status,
     unity_merge_asset,
+    unity_project_symbols,
     unity_search,
     unity_show_in_editor,
 );

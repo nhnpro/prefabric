@@ -9406,5 +9406,20 @@
   "UnityYAMLMerge: {count} properties changed on both sides": "UnityYAMLMerge：{count} 个属性在双方都有更改",
   "Merge {name} with UnityYAMLMerge": "使用 UnityYAMLMerge 合并 {name}",
   "{name} merged by UnityYAMLMerge": "{name} 已由 UnityYAMLMerge 合并",
-  "Shader include '{includePath}' not found in project": "项目中未找到着色器包含文件 '{includePath}'"
+  "Shader include '{includePath}' not found in project": "项目中未找到着色器包含文件 '{includePath}'",
+  "Unity Script": "Unity 脚本",
+  "MonoBehaviour": "MonoBehaviour",
+  "ScriptableObject": "ScriptableObject",
+  "Custom Editor": "自定义编辑器",
+  "Editor Window": "编辑器窗口",
+  "EditMode Test": "EditMode 测试",
+  "PlayMode Test": "PlayMode 测试",
+  "Unity Shader": "Unity 着色器",
+  "URP Unlit Shader": "URP 无光照着色器",
+  "Built-in Unlit Shader": "内置无光照着色器",
+  "Compute Shader": "计算着色器",
+  "HLSL Include": "HLSL 包含文件",
+  "Unity Assembly Definition": "Unity 程序集定义",
+  "Assembly Definition": "程序集定义",
+  "Assembly Definition Reference": "程序集定义引用"
 }

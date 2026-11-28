@@ -24,7 +24,10 @@ import { tagAtCaret, updateTag } from "./emmet/editor";
 import { loadEmmet } from "./emmet/model";
 import { promptAbbreviation, UpdateTagDialogHost } from "./emmet/UpdateTagDialog";
 import { tx } from "@/platform/i18n";
+import { useProject } from "@/platform/project";
 import type { ProjectType } from "@/ui/projectType";
+
+const UNITY_TEMPLATE_IDS = new Set(["unity-script", "unity-shader", "unity-asmdef"]);
 
 const EDITOR_WHEN = "textEditorActive && !editorReadOnly && (editorFocus || !toolWindowFocus)";
 const MARKUP_PATH = /\.(html?|xhtml|shtml|vue|svelte|xml)$/i;
@@ -119,10 +122,12 @@ function registerNewMenuGroups(): () => void {
       items: (_menu, ctx) => {
         const directory = ctx.paths[0];
         const tomcat = directory !== undefined && hasRunConfiguration("tomcat", directory);
+        const unity = !!useProject.getState().project?.unity;
         return fileTemplates()
           .filter((t) => {
             if (t.enabled === false || t.id === "file") return false;
             if (t.id === "tomcat-context") return tomcat;
+            if (UNITY_TEMPLATE_IDS.has(t.id)) return unity;
             const types = templateProjectTypes[t.id];
             return !types || !ctx.projectType || types.includes(ctx.projectType);
           })
