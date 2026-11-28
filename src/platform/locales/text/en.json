@@ -3062,5 +3062,6 @@
   "Pauses the Editor's Play mode (a pausepoint's hit); nothing in Edit mode": "Pauses the Editor's Play mode (a pausepoint's hit); nothing in Edit mode",
   "UnityYAMLMerge: {count} properties changed on both sides": "UnityYAMLMerge: {count} properties changed on both sides",
   "Merge {name} with UnityYAMLMerge": "Merge {name} with UnityYAMLMerge",
-  "{name} merged by UnityYAMLMerge": "{name} merged by UnityYAMLMerge"
+  "{name} merged by UnityYAMLMerge": "{name} merged by UnityYAMLMerge",
+  "Shader include '{includePath}' not found in project": "Shader include '{includePath}' not found in project"
 }
