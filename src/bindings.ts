@@ -4380,6 +4380,8 @@ export type CoverageReportSpec =
 { kind: "simpleCov"; path: IpcPath; base: IpcPath } | 
 /**  Every JaCoCo XML report (Maven `target/site/jacoco`, Gradle `build/reports/jacoco`) under `dir`. */
 { kind: "jacoco"; dir: IpcPath } | 
+/**  Every Cobertura XML report (`dotnet test --collect:"XPlat Code Coverage"`) under `dir`. */
+{ kind: "cobertura"; runner: string; dir: IpcPath; base: IpcPath } | 
 /**  The tool's raw data is exported to lcov by `argv` first (coverage.py: `… -m coverage lcov -o <lcov>`). */
 { kind: "exported"; runner: string; argv: string[]; cwd: IpcPath; env: { [key in string]: string }; lcov: IpcPath };
 
@@ -10419,7 +10421,9 @@ export type ProfileSpec =
  */
 { kind: "folded"; profiler: string; dir: IpcPath; ext: string; base: IpcPath; jvmRoot: IpcPath | null; mode: ProfileMode } | 
 /**  `perf script -i <data>` output. */
-{ kind: "perf"; perf: string; data: IpcPath; cwd: IpcPath; env: { [key in string]: string } };
+{ kind: "perf"; perf: string; data: IpcPath; cwd: IpcPath; env: { [key in string]: string } } | 
+/**  Speedscope JSON files (`*.speedscope.json` / `*.json`) written by `dotnet-trace`. */
+{ kind: "speedscope"; profiler: string; dir: IpcPath; base: IpcPath };
 
 /**  A command line that installs a missing profiler. */
 export type ProfilerInstall = {

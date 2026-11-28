@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 const ASYNC_PROFILER_HOME: &str = "https://github.com/async-profiler/async-profiler/releases";
 const PY_SPY_HOME: &str = "https://github.com/benfred/py-spy";
+const DOTNET_TRACE_HOME: &str = "https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-trace";
 
 fn s(v: &str) -> String {
     v.to_owned()
@@ -48,6 +49,7 @@ pub fn prepare(root: &Path, config: &RunConfig, out: &Path, mode: ProfileMode) -
     match program.as_str() {
         "node" | "npx" | "tsx" | "ts-node" | "npm" | "pnpm" | "yarn" => node(root, config, out),
         "java" => jvm(root, config, &dir, out, mode),
+        "dotnet" => dotnet(root, config, &dir, out),
         "cargo" => cargo(config, &dir, out),
         "bun" | "deno" => unsupported(format!("Profiling {program} programs is not supported.")),
         _ if config.kind == "native" => native(config, &dir, out),
@@ -256,6 +258,54 @@ fn cargo(config: &RunConfig, dir: &Path, out: &Path) -> ProfilePrepared {
     args.extend(config.args[toolchain..].iter().cloned());
     let launch = RunConfig { args, ..config.clone() };
     ready("perf", launch, perf_spec(&perf, data, dir, config))
+}
+
+fn find_dotnet_trace(root: &Path, config: &RunConfig, dir: &Path) -> Option<PathBuf> {
+    if let Some(found) = wrap::find_tool("dotnet-trace", config, dir, root) {
+        return Some(found);
+    }
+    let home = config
+        .env
+        .get("HOME")
+        .or_else(|| config.env.get("USERPROFILE"))
+        .cloned()
+        .or_else(|| std::env::var("HOME").ok())
+        .or_else(|| std::env::var("USERPROFILE").ok())?;
+    let bin = if cfg!(windows) { "dotnet-trace.exe" } else { "dotnet-trace" };
+    let candidate = PathBuf::from(home).join(".dotnet").join("tools").join(bin);
+    candidate.is_file().then_some(candidate)
+}
+
+fn dotnet(root: &Path, config: &RunConfig, dir: &Path, out: &Path) -> ProfilePrepared {
+    let Some(trace) = find_dotnet_trace(root, config, dir) else {
+        return ProfilePrepared::MissingTool {
+            tool: s("dotnet-trace"),
+            message: s("Profiling .NET programs needs dotnet-trace."),
+            install: Some(ProfilerInstall {
+                command: config.command.clone(),
+                args: vec![s("tool"), s("install"), s("--global"), s("dotnet-trace")],
+                cwd: Some(dir.to_path_buf().into()),
+            }),
+            homepage: Some(DOTNET_TRACE_HOME.into()),
+        };
+    };
+    let mut args = vec![
+        s("collect"),
+        s("--format"),
+        s("Speedscope"),
+        s("-o"),
+        path(&out.join("profile.nettrace")),
+        s("--"),
+        config.command.clone(),
+    ];
+    args.extend(config.args.iter().cloned());
+    let launch = RunConfig { command: path(&trace), args, ..config.clone() };
+    let spec = ProfileSpec::Speedscope {
+        profiler: s("dotnet-trace"),
+        dir: out.to_path_buf().into(),
+        base: dir.to_path_buf().into(),
+    };
+    ready("dotnet-trace", launch, spec)
 }
 
 #[cfg(test)]
@@ -488,6 +538,39 @@ mod tests {
             }
         }
         assert!(matches!(prepare(dir.path(), &c, dir.path(), ProfileMode::Cpu), ProfilePrepared::Ready { .. }));
+    }
+
+    #[test]
+    fn dotnet_uses_dotnet_trace_or_asks_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = cfg("dotnet", "dotnet", &["run", "--project", "App.csproj"]);
+        c.env.insert("PATH".into(), dir.path().join("nothing").to_string_lossy().into_owned());
+        c.env.insert("HOME".into(), dir.path().to_string_lossy().into_owned());
+        c.env.insert("USERPROFILE".into(), dir.path().to_string_lossy().into_owned());
+        match prepare(dir.path(), &c, dir.path(), ProfileMode::Cpu) {
+            ProfilePrepared::MissingTool { tool, install: Some(i), .. } => {
+                assert_eq!(tool, "dotnet-trace");
+                assert_eq!(i.command, "dotnet");
+                assert_eq!(i.args, ["tool", "install", "--global", "dotnet-trace"]);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let tools = dir.path().join(".dotnet/tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        let trace = tools.join(if cfg!(windows) { "dotnet-trace.exe" } else { "dotnet-trace" });
+        std::fs::write(&trace, "").unwrap();
+        match prepare(dir.path(), &c, dir.path(), ProfileMode::Cpu) {
+            ProfilePrepared::Ready { profiler, launch, spec } => {
+                assert_eq!(profiler, "dotnet-trace");
+                assert_eq!(launch.command, trace.to_string_lossy());
+                assert_eq!(&launch.args[..3], ["collect", "--format", "Speedscope"]);
+                let dash = launch.args.iter().position(|a| a == "--").unwrap();
+                assert_eq!(&launch.args[dash + 1..], ["dotnet", "run", "--project", "App.csproj"]);
+                assert!(matches!(spec, ProfileSpec::Speedscope { profiler, .. } if profiler == "dotnet-trace"));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

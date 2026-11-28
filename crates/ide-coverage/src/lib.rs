@@ -13,9 +13,11 @@
 //! | Ruby (rspec, minitest, rake, scripts) | SimpleCov (`coverage/.resultset.json`) | SimpleCov resultset |
 //! | Go (`go test`) | `-coverprofile` | Go cover profile |
 //! | Maven / Gradle tests | JaCoCo (plugin goals / an init script) | JaCoCo XML |
+//! | .NET (`dotnet test`) | `dotnet test --collect:"XPlat Code Coverage"` | Cobertura XML |
 //!
 //! Lines in the model are 0-based, like every IPC coordinate.
 
+mod cobertura;
 mod goprofile;
 mod import;
 mod jacoco;
@@ -89,6 +91,8 @@ pub enum CoverageReportSpec {
     SimpleCov { path: IpcPath, base: IpcPath },
     /// Every JaCoCo XML report (Maven `target/site/jacoco`, Gradle `build/reports/jacoco`) under `dir`.
     Jacoco { dir: IpcPath },
+    /// Every Cobertura XML report (`dotnet test --collect:"XPlat Code Coverage"`) under `dir`.
+    Cobertura { runner: String, dir: IpcPath, base: IpcPath },
     /// The tool's raw data is exported to lcov by `argv` first (coverage.py: `… -m coverage lcov -o <lcov>`).
     Exported { runner: String, argv: Vec<String>, cwd: IpcPath, env: BTreeMap<String, String>, lcov: IpcPath },
 }
@@ -210,6 +214,22 @@ pub fn collect(spec: &CoverageReportSpec) -> IdeResult<CoverageSuite> {
                     .map_err(|e| IdeError::invalid(format!("{}: {e}", report.display())))?;
             }
             Ok(acc.finish("JaCoCo"))
+        }
+        CoverageReportSpec::Cobertura { runner, dir, base } => {
+            let reports = cobertura::find_reports(dir);
+            if reports.is_empty() {
+                return Err(IdeError::not_found(format!(
+                    "the run produced no Cobertura coverage report under {} (ensure the test project references coverlet.collector)",
+                    dir.display()
+                )));
+            }
+            let mut acc = Accumulator::default();
+            for report in reports {
+                let xml = std::fs::read_to_string(&report)?;
+                cobertura::parse_into(&xml, base, &mut acc)
+                    .map_err(|e| IdeError::invalid(format!("{}: {e}", report.display())))?;
+            }
+            Ok(acc.finish(runner))
         }
         CoverageReportSpec::Exported { runner, argv, cwd, env, lcov } => {
             let (program, args) =
