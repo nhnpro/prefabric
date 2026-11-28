@@ -648,6 +648,7 @@ unity_install_package                        trusted            project_host bin
 unity_lenses                                 always             project_host bindings async
 unity_link_status                            always             project_host bindings sync
 unity_merge_asset                            trusted            project_host bindings async
+unity_project_symbols                        always             project_host bindings async
 unity_search                                 always             project_host bindings async
 unity_show_in_editor                         trusted            project_host bindings async
 user_font_data                               always             desktop      -        async

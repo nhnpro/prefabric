@@ -22,6 +22,7 @@ import { hierarchyActions, hierarchyWrapper } from "./hierarchy";
 import { showYamlOnNavigation } from "./hierarchy/follow";
 import { clearHierarchyModes, isSceneOrPrefab } from "./hierarchy/modes";
 import { unityLenses } from "./lenses";
+import { clearUnitySymbolsCache, unityLiteralSource } from "./literals";
 import { trackUnitySearchCategory } from "./searchTab";
 import { unityRename } from "./rename";
 import { clearUnityYaml, unityYamlBanner, unityYamlLock } from "./unityYaml";
@@ -39,6 +40,7 @@ const deps = unityDeps(async () => {
 });
 
 const rename = unityRename(deps);
+const literalCompletion = unityLiteralSource();
 
 export function activate() {
   const unregister = registerEditorContribution({
@@ -48,6 +50,7 @@ export function activate() {
         ? [
             EditorState.languageData.of(() => [
               { openideaCompletion: unityMessageSource(ctx.path, deps), [CONTRIBUTED_RENAME]: rename },
+              ...(useProject.getState().project?.unity ? [{ openideaCompletion: literalCompletion }] : []),
             ]),
             eventFunctionGutter(ctx.path, deps),
             useProject.getState().project?.unity ? unityLenses(ctx.doc) : [],
@@ -98,6 +101,7 @@ export function activate() {
   const offProject = useProject.subscribe((s, prev) => {
     if (s.project?.root === prev.project?.root) return;
     clearUnityBases();
+    clearUnitySymbolsCache();
     clearConsole();
     clearUnityYaml();
     clearHierarchyModes();

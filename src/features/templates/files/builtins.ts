@@ -497,4 +497,95 @@ export const BUILTIN_FILE_TEMPLATES: readonly FileTemplate[] = [
       },
     ],
   },
+  {
+    id: "unity-script",
+    name: "Unity Script",
+    icon: "class",
+    extension: "cs",
+    nameStyle: "pascal",
+    packageStyle: "csharp",
+    kinds: [
+      {
+        id: "monobehaviour",
+        label: "MonoBehaviour",
+        body: 'using UnityEngine;\n\nnamespace $PACKAGE$;\n\n#parse("File Header")\npublic class $NAME$ : MonoBehaviour\n{\n    private void Start()\n    {\n        $END$\n    }\n\n    private void Update()\n    {\n    }\n}\n',
+      },
+      {
+        id: "scriptableobject",
+        label: "ScriptableObject",
+        body: 'using UnityEngine;\n\nnamespace $PACKAGE$;\n\n#parse("File Header")\n[CreateAssetMenu(fileName = "$NAME$", menuName = "Scriptable Objects/$NAME$")]\npublic class $NAME$ : ScriptableObject\n{\n    $END$\n}\n',
+      },
+      {
+        id: "editor",
+        label: "Custom Editor",
+        body: 'using UnityEditor;\nusing UnityEngine;\n\nnamespace $PACKAGE$;\n\n#parse("File Header")\n[CustomEditor(typeof($END$))]\npublic class $NAME$ : Editor\n{\n    public override void OnInspectorGUI()\n    {\n        DrawDefaultInspector();\n    }\n}\n',
+      },
+      {
+        id: "editorwindow",
+        label: "Editor Window",
+        body: 'using UnityEditor;\nusing UnityEngine;\n\nnamespace $PACKAGE$;\n\n#parse("File Header")\npublic class $NAME$ : EditorWindow\n{\n    [MenuItem("Window/$NAME$")]\n    public static void ShowWindow()\n    {\n        GetWindow<$NAME$>("$NAME$");\n    }\n\n    private void OnGUI()\n    {\n        $END$\n    }\n}\n',
+      },
+      {
+        id: "editmode-test",
+        label: "EditMode Test",
+        body: 'using NUnit.Framework;\n\nnamespace $PACKAGE$;\n\n#parse("File Header")\npublic class $NAME$\n{\n    [Test]\n    public void SimplePasses()\n    {\n        $END$\n    }\n}\n',
+      },
+      {
+        id: "playmode-test",
+        label: "PlayMode Test",
+        body: 'using System.Collections;\nusing NUnit.Framework;\nusing UnityEngine.TestTools;\n\nnamespace $PACKAGE$;\n\n#parse("File Header")\npublic class $NAME$\n{\n    [UnityTest]\n    public IEnumerator WithEnumeratorPasses()\n    {\n        $END$\n        yield return null;\n    }\n}\n',
+      },
+    ],
+  },
+  {
+    id: "unity-shader",
+    name: "Unity Shader",
+    icon: "file",
+    extension: "shader",
+    nameStyle: "pascal",
+    kinds: [
+      {
+        id: "urp-unlit",
+        label: "URP Unlit Shader",
+        body: 'Shader "Custom/$NAME$"\n{\n    Properties\n    {\n        [MainTexture] _BaseMap ("Base Map", 2D) = "white" {}\n        [MainColor] _BaseColor ("Base Color", Color) = (1, 1, 1, 1)\n    }\n\n    SubShader\n    {\n        Tags { "RenderType" = "Opaque" "RenderPipeline" = "UniversalPipeline" }\n\n        Pass\n        {\n            HLSLPROGRAM\n            #pragma vertex vert\n            #pragma fragment frag\n\n            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"\n\n            struct Attributes\n            {\n                float4 positionOS : POSITION;\n                float2 uv : TEXCOORD0;\n            };\n\n            struct Varyings\n            {\n                float4 positionHCS : SV_POSITION;\n                float2 uv : TEXCOORD0;\n            };\n\n            TEXTURE2D(_BaseMap);\n            SAMPLER(sampler_BaseMap);\n\n            CBUFFER_START(UnityPerMaterial)\n                half4 _BaseColor;\n                float4 _BaseMap_ST;\n            CBUFFER_END\n\n            Varyings vert(Attributes IN)\n            {\n                Varyings OUT;\n                OUT.positionHCS = TransformObjectToHClip(IN.positionOS.xyz);\n                OUT.uv = TRANSFORM_TEX(IN.uv, _BaseMap);\n                return OUT;\n            }\n\n            half4 frag(Varyings IN) : SV_Target\n            {\n                $END$return SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv) * _BaseColor;\n            }\n            ENDHLSL\n        }\n    }\n}\n',
+      },
+      {
+        id: "builtin-unlit",
+        label: "Built-in Unlit Shader",
+        body: 'Shader "Unlit/$NAME$"\n{\n    Properties\n    {\n        _MainTex ("Texture", 2D) = "white" {}\n    }\n    SubShader\n    {\n        Tags { "RenderType" = "Opaque" }\n        LOD 100\n\n        Pass\n        {\n            CGPROGRAM\n            #pragma vertex vert\n            #pragma fragment frag\n            #include "UnityCG.cginc"\n\n            struct appdata\n            {\n                float4 vertex : POSITION;\n                float2 uv : TEXCOORD0;\n            };\n\n            struct v2f\n            {\n                float2 uv : TEXCOORD0;\n                float4 vertex : SV_POSITION;\n            };\n\n            sampler2D _MainTex;\n            float4 _MainTex_ST;\n\n            v2f vert(appdata v)\n            {\n                v2f o;\n                o.vertex = UnityObjectToClipPos(v.vertex);\n                o.uv = TRANSFORM_TEX(v.uv, _MainTex);\n                return o;\n            }\n\n            fixed4 frag(v2f i) : SV_Target\n            {\n                $END$return tex2D(_MainTex, i.uv);\n            }\n            ENDCG\n        }\n    }\n}\n',
+      },
+      {
+        id: "compute",
+        label: "Compute Shader",
+        extension: "compute",
+        body: "#pragma kernel CSMain\n\nRWTexture2D<float4> Result;\n\n[numthreads(8, 8, 1)]\nvoid CSMain(uint3 id : SV_DispatchThreadID)\n{\n    $END$Result[id.xy] = float4(id.x & id.y, (id.x & 15) / 15.0, (id.y & 15) / 15.0, 0.0);\n}\n",
+      },
+      {
+        id: "hlsl-include",
+        label: "HLSL Include",
+        extension: "hlsl",
+        body: "#ifndef $NAME$_INCLUDED\n#define $NAME$_INCLUDED\n\n$END$\n\n#endif\n",
+      },
+    ],
+  },
+  {
+    id: "unity-asmdef",
+    name: "Unity Assembly Definition",
+    icon: "file-json",
+    extension: "asmdef",
+    nameStyle: "asis",
+    kinds: [
+      {
+        id: "asmdef",
+        label: "Assembly Definition",
+        body: '{\n    "name": "$NAME$",\n    "rootNamespace": "$NAME$",\n    "references": [$END$],\n    "includePlatforms": [],\n    "excludePlatforms": [],\n    "allowUnsafeCode": false,\n    "overrideReferences": false,\n    "precompiledReferences": [],\n    "autoReferenced": true,\n    "defineConstraints": [],\n    "versionDefines": [],\n    "noEngineReferences": false\n}\n',
+      },
+      {
+        id: "asmref",
+        label: "Assembly Definition Reference",
+        extension: "asmref",
+        body: '{\n    "reference": "$END$"\n}\n',
+      },
+    ],
+  },
 ];

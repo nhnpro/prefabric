@@ -3063,5 +3063,20 @@
   "UnityYAMLMerge: {count} properties changed on both sides": "UnityYAMLMerge: {count} properties changed on both sides",
   "Merge {name} with UnityYAMLMerge": "Merge {name} with UnityYAMLMerge",
   "{name} merged by UnityYAMLMerge": "{name} merged by UnityYAMLMerge",
-  "Shader include '{includePath}' not found in project": "Shader include '{includePath}' not found in project"
+  "Shader include '{includePath}' not found in project": "Shader include '{includePath}' not found in project",
+  "Unity Script": "Unity Script",
+  "MonoBehaviour": "MonoBehaviour",
+  "ScriptableObject": "ScriptableObject",
+  "Custom Editor": "Custom Editor",
+  "Editor Window": "Editor Window",
+  "EditMode Test": "EditMode Test",
+  "PlayMode Test": "PlayMode Test",
+  "Unity Shader": "Unity Shader",
+  "URP Unlit Shader": "URP Unlit Shader",
+  "Built-in Unlit Shader": "Built-in Unlit Shader",
+  "Compute Shader": "Compute Shader",
+  "HLSL Include": "HLSL Include",
+  "Unity Assembly Definition": "Unity Assembly Definition",
+  "Assembly Definition": "Assembly Definition",
+  "Assembly Definition Reference": "Assembly Definition Reference"
 }

@@ -17,6 +17,7 @@ pub mod problems;
 pub mod scan;
 pub mod search;
 mod store;
+pub mod symbols;
 #[doc(hidden)]
 pub mod synthetic;
 pub mod usages;
