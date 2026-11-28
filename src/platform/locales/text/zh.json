@@ -9406,5 +9406,22 @@
   "UnityYAMLMerge: {count} properties changed on both sides": "UnityYAMLMerge：{count} 个属性在双方都有更改",
   "Merge {name} with UnityYAMLMerge": "使用 UnityYAMLMerge 合并 {name}",
   "{name} merged by UnityYAMLMerge": "{name} 已由 UnityYAMLMerge 合并",
-  "Shader include '{includePath}' not found in project": "项目中未找到着色器包含文件 '{includePath}'"
+  "Shader include '{includePath}' not found in project": "项目中未找到着色器包含文件 '{includePath}'",
+  "Open Unity Documentation": "打开 Unity 文档",
+  "Frequently called Unity code": "高频调用的 Unity 代码",
+  "Unity allocation in hot path": "Unity 热路径内存分配",
+  "Unity performance warning": "Unity 性能警告",
+  "Hot path:": "热路径：",
+  "Camera.main searches tagged objects; cache the Camera reference in Awake or Start.": "Camera.main 会按标签查找对象；请在 Awake 或 Start 中缓存 Camera 引用。",
+  "Expensive component lookup in frequently called code; cache the component in Awake or Start.": "高频调用代码中的高开销组件查找；请在 Awake 或 Start 中缓存该组件。",
+  "Expensive scene or asset lookup in frequently called code; cache the result outside the update loop.": "高频调用代码中的高开销场景或资源查找；请在更新循环外部缓存结果。",
+  "Reflection-based message dispatch is slow in frequently called code; call the method directly or use an event.": "基于反射的消息分发在高频调用代码中较慢；请直接调用方法或使用事件。",
+  "Comparing .tag allocates a managed string; use CompareTag(...) instead.": "比较 .tag 会分配托管字符串；请改用 CompareTag(...)。",
+  "String-based shader property lookup in frequently called code; cache an ID with Shader.PropertyToID.": "高频调用代码中基于字符串的着色器属性查找；请使用 Shader.PropertyToID 缓存 ID。",
+  "String-based Animator lookup in frequently called code; cache a hash with Animator.StringToHash.": "高频调用代码中基于字符串的 Animator 查找；请使用 Animator.StringToHash 缓存哈希值。",
+  "Allocates a new array every call; prefer the NonAlloc overload with a preallocated buffer.": "每次调用都会分配新数组；请优先使用带预分配缓冲区的 NonAlloc 重载。",
+  "Allocates a WaitForSeconds instance; cache and reuse it.": "会分配 WaitForSeconds 实例；请缓存并复用它。",
+  "Heap allocation in frequently called code; reuse a preallocated collection or buffer.": "高频调用代码中的堆内存分配；请复用预分配的集合或缓冲区。",
+  "LINQ allocates enumerators and closures in frequently called code; prefer a for loop.": "LINQ 在高频调用代码中会分配枚举器和闭包；请优先使用 for 循环。",
+  "String formatting allocates on the managed heap in frequently called code.": "字符串格式化在高频调用代码中会分配托管堆内存。"
 }

@@ -32,6 +32,8 @@ import { trackUnityLink, UnityLinkItem } from "./link";
 import { playActions, trackPlayControls, UnityPlayControls } from "./playControls";
 import { appendEntries, clearConsole } from "./console/store";
 import { showInUnityAction, showInUnityMenus } from "./showInUnity";
+import { openUnityDocsAction, openUnityDocsMenus } from "./docs";
+import { unityPerformanceExtension } from "./performance";
 
 const deps = unityDeps(async () => {
   const unity = useProject.getState().project?.unity;
@@ -50,6 +52,7 @@ export function activate() {
               { openideaCompletion: unityMessageSource(ctx.path, deps), [CONTRIBUTED_RENAME]: rename },
             ]),
             eventFunctionGutter(ctx.path, deps),
+            useProject.getState().project?.unity ? unityPerformanceExtension(ctx.path, deps) : [],
             useProject.getState().project?.unity ? unityLenses(ctx.doc) : [],
           ]
         : ctx.language === "json" && !ctx.virtual
@@ -65,8 +68,14 @@ export function activate() {
   const unregisterBanner = registerEditorBanner(unityYamlBanner);
   const unregisterSearch = trackUnitySearchCategory();
   const unregisterHierarchy = registerTextEditorWrapper(hierarchyWrapper);
-  const unregisterActions = registerActions([...hierarchyActions(), ...playActions(), showInUnityAction()]);
+  const unregisterActions = registerActions([
+    ...hierarchyActions(),
+    ...playActions(),
+    showInUnityAction(),
+    openUnityDocsAction(deps),
+  ]);
   const unregisterShowMenus = showInUnityMenus();
+  const unregisterDocsMenus = openUnityDocsMenus();
   const unregisterLink = registerStatusItem({
     id: "unity.link",
     title: "Unity Editor",
@@ -103,6 +112,7 @@ export function activate() {
     clearHierarchyModes();
   });
   return () => {
+    unregisterDocsMenus();
     unregisterShowMenus();
     offProject();
     offConsole();

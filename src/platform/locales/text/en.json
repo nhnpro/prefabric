@@ -3063,5 +3063,22 @@
   "UnityYAMLMerge: {count} properties changed on both sides": "UnityYAMLMerge: {count} properties changed on both sides",
   "Merge {name} with UnityYAMLMerge": "Merge {name} with UnityYAMLMerge",
   "{name} merged by UnityYAMLMerge": "{name} merged by UnityYAMLMerge",
-  "Shader include '{includePath}' not found in project": "Shader include '{includePath}' not found in project"
+  "Shader include '{includePath}' not found in project": "Shader include '{includePath}' not found in project",
+  "Open Unity Documentation": "Open Unity Documentation",
+  "Frequently called Unity code": "Frequently called Unity code",
+  "Unity allocation in hot path": "Unity allocation in hot path",
+  "Unity performance warning": "Unity performance warning",
+  "Hot path:": "Hot path:",
+  "Camera.main searches tagged objects; cache the Camera reference in Awake or Start.": "Camera.main searches tagged objects; cache the Camera reference in Awake or Start.",
+  "Expensive component lookup in frequently called code; cache the component in Awake or Start.": "Expensive component lookup in frequently called code; cache the component in Awake or Start.",
+  "Expensive scene or asset lookup in frequently called code; cache the result outside the update loop.": "Expensive scene or asset lookup in frequently called code; cache the result outside the update loop.",
+  "Reflection-based message dispatch is slow in frequently called code; call the method directly or use an event.": "Reflection-based message dispatch is slow in frequently called code; call the method directly or use an event.",
+  "Comparing .tag allocates a managed string; use CompareTag(...) instead.": "Comparing .tag allocates a managed string; use CompareTag(...) instead.",
+  "String-based shader property lookup in frequently called code; cache an ID with Shader.PropertyToID.": "String-based shader property lookup in frequently called code; cache an ID with Shader.PropertyToID.",
+  "String-based Animator lookup in frequently called code; cache a hash with Animator.StringToHash.": "String-based Animator lookup in frequently called code; cache a hash with Animator.StringToHash.",
+  "Allocates a new array every call; prefer the NonAlloc overload with a preallocated buffer.": "Allocates a new array every call; prefer the NonAlloc overload with a preallocated buffer.",
+  "Allocates a WaitForSeconds instance; cache and reuse it.": "Allocates a WaitForSeconds instance; cache and reuse it.",
+  "Heap allocation in frequently called code; reuse a preallocated collection or buffer.": "Heap allocation in frequently called code; reuse a preallocated collection or buffer.",
+  "LINQ allocates enumerators and closures in frequently called code; prefer a for loop.": "LINQ allocates enumerators and closures in frequently called code; prefer a for loop.",
+  "String formatting allocates on the managed heap in frequently called code.": "String formatting allocates on the managed heap in frequently called code."
 }
