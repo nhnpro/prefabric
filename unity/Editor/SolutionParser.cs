@@ -95,7 +95,7 @@ namespace Prefabric.Unity.Editor
 			return properties.ToArray();
 		}
 
-		private static Solution ParseSolutionXmlContent(string content)
+		internal static Solution ParseSolutionXmlContent(string content)
 		{
 			return new Solution
 			{
@@ -112,7 +112,7 @@ namespace Prefabric.Unity.Editor
 			foreach (var project in document.Descendants("Project"))
 			{
 				var fileName = project.Attribute("Path")?.Value;
-				if (FileUtility.IsMSBuildGeneratedProject(fileName))
+				if (string.IsNullOrEmpty(fileName) || FileUtility.IsMSBuildGeneratedProject(fileName))
 					continue;
 
 				projects.Add(new SolutionProjectEntry

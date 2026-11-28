@@ -146,7 +146,7 @@ namespace Prefabric.Unity.Editor
 
 		public bool IsInternalizedPackagePath(string path)
 		{
-			if (string.IsNullOrEmpty(path.Trim()))
+			if (string.IsNullOrWhiteSpace(path))
 			{
 				return false;
 			}

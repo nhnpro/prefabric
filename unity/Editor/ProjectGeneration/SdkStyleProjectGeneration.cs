@@ -62,7 +62,7 @@ namespace Prefabric.Unity.Editor
 			headerBuilder.Append(@"    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"    <UseCommonOutputDirectory>true</UseCommonOutputDirectory>").Append(k_WindowsNewline);
-			headerBuilder.Append($"    <OutputPath>").Append(properties.OutputPath.NormalizePathSeparators()).Append(@"</OutputPath>").Append(k_WindowsNewline);
+			headerBuilder.Append($"    <OutputPath>").Append(XmlFilename(properties.OutputPath.NormalizePathSeparators())).Append(@"</OutputPath>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"  </PropertyGroup>").Append(k_WindowsNewline);
 
 			// Supported capabilities
@@ -71,12 +71,12 @@ namespace Prefabric.Unity.Editor
 			headerBuilder.Append(@"  <PropertyGroup>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"    <EnableDefaultItems>false</EnableDefaultItems>").Append(k_WindowsNewline);
-			headerBuilder.Append(@"    <LangVersion>").Append(properties.LangVersion).Append(@"</LangVersion>").Append(k_WindowsNewline);
+			headerBuilder.Append(@"    <LangVersion>").Append(XmlEscape(properties.LangVersion)).Append(@"</LangVersion>").Append(k_WindowsNewline);
 			if (!string.IsNullOrEmpty(properties.Nullable))
-				headerBuilder.Append(@"    <Nullable>").Append(properties.Nullable).Append(@"</Nullable>").Append(k_WindowsNewline);
-			headerBuilder.Append(@"    <RootNamespace>").Append(properties.RootNamespace).Append(@"</RootNamespace>").Append(k_WindowsNewline);
+				headerBuilder.Append(@"    <Nullable>").Append(XmlEscape(properties.Nullable)).Append(@"</Nullable>").Append(k_WindowsNewline);
+			headerBuilder.Append(@"    <RootNamespace>").Append(XmlEscape(properties.RootNamespace)).Append(@"</RootNamespace>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"    <OutputType>Library</OutputType>").Append(k_WindowsNewline);
-			headerBuilder.Append(@"    <AssemblyName>").Append(properties.AssemblyName).Append(@"</AssemblyName>").Append(k_WindowsNewline);
+			headerBuilder.Append(@"    <AssemblyName>").Append(XmlEscape(properties.AssemblyName)).Append(@"</AssemblyName>").Append(k_WindowsNewline);
 			// In the end, given we use NoConfig/NoStdLib (see below), hardcoding the target framework version will have no impact, even when targeting netstandard/net48 from Unity.
 			// But with SDK style we use netstandard2.1 (net471 for legacy), so 3rd party tools will not fail to work when .NETFW reference assemblies are not installed.
 			// Unity already selected proper API surface through referenced DLLs for us.
@@ -103,7 +103,7 @@ namespace Prefabric.Unity.Editor
 		{
 			// If the current assembly is a Player project, we want to project-reference the corresponding Player project
 			var referenceName = m_AssemblyNameProvider.GetAssemblyName(assembly.outputPath, reference.name);
-			projectBuilder.Append(@"    <ProjectReference Include=""").Append(referenceName).Append(GetProjectExtension()).Append(@""" />").Append(k_WindowsNewline);
+			projectBuilder.Append(@"    <ProjectReference Include=""").Append(XmlFilename(referenceName + GetProjectExtension())).Append(@""" />").Append(k_WindowsNewline);
 		}
 
 		internal override void GetProjectFooter(StringBuilder footerBuilder)
@@ -139,7 +139,7 @@ namespace Prefabric.Unity.Editor
 
 			foreach (var project in projects)
 			{
-				content.Append("  ").Append("<Project Path=\"").Append(project.FileName).Append("\" />").Append(k_WindowsNewline);
+				content.Append("  ").Append("<Project Path=\"").Append(XmlEscape(project.FileName)).Append("\" />").Append(k_WindowsNewline);
 			}
 
 			content.Append("</Solution>").Append(k_WindowsNewline);

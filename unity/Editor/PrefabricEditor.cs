@@ -29,6 +29,8 @@ namespace Prefabric.Unity.Editor
 
 #if !UNITY_MSBUILD_ENABLED
 			MSBuildProjectIntegration.RemoveGeneratedProps();
+#else
+			EditorApplication.delayCall += () => MSBuildProjectIntegration.Update(CurrentInstallation);
 #endif
 			// A handful of fixed paths: cheap enough to check synchronously.
 			foreach (var installation in PrefabricInstallation.Discover())
@@ -77,9 +79,10 @@ namespace Prefabric.Unity.Editor
 		}
 
 #if !UNITY_MSBUILD_ENABLED
-		private static readonly IGenerator _generator = new SdkStyleProjectGeneration();
-		internal static IGenerator Generator => _generator;
+		private static readonly Lazy<IGenerator> _generator = new Lazy<IGenerator>(() => new SdkStyleProjectGeneration());
+		internal static IGenerator Generator => _generator.Value;
 #endif
+		private static GUIStyle _packageVersionStyle;
 
 		public void Initialize(string editorInstallationPath)
 		{
@@ -100,8 +103,8 @@ namespace Prefabric.Unity.Editor
 		{
 			GUILayout.BeginHorizontal();
 			GUILayout.FlexibleSpace();
-			var style = new GUIStyle { richText = true, margin = new RectOffset(0, 4, 0, 0) };
-			GUILayout.Label($"<size=10><color=grey>Prefabric package v{PrefabricInstallation.PackageVersion()} enabled</color></size>", style);
+			_packageVersionStyle ??= new GUIStyle { richText = true, margin = new RectOffset(0, 4, 0, 0) };
+			GUILayout.Label($"<size=10><color=grey>Prefabric package v{PrefabricInstallation.PackageVersion()} enabled</color></size>", _packageVersionStyle);
 			GUILayout.EndHorizontal();
 
 #if UNITY_MSBUILD_ENABLED
@@ -120,7 +123,7 @@ namespace Prefabric.Unity.Editor
 			var rect = EditorGUI.IndentedRect(EditorGUILayout.GetControlRect());
 			rect.width = 252;
 			if (GUI.Button(rect, "Regenerate project files"))
-				_generator.Sync();
+				Generator.Sync();
 			EditorGUI.indentLevel--;
 #endif
 		}
@@ -128,10 +131,10 @@ namespace Prefabric.Unity.Editor
 #if !UNITY_MSBUILD_ENABLED
 		private static void SettingsButton(ProjectGenerationFlag preference, string guiMessage, string toolTip)
 		{
-			var prevValue = _generator.AssemblyNameProvider.ProjectGenerationFlag.HasFlag(preference);
+			var prevValue = Generator.AssemblyNameProvider.ProjectGenerationFlag.HasFlag(preference);
 			var newValue = EditorGUILayout.Toggle(new GUIContent(guiMessage, toolTip), prevValue);
 			if (newValue != prevValue)
-				_generator.AssemblyNameProvider.ToggleProjectGeneration(preference);
+				Generator.AssemblyNameProvider.ToggleProjectGeneration(preference);
 		}
 #endif
 
@@ -140,7 +143,7 @@ namespace Prefabric.Unity.Editor
 #if UNITY_MSBUILD_ENABLED
 			MSBuildProjectIntegration.Update(CurrentInstallation);
 #else
-			_generator.SyncIfNeeded(addedFiles.Union(deletedFiles).Union(movedFiles).Union(movedFromFiles), importedFiles);
+			Generator.SyncIfNeeded(addedFiles.Union(deletedFiles).Union(movedFiles).Union(movedFromFiles), importedFiles);
 #endif
 		}
 
@@ -149,7 +152,7 @@ namespace Prefabric.Unity.Editor
 #if UNITY_MSBUILD_ENABLED
 			MSBuildProjectIntegration.Update(CurrentInstallation);
 #else
-			_generator.Sync();
+			Generator.Sync();
 #endif
 		}
 
@@ -167,10 +170,10 @@ namespace Prefabric.Unity.Editor
 			var projectDirectory = Path.GetDirectoryName(MSBuildProjectIntegration.SolutionFilePath);
 #else
 			// Path is empty with "Open C# Project".
-			if (!string.IsNullOrEmpty(path) && !_generator.IsSupportedFile(path))
+			if (!string.IsNullOrEmpty(path) && !Generator.IsSupportedFile(path))
 				return false;
-			_generator.Sync();
-			var projectDirectory = _generator.ProjectDirectory;
+			Generator.Sync();
+			var projectDirectory = Generator.ProjectDirectory;
 #endif
 			return installation.Open(path, line, column, projectDirectory);
 		}

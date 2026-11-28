@@ -34,6 +34,7 @@ namespace Prefabric.Unity.Editor.Link
         readonly Func<Dictionary<string, object>> helloResult;
         readonly ConcurrentQueue<Action> mainThread = new ConcurrentQueue<Action>();
         readonly List<Client> clients = new List<Client>();
+        volatile int clientCount;
         readonly TcpListener listener;
         readonly Thread acceptThread;
         volatile bool stopped;
@@ -103,10 +104,7 @@ namespace Prefabric.Unity.Editor.Link
                 action();
         }
 
-        public int ClientCount
-        {
-            get { lock (clients) return clients.Count; }
-        }
+        public int ClientCount => clientCount;
 
         public bool HasReadyClient
         {
@@ -123,10 +121,19 @@ namespace Prefabric.Unity.Editor.Link
         /// <summary>Sends a notification to every client that completed the handshake.</summary>
         public void Notify(string method, object parameters)
         {
-            var line = Json.Write(new Dictionary<string, object> { ["jsonrpc"] = "2.0", ["method"] = method, ["params"] = parameters });
             Client[] targets;
             lock (clients)
+            {
+                if (clients.Count == 0)
+                    return;
                 targets = clients.ToArray();
+            }
+            var anyReady = false;
+            foreach (var c in targets)
+                if (c.Ready) { anyReady = true; break; }
+            if (!anyReady)
+                return;
+            var line = Json.Write(new Dictionary<string, object> { ["jsonrpc"] = "2.0", ["method"] = method, ["params"] = parameters });
             foreach (var c in targets)
                 if (c.Ready)
                     c.Send(line);
@@ -177,6 +184,7 @@ namespace Prefabric.Unity.Editor.Link
                         continue;
                     }
                     clients.Add(client);
+                    clientCount = clients.Count;
                 }
                 client.Start();
             }
@@ -185,7 +193,10 @@ namespace Prefabric.Unity.Editor.Link
         void Remove(Client client)
         {
             lock (clients)
+            {
                 clients.Remove(client);
+                clientCount = clients.Count;
+            }
         }
 
         static string Response(object id, object result) =>
@@ -265,6 +276,17 @@ namespace Prefabric.Unity.Editor.Link
             }
             mainThread.Enqueue(() =>
             {
+                if (id == null)
+                {
+                    try
+                    {
+                        handler(parameters);
+                    }
+                    catch (Exception)
+                    {
+                    }
+                    return;
+                }
                 string reply;
                 try
                 {
@@ -274,8 +296,7 @@ namespace Prefabric.Unity.Editor.Link
                 {
                     reply = Error(id, InternalError, e.Message);
                 }
-                if (id != null)
-                    client.Send(reply);
+                client.Send(reply);
             });
             return true;
         }
@@ -295,6 +316,7 @@ namespace Prefabric.Unity.Editor.Link
             {
                 all = clients.ToArray();
                 clients.Clear();
+                clientCount = 0;
             }
             foreach (var c in all)
                 c.Close();
@@ -310,6 +332,7 @@ namespace Prefabric.Unity.Editor.Link
             const int CloseSendTimeoutMs = 1000;
             const int MaxLineBeforeHello = 64 * 1024;
             const int MaxLine = 16 * 1024 * 1024;
+            const int ShrinkLineCapacity = 64 * 1024;
 
             readonly LinkServer server;
             readonly TcpClient tcp;
@@ -332,6 +355,8 @@ namespace Prefabric.Unity.Editor.Link
 
             public void Start()
             {
+                if (closing)
+                    return;
                 // A peer that never completes the handshake doesn't keep a client slot.
                 var timer = new Timer(_ =>
                 {
@@ -340,7 +365,19 @@ namespace Prefabric.Unity.Editor.Link
                     CancelHandshakeTimeout();
                 }, null, Timeout.Infinite, Timeout.Infinite);
                 handshake = timer;
-                timer.Change(HandshakeTimeoutMs, Timeout.Infinite);
+                if (closing)
+                {
+                    CancelHandshakeTimeout();
+                    return;
+                }
+                try
+                {
+                    timer.Change(HandshakeTimeoutMs, Timeout.Infinite);
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
                 new Thread(ReadLoop) { IsBackground = true, Name = "Prefabric link client" }.Start();
             }
 
@@ -366,7 +403,10 @@ namespace Prefabric.Unity.Editor.Link
                             line.Write(buffer, start, i - start);
                             start = i + 1;
                             var text = Encoding.UTF8.GetString(line.GetBuffer(), 0, (int)line.Length).TrimEnd('\r');
-                            line.SetLength(0);
+                            if (line.Capacity > ShrinkLineCapacity)
+                                line = new MemoryStream();
+                            else
+                                line.SetLength(0);
                             if (text.Length > 0 && !server.Handle(this, text))
                                 return;
                         }

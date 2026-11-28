@@ -12,6 +12,7 @@ using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml;
 using Unity.CodeEditor;
 using Unity.Profiling;
 using UnityEditor;
@@ -57,6 +58,8 @@ namespace Prefabric.Unity.Editor
 		readonly IFileIO m_FileIOProvider;
 		readonly IGUIDGenerator m_GUIDGenerator;
 		PrefabricInstallation m_CurrentInstallation;
+		string[] m_CachedAnalyzers;
+		readonly Dictionary<ApiCompatibilityLevel, string[]> m_SystemAssemblyDirsCache = new Dictionary<ApiCompatibilityLevel, string[]>();
 
 		public ProjectGeneration() : this(Directory.GetParent(Application.dataPath).FullName)
 		{
@@ -68,7 +71,10 @@ namespace Prefabric.Unity.Editor
 
 		public ProjectGeneration(string tempDirectory, IAssemblyNameProvider assemblyNameProvider, IFileIO fileIoProvider, IGUIDGenerator guidGenerator)
 		{
-			ProjectDirectory = FileUtility.NormalizeWindowsToUnix(tempDirectory);
+			var normalized = FileUtility.NormalizeWindowsToUnix(tempDirectory);
+			if (normalized != null && normalized.Length > 1)
+				normalized = normalized.TrimEnd('/');
+			ProjectDirectory = normalized;
 			m_ProjectName = Path.GetFileName(ProjectDirectory);
 			m_AssemblyNameProvider = assemblyNameProvider;
 			m_FileIOProvider = fileIoProvider;
@@ -97,8 +103,11 @@ namespace Prefabric.Unity.Editor
 			{
 				// We need the exact VS version/capabilities to tweak project generation (analyzers/langversion)
 				RefreshCurrentInstallation();
+				m_SystemAssemblyDirsCache.Clear();
 
 				SetupProjectSupportedExtensions();
+
+				(m_AssemblyNameProvider as AssemblyNameProvider)?.ResetPackageInfoCache();
 
 				// Don't sync if we haven't synced before
 				var affected = affectedFiles as ICollection<string> ?? affectedFiles.ToArray();
@@ -108,30 +117,46 @@ namespace Prefabric.Unity.Editor
 					return false;
 				}
 
-				var assemblies = m_AssemblyNameProvider.GetAssemblies(ShouldFileBePartOfSolution);
+				var assemblies = m_AssemblyNameProvider.GetAssemblies(ShouldFileBePartOfSolution).ToList();
 				var allProjectAssemblies = RelevantAssembliesForMode(assemblies).ToList();
+				var solutionAssemblies = new HashSet<string>(allProjectAssemblies.Select(a => a.name), StringComparer.Ordinal);
 				SyncSolution(allProjectAssemblies);
+
+				var syncAll = reimported.Any(ShouldSyncOnReimportedAsset) || affected.Any(ShouldSyncOnReimportedAsset);
+				var affectedAndReimported = new HashSet<string>(StringComparer.Ordinal);
+				if (!syncAll)
+				{
+					foreach (var asset in affected.Concat(reimported))
+					{
+						var name = m_AssemblyNameProvider.GetAssemblyNameFromScriptPath(asset);
+						if (string.IsNullOrWhiteSpace(name))
+						{
+							if (ShouldFileBePartOfSolution(asset))
+							{
+								syncAll = true;
+								break;
+							}
+							continue;
+						}
+						affectedAndReimported.Add(Path.GetFileNameWithoutExtension(name));
+					}
+				}
+
+				var toSync = syncAll
+					? allProjectAssemblies
+					: allProjectAssemblies.Where(a => affectedAndReimported.Contains(a.name)).ToList();
+
+				if (toSync.Count == 0)
+					return true;
 
 				var allAssetProjectParts = GenerateAllAssetProjectParts();
 
-				var affectedNames = affected
-					.Select(asset => m_AssemblyNameProvider.GetAssemblyNameFromScriptPath(asset))
-					.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name =>
-						name.Split(new[] { ".dll" }, StringSplitOptions.RemoveEmptyEntries)[0]);
-				var reimportedNames = reimported
-					.Select(asset => m_AssemblyNameProvider.GetAssemblyNameFromScriptPath(asset))
-					.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name =>
-						name.Split(new[] { ".dll" }, StringSplitOptions.RemoveEmptyEntries)[0]);
-				var affectedAndReimported = new HashSet<string>(affectedNames.Concat(reimportedNames));
-
-				foreach (var assembly in allProjectAssemblies)
+				foreach (var assembly in toSync)
 				{
-					if (!affectedAndReimported.Contains(assembly.name))
-						continue;
-
 					SyncProject(assembly,
 						allAssetProjectParts,
-						ParseResponseFileData(assembly));
+						ParseResponseFileData(assembly),
+						solutionAssemblies);
 				}
 
 				return true;
@@ -147,12 +172,16 @@ namespace Prefabric.Unity.Editor
 		{
 			// ".dll", ".asmdef"
 			var extension = Path.GetExtension(asset);
-			return extension == ".dll" || extension == ".asmdef";
+			return string.Equals(extension, ".dll", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(extension, ".asmdef", StringComparison.OrdinalIgnoreCase);
 		}
 
 		private void RefreshCurrentInstallation()
 		{
 			m_CurrentInstallation = PrefabricEditor.GenerationInstallation;
+			m_CachedAnalyzers = m_CurrentInstallation != null && m_CurrentInstallation.SupportsAnalyzers
+				? m_CurrentInstallation.GetAnalyzers()
+				: Array.Empty<string>();
 		}
 
 		static ProfilerMarker solutionSyncMarker = new ProfilerMarker("SolutionSynchronizerSync");
@@ -161,6 +190,7 @@ namespace Prefabric.Unity.Editor
 		{
 			// We need the exact VS version/capabilities to tweak project generation (analyzers/langversion)
 			RefreshCurrentInstallation();
+			m_SystemAssemblyDirsCache.Clear();
 
 			SetupProjectSupportedExtensions();
 
@@ -183,7 +213,7 @@ namespace Prefabric.Unity.Editor
 
 		private void SetupProjectSupportedExtensions()
 		{
-			_supportedExtensions = new HashSet<string>
+			_supportedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 			{
 				"dll",
 				"asmdef",
@@ -192,12 +222,14 @@ namespace Prefabric.Unity.Editor
 
 			foreach (var extension in m_AssemblyNameProvider.ProjectSupportedExtensions)
 			{
-				_supportedExtensions.Add(extension);
+				if (!string.IsNullOrWhiteSpace(extension))
+					_supportedExtensions.Add(extension.Trim().TrimStart('.'));
 			}
 
 			foreach (var extension in EditorSettings.projectGenerationBuiltinExtensions)
 			{
-				_supportedExtensions.Add(extension);
+				if (!string.IsNullOrWhiteSpace(extension))
+					_supportedExtensions.Add(extension.Trim().TrimStart('.'));
 			}
 		}
 
@@ -214,14 +246,13 @@ namespace Prefabric.Unity.Editor
 
 		private static string GetExtensionWithoutDot(string path)
 		{
-			// Prevent re-processing and information loss
-			if (!Path.HasExtension(path))
-				return path;
+			if (string.IsNullOrEmpty(path) || !Path.HasExtension(path))
+				return string.Empty;
 
 			return Path
 				.GetExtension(path)
 				.TrimStart('.')
-				.ToLower();
+				.ToLowerInvariant();
 		}
 
 		public bool IsSupportedFile(string path)
@@ -233,7 +264,7 @@ namespace Prefabric.Unity.Editor
 		{
 			extensionWithoutDot = GetExtensionWithoutDot(path);
 			// dlls and other configured files are not scripts but still need to be included
-			return _supportedExtensions.Contains(extensionWithoutDot);
+			return !string.IsNullOrEmpty(extensionWithoutDot) && _supportedExtensions.Contains(extensionWithoutDot);
 		}
 
 		private static ScriptingLanguage ScriptingLanguageFor(Assembly assembly)
@@ -266,39 +297,44 @@ namespace Prefabric.Unity.Editor
 
 			SyncSolution(assemblies);
 
-			var allProjectAssemblies = RelevantAssembliesForMode(assemblies);
+			var allProjectAssemblies = RelevantAssembliesForMode(assemblies).ToList();
+			var solutionAssemblies = new HashSet<string>(allProjectAssemblies.Select(a => a.name), StringComparer.Ordinal);
 
 			foreach (var assembly in allProjectAssemblies)
 			{
 				SyncProject(assembly,
 					allAssetProjectParts,
-					ParseResponseFileData(assembly));
+					ParseResponseFileData(assembly),
+					solutionAssemblies);
 			}
 		}
 
 		private ResponseFileData[] ParseResponseFileData(Assembly assembly)
 		{
-			var systemReferenceDirectories = CompilationPipeline.GetSystemAssemblyDirectories(assembly.compilerOptions.ApiCompatibilityLevel);
-
-			Dictionary<string, ResponseFileData> responseFilesData = assembly.compilerOptions.ResponseFiles.ToDictionary(x => x, x => m_AssemblyNameProvider.ParseResponseFile(
-				x,
-				ProjectDirectory,
-				systemReferenceDirectories
-			));
-
-			Dictionary<string, ResponseFileData> responseFilesWithErrors = responseFilesData.Where(x => x.Value.Errors.Any())
-				.ToDictionary(x => x.Key, x => x.Value);
-
-			if (responseFilesWithErrors.Any())
+			var apiLevel = assembly.compilerOptions.ApiCompatibilityLevel;
+			if (!m_SystemAssemblyDirsCache.TryGetValue(apiLevel, out var systemReferenceDirectories))
 			{
-				foreach (var error in responseFilesWithErrors)
-					foreach (var valueError in error.Value.Errors)
-					{
-						Debug.LogError($"{error.Key} Parse Error : {valueError}");
-					}
+				systemReferenceDirectories = CompilationPipeline.GetSystemAssemblyDirectories(apiLevel);
+				m_SystemAssemblyDirsCache[apiLevel] = systemReferenceDirectories;
 			}
 
-			return responseFilesData.Select(x => x.Value).ToArray();
+			var result = new List<ResponseFileData>();
+			foreach (var responseFile in assembly.compilerOptions.ResponseFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+			{
+				var data = m_AssemblyNameProvider.ParseResponseFile(
+					responseFile,
+					ProjectDirectory,
+					systemReferenceDirectories
+				);
+				if (data.Errors.Any())
+				{
+					foreach (var valueError in data.Errors)
+						Debug.LogError($"{responseFile} Parse Error : {valueError}");
+				}
+				result.Add(data);
+			}
+
+			return result.ToArray();
 		}
 
 		private Dictionary<string, string> GenerateAllAssetProjectParts()
@@ -372,11 +408,12 @@ namespace Prefabric.Unity.Editor
 		private void SyncProject(
 			Assembly assembly,
 			Dictionary<string, string> allAssetsProjectParts,
-			ResponseFileData[] responseFileData)
+			ResponseFileData[] responseFileData,
+			HashSet<string> solutionAssemblies)
 		{
 			SyncProjectFileIfNotChanged(
 				ProjectFile(assembly),
-				ProjectText(assembly, allAssetsProjectParts, responseFileData));
+				ProjectText(assembly, allAssetsProjectParts, responseFileData, solutionAssemblies));
 		}
 
 		private void SyncProjectFileIfNotChanged(string path, string newContents)
@@ -411,9 +448,9 @@ namespace Prefabric.Unity.Editor
 			foreach (var method in TypeCacheHelper.GetPostProcessorCallbacks(nameof(OnPreGeneratingCSProjectFiles)))
 			{
 				var retValue = method.Invoke(null, Array.Empty<object>());
-				if (method.ReturnType == typeof(bool))
+				if (method.ReturnType == typeof(bool) && retValue is bool b)
 				{
-					result |= (bool)retValue;
+					result |= b;
 				}
 			}
 
@@ -422,14 +459,14 @@ namespace Prefabric.Unity.Editor
 
 		private static string InvokeAssetPostProcessorGenerationCallbacks(string name, string path, string content)
 		{
-			foreach (var method in TypeCacheHelper.GetPostProcessorCallbacks(name))
+			foreach (var method in TypeCacheHelper.GetPostProcessorCallbacks(name, typeof(string), typeof(string)))
 			{
 				var args = new[] { path, content };
 				var returnValue = method.Invoke(null, args);
-				if (method.ReturnType == typeof(string))
+				if (returnValue is string updated)
 				{
 					// We want to chain content update between invocations
-					content = (string)returnValue;
+					content = updated;
 				}
 			}
 
@@ -465,7 +502,8 @@ namespace Prefabric.Unity.Editor
 
 		private string ProjectText(Assembly assembly,
 			Dictionary<string, string> allAssetsProjectParts,
-			ResponseFileData[] responseFileData)
+			ResponseFileData[] responseFileData,
+			HashSet<string> solutionAssemblies)
 		{
 			ProjectHeader(assembly, responseFileData, out StringBuilder projectBuilder);
 
@@ -483,8 +521,7 @@ namespace Prefabric.Unity.Editor
 				}
 				else
 				{
-					var fullFile = EscapedRelativePathFor(file, out _);
-					references.Add(fullFile);
+					references.Add(file);
 				}
 			}
 			projectBuilder.Append(@"  </ItemGroup>").Append(k_WindowsNewline);
@@ -504,7 +541,7 @@ namespace Prefabric.Unity.Editor
 
 			var responseRefs = responseFileData.SelectMany(x => x.FullPathReferences.Select(r => r));
 			var internalAssemblyReferences = assembly.assemblyReferences
-				.Where(i => !i.sourceFiles.Any(ShouldFileBePartOfSolution)).Select(i => i.outputPath);
+				.Where(i => !solutionAssemblies.Contains(i.name)).Select(i => i.outputPath);
 			var allReferences =
 				assembly.compiledAssemblyReferences
 					.Union(responseRefs)
@@ -522,7 +559,7 @@ namespace Prefabric.Unity.Editor
 			if (0 < assembly.assemblyReferences.Length)
 			{
 				projectBuilder.Append("  <ItemGroup>").Append(k_WindowsNewline);
-				foreach (var reference in assembly.assemblyReferences.Where(i => i.sourceFiles.Any(ShouldFileBePartOfSolution)))
+				foreach (var reference in assembly.assemblyReferences.Where(i => solutionAssemblies.Contains(i.name)))
 				{
 					AppendProjectReference(assembly, reference, projectBuilder);
 				}
@@ -534,20 +571,27 @@ namespace Prefabric.Unity.Editor
 			return projectBuilder.ToString();
 		}
 
-		private static string XmlFilename(string path)
+		internal static string XmlFilename(string path)
 		{
 			if (string.IsNullOrEmpty(path))
 				return path;
 
-			path = path.Replace(@"%", "%25");
-			path = path.Replace(@";", "%3b");
+			path = path
+				.Replace("%", "%25")
+				.Replace(";", "%3b")
+				.Replace("$", "%24")
+				.Replace("@", "%40")
+				.Replace("(", "%28")
+				.Replace(")", "%29")
+				.Replace("*", "%2a")
+				.Replace("?", "%3f");
 
 			return XmlEscape(path);
 		}
 
-		private static string XmlEscape(string s)
+		internal static string XmlEscape(string s)
 		{
-			return SecurityElement.Escape(s);
+			return string.IsNullOrEmpty(s) ? s : SecurityElement.Escape(s);
 		}
 
 		internal virtual void AppendProjectReference(Assembly assembly, Assembly reference, StringBuilder projectBuilder)
@@ -618,16 +662,19 @@ namespace Prefabric.Unity.Editor
 				var key = argument
 					.Substring(1, index - 1)
 					.Trim();
-				
-				if (name != key)
+
+				if (!string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
 					continue;
 
-				if (argument.Length <= index)
+				if (argument.Length <= index + 1)
 					continue;
 
-				yield return argument
+				var value = argument
 					.Substring(index + 1)
 					.Trim();
+				if (value.Length >= 2 && value[0] == '"' && value[value.Length - 1] == '"')
+					value = value.Substring(1, value.Length - 2);
+				yield return value;
 			}
 		}
 
@@ -637,7 +684,7 @@ namespace Prefabric.Unity.Editor
 				return;
 
 			// Analyzers shipped in the package
-			var analyzers = new List<string>(m_CurrentInstallation.GetAnalyzers());
+			var analyzers = new List<string>(m_CachedAnalyzers ?? m_CurrentInstallation.GetAnalyzers());
 			var additionalFilePaths = new List<string>();
 			var rulesetPath = string.Empty;
 			var analyzerConfigPath = string.Empty;
@@ -697,7 +744,7 @@ namespace Prefabric.Unity.Editor
 
 			var projectProperties = new ProjectProperties
 			{
-				ProjectGuid = ProjectGuid(assembly),
+				ProjectGuid = Style == GeneratorStyle.SDK ? string.Empty : ProjectGuid(assembly),
 				LangVersion = GetLangVersion(assembly, responseFileData),
 				Nullable = GetNullable(responseFileData),
 				AssemblyName = assembly.name,
@@ -752,7 +799,7 @@ namespace Prefabric.Unity.Editor
 
 			headerBuilder.Append(@"  <PropertyGroup>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"    <NoWarn>").Append(NoWarn).Append("</NoWarn>").Append(k_WindowsNewline);
-			headerBuilder.Append(@"    <DefineConstants>").Append(string.Join(";", properties.Defines)).Append(@"</DefineConstants>").Append(k_WindowsNewline);
+			headerBuilder.Append(@"    <DefineConstants>").Append(XmlEscape(string.Join(";", properties.Defines))).Append(@"</DefineConstants>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"    <AllowUnsafeBlocks>").Append(properties.Unsafe).Append(@"</AllowUnsafeBlocks>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"  </PropertyGroup>").Append(k_WindowsNewline);
 		}
@@ -762,7 +809,7 @@ namespace Prefabric.Unity.Editor
 			if (!string.IsNullOrEmpty(properties.RulesetPath))
 			{
 				headerBuilder.Append(@"  <PropertyGroup>").Append(k_WindowsNewline);
-				headerBuilder.Append(@"    <CodeAnalysisRuleSet>").Append(properties.RulesetPath).Append(@"</CodeAnalysisRuleSet>").Append(k_WindowsNewline);
+				headerBuilder.Append(@"    <CodeAnalysisRuleSet>").Append(XmlFilename(properties.RulesetPath)).Append(@"</CodeAnalysisRuleSet>").Append(k_WindowsNewline);
 				headerBuilder.Append(@"  </PropertyGroup>").Append(k_WindowsNewline);
 			}
 
@@ -771,7 +818,7 @@ namespace Prefabric.Unity.Editor
 				headerBuilder.Append(@"  <ItemGroup>").Append(k_WindowsNewline);
 				foreach (var analyzer in properties.Analyzers)
 				{
-					headerBuilder.Append(@"    <Analyzer Include=""").Append(analyzer).Append(@""" />").Append(k_WindowsNewline);
+					headerBuilder.Append(@"    <Analyzer Include=""").Append(XmlFilename(analyzer)).Append(@""" />").Append(k_WindowsNewline);
 				}
 				headerBuilder.Append(@"  </ItemGroup>").Append(k_WindowsNewline);
 			}
@@ -779,7 +826,7 @@ namespace Prefabric.Unity.Editor
 			if (!string.IsNullOrEmpty(properties.AnalyzerConfigPath))
 			{
 				headerBuilder.Append(@"  <ItemGroup>").Append(k_WindowsNewline);
-				headerBuilder.Append(@"    <EditorConfigFiles Include=""").Append(properties.AnalyzerConfigPath).Append(@""" />").Append(k_WindowsNewline);
+				headerBuilder.Append(@"    <EditorConfigFiles Include=""").Append(XmlFilename(properties.AnalyzerConfigPath)).Append(@""" />").Append(k_WindowsNewline);
 				headerBuilder.Append(@"  </ItemGroup>").Append(k_WindowsNewline);
 			}
 
@@ -788,7 +835,7 @@ namespace Prefabric.Unity.Editor
 				headerBuilder.Append(@"  <ItemGroup>").Append(k_WindowsNewline);
 				foreach (var additionalFile in properties.AdditionalFilePaths)
 				{
-					headerBuilder.Append(@"    <AdditionalFiles Include=""").Append(additionalFile).Append(@""" />").Append(k_WindowsNewline);
+					headerBuilder.Append(@"    <AdditionalFiles Include=""").Append(XmlFilename(additionalFile)).Append(@""" />").Append(k_WindowsNewline);
 				}
 				headerBuilder.Append(@"  </ItemGroup>").Append(k_WindowsNewline);
 			}
@@ -805,11 +852,11 @@ namespace Prefabric.Unity.Editor
 			}
 
 			headerBuilder.Append(@"    <UnityProjectGenerator>Package</UnityProjectGenerator>").Append(k_WindowsNewline);
-			headerBuilder.Append(@"    <UnityProjectGeneratorVersion>").Append(properties.FlavoringPackageVersion).Append(@"</UnityProjectGeneratorVersion>").Append(k_WindowsNewline);
+			headerBuilder.Append(@"    <UnityProjectGeneratorVersion>").Append(XmlEscape(properties.FlavoringPackageVersion)).Append(@"</UnityProjectGeneratorVersion>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"    <UnityProjectGeneratorStyle>").Append(Style).Append("</UnityProjectGeneratorStyle>").Append(k_WindowsNewline);
-			headerBuilder.Append(@"    <UnityProjectType>").Append(properties.FlavoringProjectType).Append(@"</UnityProjectType>").Append(k_WindowsNewline);
-			headerBuilder.Append(@"    <UnityBuildTarget>").Append(properties.FlavoringBuildTarget).Append(@"</UnityBuildTarget>").Append(k_WindowsNewline);
-			headerBuilder.Append(@"    <UnityVersion>").Append(properties.FlavoringUnityVersion).Append(@"</UnityVersion>").Append(k_WindowsNewline);
+			headerBuilder.Append(@"    <UnityProjectType>").Append(XmlEscape(properties.FlavoringProjectType)).Append(@"</UnityProjectType>").Append(k_WindowsNewline);
+			headerBuilder.Append(@"    <UnityBuildTarget>").Append(XmlEscape(properties.FlavoringBuildTarget)).Append(@"</UnityBuildTarget>").Append(k_WindowsNewline);
+			headerBuilder.Append(@"    <UnityVersion>").Append(XmlEscape(properties.FlavoringUnityVersion)).Append(@"</UnityVersion>").Append(k_WindowsNewline);
 			headerBuilder.Append(@"  </PropertyGroup>").Append(k_WindowsNewline);
 		}
 
@@ -823,7 +870,18 @@ namespace Prefabric.Unity.Editor
 				Debug.LogWarning("Project path contains special characters, which can be an issue when opening Visual Studio");
 
 			var solutionFile = SolutionFile();
-			var previousSolution = m_FileIOProvider.Exists(solutionFile) ? SolutionParser.ParseSolutionFile(solutionFile, m_FileIOProvider) : null;
+			Solution previousSolution = null;
+			if (m_FileIOProvider.Exists(solutionFile))
+			{
+				try
+				{
+					previousSolution = SolutionParser.ParseSolutionFile(solutionFile, m_FileIOProvider);
+				}
+				catch (Exception e) when (e is XmlException || e is IOException)
+				{
+					Debug.LogWarning($"Failed to parse existing solution '{solutionFile}', regenerating: {e.Message}");
+				}
+			}
 			SyncSolutionFileIfNotChanged(solutionFile, SolutionText(assemblies, previousSolution));
 		}
 
@@ -991,7 +1049,13 @@ namespace Prefabric.Unity.Editor
 
 		internal static string SkipPathPrefix(string path, string prefix)
 		{
-			if (path.StartsWith($"{prefix}{Path.DirectorySeparatorChar}") && (path.Length > prefix.Length))
+			var comparison =
+#if UNITY_EDITOR_WIN || UNITY_EDITOR_OSX
+				StringComparison.OrdinalIgnoreCase;
+#else
+				StringComparison.Ordinal;
+#endif
+			if (path.StartsWith($"{prefix}{Path.DirectorySeparatorChar}", comparison) && (path.Length > prefix.Length))
 				return path.Substring(prefix.Length + 1);
 			return path;
 		}
@@ -1042,14 +1106,17 @@ namespace Prefabric.Unity.Editor
 
 		private static string ComputeGuidHashFor(string input)
 		{
-			var hash = MD5.Create().ComputeHash(Encoding.Default.GetBytes(input));
-			return HashAsGuid(HashToString(hash));
+			using (var md5 = MD5.Create())
+			{
+				var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(input));
+				return HashAsGuid(HashToString(hash));
+			}
 		}
 
 		private static string HashAsGuid(string hash)
 		{
 			var guid = hash.Substring(0, 8) + "-" + hash.Substring(8, 4) + "-" + hash.Substring(12, 4) + "-" + hash.Substring(16, 4) + "-" + hash.Substring(20, 12);
-			return guid.ToUpper();
+			return guid.ToUpperInvariant();
 		}
 
 		private static string HashToString(byte[] bs)
