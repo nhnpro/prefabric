@@ -1,59 +1,106 @@
 # Prefabric
 
 An open-source desktop IDE for **Unity and C#**, with a Rust core and a native
-(Tauri) shell. Prefabric is a fork of [OpenIDEA](https://github.com/l0ng-ai/openidea)
-and keeps its editor, code insight, debugger, Git, terminal and plugin system,
-then focuses on game development with Unity and .NET.
+(Tauri 2) shell. Prefabric is a fork of [OpenIDEA](https://github.com/l0ng-ai/openidea)
+that keeps its editor, code insight, debugger, Git, terminal, remote development and
+plugin system, then focuses on game development with Unity and .NET.
 
-> **Status: early.** No releases yet. Build it from source (below).
+> **Status: early preview.** No signed releases yet — build from source below or run the
+> manual macOS build workflow in GitHub Actions.
 
-## What works today
+## Features
 
-- **C#**: completion, navigation and refactors through `csharp-ls`. Run configurations from
-  `.sln`/`.slnx`/`.csproj` and `launchSettings.json`, `dotnet build` and `dotnet test`
-  runs, and launch debugging through `netcoredbg`.
-- **Unity projects**:
-  - detects the project and its editor version;
-  - a Unity view of the project tree that hides `Library/`, `Temp/` and `.meta` files;
-  - moving or renaming an asset keeps its `.meta` file and GUID;
-  - duplicating an asset gives the copy a fresh GUID and rewrites its references;
-  - new `.meta` files are staged in Git with their assets.
-- Everything inherited from OpenIDEA: many languages through LSP, debugging through DAP,
-  Git, terminal, database and HTTP clients, and sandboxed WebAssembly plugins.
+### Unity
 
-## Roadmap
+- **External script editor (`dev.prefabric.unity`)**: bundled and installed automatically
+  for Unity 2022.3+. Select Prefabric in _Preferences › External Tools_ to open scripts
+  and Console errors at line/column, and generate SDK-style `.csproj` / `.slnx` files with
+  `Microsoft.Unity.Analyzers` (or use Unity's `UNITY_MSBUILD_ENABLED` pipeline). See
+  [`unity/README.md`](unity/README.md).
+- **Unity Editor Link**: Play, Pause, Step and Refresh controls in the title bar, a live
+  **Unity Console** tool window, Editor compile diagnostics in Problems, **Show in Unity
+  Editor** from code or YAML, and running/cancelling EditMode & PlayMode tests through the
+  Unity Test Runner.
+- **Unity debugger**: attach via Mono Soft Debugger to local Unity Editors, local and
+  network development players (multicast discovery), and USB-connected Android (`adb`) and
+  iOS (`iproxy`) devices, with support for pausepoints.
+- **Asset index, Hierarchy & Code Vision**:
+  - indexes `.unity` scenes, `.prefab` files (including variants and nested prefabs),
+    animation clips and `.asset` files;
+  - **Hierarchy view** for scenes and prefabs with components, prefab overrides, added and
+    removed GameObjects, and read-only YAML inspection;
+  - **Code Vision lenses & asset-aware navigation** for script usages, UnityEvent and
+    animation event bindings, and serialized field values/overrides;
+  - a **Unity** tab in Search Everywhere across GameObjects, prefab instances and assets.
+- **Unity C# & asset editing**:
+  - event function completion, documentation and gutter icons;
+  - Unity-aware rename (offers matching `.cs` file rename and `[FormerlySerializedAs]` for
+    serialized fields);
+  - navigation in `.asmdef` / `.asmref` files and Unity property completion in `.uss`;
+  - Unity project tree hiding `Library/`, `Temp/` and `.meta` clutter; moving, renaming or
+    duplicating assets preserves or regenerates `.meta` GUIDs and rewrites references; new
+    `.meta` files stage automatically in Git.
 
-The plan is in [`docs/proposals/rust-csharp-unity.md`](docs/proposals/rust-csharp-unity.md).
-The main items:
+### C# & .NET
 
-1. **Unity external script editor**: a `dev.prefabric.unity` Unity package, so Prefabric can be
-   picked in _Preferences › External Tools_ and generates the `.sln`/`.csproj` files.
-2. **Asset-aware navigation**: index scenes, prefabs and assets, then find the GameObjects and
-   prefabs that use a script, method or serialized field.
-3. **Unity inspections**: event functions such as `Update` are no longer reported as unused,
-   plus Unity analyzers and message completion.
-4. **Unity debugger**: attach to the Unity Editor and players (Mono soft debugger).
-5. **Editor link**: Play, Pause and Refresh from the IDE, the Unity console, and the Unity Test Runner.
-6. A better C# experience: Roslyn language server, a solution view, NuGet and a test tree.
+- **Roslyn Language Server** (`roslyn-language-server`, with `csharp-ls` fallback) for
+  completion (including unimported namespaces), navigation, inlay hints, full-solution
+  compiler diagnostics, refactors and `.editorconfig` formatting.
+- **.NET tool window**: solution and project explorer, configuration / target-framework
+  switcher, and NuGet package management.
+- **Run, test & debug**: auto-detected configurations from `.sln` / `.slnx` / `.csproj` and
+  `launchSettings.json`, `dotnet build` and `dotnet test` with test tree integration, and
+  launch debugging through `netcoredbg`.
+
+### Platform (from OpenIDEA)
+
+- Multi-language LSP & tree-sitter support, DAP debugging, Git/VCS, integrated terminal,
+  database and HTTP clients, remote development (SSH, WSL, Dev Containers), AI agents &
+  MCP, and sandboxed WebAssembly plugins.
+- Per-project configuration lives in `.prefabric/` (existing `.openidea/` folders continue
+  to work automatically).
 
 ## Build from source
 
 Requirements:
 
-- [Rust](https://rustup.rs) (stable)
+- [Rust](https://rustup.rs) (stable, 1.96+ / Edition 2024)
 - Node.js 22 LTS (22.18 or newer)
-- pnpm
+- pnpm 12
 - the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS
 
 ```sh
 pnpm install
 pnpm tauri dev      # debug build with hot reload
-pnpm tauri build    # release bundle in target/release/bundle/
 ```
 
-The first build compiles about a thousand crates and can take a while; later builds are
-incremental. Contributor notes are in [`CLAUDE.md`](CLAUDE.md) and
-[`CONTRIBUTING.md`](CONTRIBUTING.md). Plugin docs: [`plugins/README.md`](plugins/README.md).
+To build a local unsigned release bundle (disabling updater artifact signing, which
+otherwise requires `TAURI_SIGNING_PRIVATE_KEY`):
+
+```sh
+pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
+The first build compiles around a thousand crates and can take a while; later builds are
+incremental.
+
+### macOS CI builds
+
+You can also trigger [`.github/workflows/build-macos.yml`](.github/workflows/build-macos.yml)
+via **Actions › Build macOS › Run workflow** (`aarch64-apple-darwin`,
+`x86_64-apple-darwin`, or `universal-apple-darwin`) to download an unsigned `.dmg` and
+`.app.zip`. Before launching an unsigned build on macOS, clear the quarantine attribute:
+
+```sh
+xattr -cr /Applications/Prefabric.app
+```
+
+## Documentation & contributing
+
+- Contributor guide: [`AGENTS.md`](AGENTS.md) (`CLAUDE.md`) and [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Unity package: [`unity/README.md`](unity/README.md)
+- Plugins: [`plugins/README.md`](plugins/README.md)
+- Architecture & design notes: [`docs/proposals/rust-csharp-unity.md`](docs/proposals/rust-csharp-unity.md)
 
 ### Contributors
 
