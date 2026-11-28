@@ -370,13 +370,9 @@ function makeParser(alwaysCode: boolean): StreamParser<ShaderState> {
         return "comment";
       }
 
-      // Preprocessor directives inside HLSL/Cg blocks (or standalone HLSL)
-      if (state.inCode && stream.sol() && stream.match(/^#\s*[a-zA-Z_]\w*/)) {
-        state.expectSemantic = false;
-        return "meta";
-      }
-      if (state.inCode && stream.peek() === "#") {
-        stream.match(/^#\s*[a-zA-Z_]\w*/);
+      // Preprocessor directives inside HLSL/Cg blocks (or standalone HLSL).
+      // Always advance via stream.match; bare `#` or `##` token-pasting falls through below.
+      if (state.inCode && stream.match(/^#\s*[a-zA-Z_]\w*/)) {
         state.expectSemantic = false;
         return "meta";
       }
@@ -385,6 +381,11 @@ function makeParser(alwaysCode: boolean): StreamParser<ShaderState> {
       if (stream.eat('"')) {
         state.expectSemantic = false;
         return readString(stream);
+      }
+
+      // ShaderLab texture property types (`2D`, `2DArray`, `3D`) must match before numbers.
+      if (!state.inCode && stream.match(/^(?:2DArray|2D|3D)\b/)) {
+        return "atom";
       }
 
       // Numbers (hex, float with suffix h/f/u, int)
