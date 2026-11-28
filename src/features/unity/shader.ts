@@ -20,20 +20,24 @@ export interface IncludeRef {
 
 const isShaderFile = (path: string) => /\.(shader|hlsl|cginc|glslinc|compute|raytrace|shaderinc)$/i.test(path);
 
-/** Extracts the `#include "..."` path covering `pos`, if any. */
-export function includeAt(text: string, pos: number): IncludeRef | null {
-  const lineStart = text.lastIndexOf("\n", Math.max(0, pos - 1)) + 1;
-  let lineEnd = text.indexOf("\n", pos);
-  if (lineEnd < 0) lineEnd = text.length;
-  const line = text.slice(lineStart, lineEnd);
+/** Extracts the `#include "..."` path covering `pos` on a single line. */
+export function includeAtLine(line: string, lineFrom: number, pos: number): IncludeRef | null {
   const m = /^\s*#\s*include(?:_with_pragmas)?\s+"([^"]+)"/.exec(line);
   if (!m) return null;
   const target = m[1]!;
   const quoteIdx = line.indexOf('"');
-  const from = lineStart + quoteIdx + 1;
+  const from = lineFrom + quoteIdx + 1;
   const to = from + target.length;
   if (pos < from - 1 || pos > to + 1) return null;
   return { path: target, from, to };
+}
+
+/** Extracts the `#include "..."` path covering `pos`, if any. */
+export function includeAt(text: string, pos: number): IncludeRef | null {
+  const lineStart = pos <= 0 ? 0 : text.lastIndexOf("\n", pos - 1) + 1;
+  let lineEnd = text.indexOf("\n", pos);
+  if (lineEnd < 0) lineEnd = text.length;
+  return includeAtLine(text.slice(lineStart, lineEnd), lineStart, pos);
 }
 
 function norm(p: string): string {
@@ -211,9 +215,10 @@ const UNITY_HLSL_ITEMS: readonly ShaderItem[] = [
 const PRAGMA_COMPLETIONS = toCompletions(PRAGMA_ITEMS);
 const SHADERLAB_COMPLETIONS = toCompletions(SHADERLAB_ITEMS);
 const UNITY_HLSL_COMPLETIONS = toCompletions(UNITY_HLSL_ITEMS);
+const ALL_SHADERLAB_COMPLETIONS = [...SHADERLAB_COMPLETIONS, ...UNITY_HLSL_COMPLETIONS];
 
 export function shaderCompletionSource(path: string) {
-  const isShaderLab = path.toLowerCase().endsWith(".shader");
+  const options = path.toLowerCase().endsWith(".shader") ? ALL_SHADERLAB_COMPLETIONS : UNITY_HLSL_COMPLETIONS;
   return (ctx: CompletionContext): CompletionResult | null => {
     const line = ctx.state.doc.lineAt(ctx.pos);
     const before = line.text.slice(0, ctx.pos - line.from);
@@ -225,23 +230,27 @@ export function shaderCompletionSource(path: string) {
     const word = ctx.matchBefore(/[A-Za-z_]\w*/);
     if (!word && !ctx.explicit) return null;
     const from = word ? word.from : ctx.pos;
-    const options = isShaderLab ? [...SHADERLAB_COMPLETIONS, ...UNITY_HLSL_COMPLETIONS] : UNITY_HLSL_COMPLETIONS;
     return { from, options, validFor: /^\w*$/ };
   };
 }
 
 export function shaderSupport(path: string): Extension {
   if (!isShaderFile(path)) return [];
+  const completion = shaderCompletionSource(path);
   const definition: ContributedDefinition = (view, pos) => {
-    const hit = includeAt(view.state.doc.toString(), pos);
+    const line = view.state.doc.lineAt(pos);
+    const hit = includeAtLine(line.text, line.from, pos);
     if (!hit) return false;
     void openInclude(path, hit.path).catch((e) => console.debug("[shader]", e));
     return true;
   };
   return [
-    EditorState.languageData.of((state, pos) => [
-      { openideaCompletion: shaderCompletionSource(path) },
-      ...(includeAt(state.doc.toString(), pos) ? [{ [CONTRIBUTED_DEFINITION]: definition }] : []),
-    ]),
+    EditorState.languageData.of((state, pos) => {
+      const line = state.doc.lineAt(pos);
+      return [
+        { openideaCompletion: completion },
+        ...(includeAtLine(line.text, line.from, pos) ? [{ [CONTRIBUTED_DEFINITION]: definition }] : []),
+      ];
+    }),
   ];
 }

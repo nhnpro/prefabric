@@ -73,4 +73,16 @@ describe("shaderlab & hlsl CodeMirror highlighters", () => {
     expect(toks).toContainEqual(["SV_Target", "sem"]);
     expect(toks).toContainEqual(["SAMPLE_TEXTURE2D", "macro"]);
   });
+
+  it("handles bare # / ## macro operators without hanging and highlights 2D/3D ShaderLab types", () => {
+    const hlsl = "#define JOIN(a, b) a##b\n# \nfloat x = 1.0;";
+    const hlslToks = tokens(hlslLanguage, hlsl);
+    expect(hlslToks).toContainEqual(["#define", "meta"]);
+    expect(hlslToks).toContainEqual(["float", "ty"]);
+
+    const shader = 'Properties { _MainTex ("Albedo", 2D) = "white" {} _Vol ("Vol", 3D) = "" {} }';
+    const shaderToks = tokens(shaderlabLanguage, shader);
+    expect(shaderToks).toContainEqual(["2D", "atom"]);
+    expect(shaderToks).toContainEqual(["3D", "atom"]);
+  });
 });

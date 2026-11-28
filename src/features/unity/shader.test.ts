@@ -20,6 +20,7 @@ describe("Unity shader support", () => {
     const secondPos = src.indexOf("Lighting.hlsl");
     expect(includeAt(src, secondPos)?.path).toBe("Lighting.hlsl");
     expect(includeAt(src, 2)).toBeNull();
+    expect(includeAt('\n#include "Foo.hlsl"', 0)).toBeNull();
   });
 
   it("builds candidate paths for relative, Assets/, and Packages/ includes", () => {
