@@ -151,3 +151,28 @@ fn never_panics_on_mutated_input() {
         scan(&bytes);
     }
 }
+
+#[test]
+fn keeps_user_m_prefixed_monobehaviour_fields_and_skips_unity_metadata() {
+    let yaml = br#"%YAML 1.1
+--- !u!114 &100
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 11111111111111111111111111111111, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_Speed: 4.5
+  m_Label: Hero
+  speed: 9
+"#;
+    let scanned = scan(yaml);
+    assert_eq!(scanned.objects.len(), 1);
+    let props: Vec<(&str, &str)> = scanned.objects[0].properties.iter().map(|(k, v)| (&**k, &**v)).collect();
+    assert_eq!(props, [("m_Speed", "4.5"), ("m_Label", "Hero"), ("speed", "9")]);
+}

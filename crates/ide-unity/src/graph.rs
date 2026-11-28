@@ -197,21 +197,37 @@ impl Graph {
         self.scanned_files = self.scanned_files.saturating_sub(1);
         let drop_file = |list: &mut Vec<FileIdx>| list.retain(|&f| f != idx);
         for o in &old.objects {
-            if let Some(list) = o.script.and_then(|s| s.guid).and_then(|g| self.scripts.get_mut(&g)) {
+            if let Some(guid) = o.script.and_then(|s| s.guid)
+                && let Some(list) = self.scripts.get_mut(&guid)
+            {
                 list.retain(|&(f, _)| f != idx);
+                if list.is_empty() {
+                    self.scripts.remove(&guid);
+                }
             }
-            if let Some(list) = o.source_prefab.and_then(|p| p.guid).and_then(|g| self.instances.get_mut(&g)) {
+            if let Some(guid) = o.source_prefab.and_then(|p| p.guid)
+                && let Some(list) = self.instances.get_mut(&guid)
+            {
                 drop_file(list);
+                if list.is_empty() {
+                    self.instances.remove(&guid);
+                }
             }
         }
         for method in methods_of(old) {
             if let Some(list) = self.methods.get_mut(&method) {
                 drop_file(list);
+                if list.is_empty() {
+                    self.methods.remove(&method);
+                }
             }
         }
         for guid in &old.references {
             if let Some(list) = self.referrers.get_mut(guid) {
                 drop_file(list);
+                if list.is_empty() {
+                    self.referrers.remove(guid);
+                }
             }
         }
     }
@@ -355,11 +371,8 @@ impl Graph {
 /// Where scanned files are kept and read back from.
 pub(crate) trait Source: Send + Sync {
     fn load(&self, rel: &str) -> Option<ScannedFile>;
-    /// Keeps an asset's record and scan (`None` drops a stored scan).
-    fn put(&self, rel: &str, record: Record, scan: Option<&ScannedFile>);
-    fn remove(&self, rel: &str);
-    /// Keeps an asset's record, leaving its scan as it is.
-    fn put_record(&self, rel: &str, record: Record);
+    /// Commits updated records/scans, timestamp-only record updates, and removals in one batch.
+    fn commit(&self, put: &[(&str, Record, Option<&ScannedFile>)], touched: &[(&str, Record)], removed: &[&str]);
 }
 
 const CACHE: usize = 256;
@@ -632,6 +645,14 @@ impl Query<'_> {
     /// [`Self::field_values`] of several fields, finding the script's components once.
     pub(crate) fn fields_values(&self, script: Guid, fields: &[&str]) -> Vec<Vec<FieldValue>> {
         let usages = self.script_usages(script);
+        self.fields_values_for(&usages, fields)
+    }
+
+    /// Values of `fields` on already-computed `usages`, resolving each component's [`prefab::Origin`] once.
+    pub(crate) fn fields_values_for(&self, usages: &[ScriptUsage], fields: &[&str]) -> Vec<Vec<FieldValue>> {
+        if fields.is_empty() {
+            return Vec::new();
+        }
         let mut by_pair: HashMap<(Arc<str>, Option<Arc<str>>), Loaded> = HashMap::new();
         let mut out = vec![Vec::new(); fields.len()];
         for usage in usages {
@@ -641,8 +662,9 @@ impl Query<'_> {
             let loaded = by_pair
                 .entry((usage.rel.clone(), usage.through.clone()))
                 .or_insert_with(|| self.load_for(idx, through_guid));
+            let Some(origin) = prefab::resolve(loaded, guid, usage.component) else { continue };
             for (field, values) in fields.iter().zip(&mut out) {
-                let Some(value) = prefab::property(loaded, guid, usage.component, field) else { continue };
+                let Some(value) = prefab::property_of(loaded, &origin, field) else { continue };
                 let overridden_at =
                     value.overridden_at.and_then(|(g, line)| Some((self.graph.rel_of(g)?.clone(), line)));
                 values.push(FieldValue { usage: usage.clone(), value: value.value, overridden_at });

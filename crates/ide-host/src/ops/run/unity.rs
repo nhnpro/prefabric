@@ -29,23 +29,62 @@ pub(super) fn adjust_detected(root: &Path, configs: &mut Vec<RunConfig>) {
         !(matches!(c.kind.as_str(), "dotnet" | "dotnet-test")
             && c.extras.params.get("project").is_some_and(|p| !p.contains(['/', '\\'])))
     });
-    for definition in ide_workspace::unity::assemblies::assembly_definitions(root) {
-        let Ok(rel) = definition.path.strip_prefix(root) else { continue };
-        if !(rel.starts_with("Assets") || rel.starts_with("Packages")) {
+    let mut found = Vec::new();
+    for top in ["Assets", "Packages"] {
+        let dir = root.join(top);
+        if dir.is_dir() {
+            collect_test_assemblies(root, &dir, &mut found);
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    for (name, dir, mode) in found {
+        configs.push(test_config(&name, &dir, mode));
+    }
+}
+
+fn collect_test_assemblies(root: &Path, dir: &Path, out: &mut Vec<(String, String, &'static str)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else { continue };
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if kind.is_dir() {
+            if !name_str.starts_with('.') && !name_str.ends_with('~') {
+                collect_test_assemblies(root, &path, out);
+            }
             continue;
         }
-        let Some(mode) = std::fs::read_to_string(&definition.path).ok().and_then(|text| test_mode(&text)) else {
+        if !kind.is_file()
+            || !path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("asmdef"))
+        {
             continue;
-        };
-        let dir = rel.parent().unwrap_or(Path::new("")).to_string_lossy().replace('\\', "/");
-        configs.push(test_config(&definition.name, &dir, mode));
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let Some((assembly, mode)) = parse_test_assembly(&text) else { continue };
+        let Ok(rel) = path.strip_prefix(root) else { continue };
+        let rel_dir = rel.parent().unwrap_or(Path::new("")).to_string_lossy().replace('\\', "/");
+        out.push((assembly, rel_dir, mode));
     }
+}
+
+/// Parses an `.asmdef` once: returns `(assembly_name, "editMode" | "playMode")` when it is a test assembly.
+fn parse_test_assembly(asmdef: &str) -> Option<(String, &'static str)> {
+    let json: Value = serde_json::from_str(asmdef.trim_start_matches('\u{feff}')).ok()?;
+    let name = json.get("name").and_then(Value::as_str).filter(|n| !n.is_empty())?.to_owned();
+    let mode = test_mode_json(&json)?;
+    Some((name, mode))
+}
+
+#[cfg(test)]
+fn test_mode(asmdef: &str) -> Option<&'static str> {
+    let json: Value = serde_json::from_str(asmdef.trim_start_matches('\u{feff}')).ok()?;
+    test_mode_json(&json)
 }
 
 /// `editMode` for a test assembly limited to the Editor, `playMode` for another one; none when the
 /// assembly has no tests.
-fn test_mode(asmdef: &str) -> Option<&'static str> {
-    let json: Value = serde_json::from_str(asmdef.trim_start_matches('\u{feff}')).ok()?;
+fn test_mode_json(json: &Value) -> Option<&'static str> {
     let strings = |key: &str| -> Vec<String> {
         json.get(key)
             .and_then(Value::as_array)

@@ -33,6 +33,7 @@ const REFUSED_OLDER_PROTOCOL: i64 = -32004;
 const POLL: Duration = Duration::from_secs(1);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const BACKOFF_START: Duration = Duration::from_millis(500);
 const BACKOFF_MAX: Duration = Duration::from_secs(5);
 /// A domain reload closes the socket for about a second; the status bar shows "reconnecting"
@@ -110,6 +111,8 @@ struct Inner {
     sink: SharedSink,
     status: Mutex<UnityLinkStatus>,
     connection: Mutex<Option<Connection>>,
+    /// Separate handle to the active socket so `Drop` can shut it down without blocking on `connection`.
+    active_stream: Mutex<Option<TcpStream>>,
     next_generation: std::sync::atomic::AtomicU64,
     /// Listeners of the test runs in progress, by the IDE's run id.
     test_runs: Mutex<HashMap<String, test_run::Listener>>,
@@ -131,6 +134,7 @@ impl UnityLink {
             sink,
             status: Mutex::default(),
             connection: Mutex::new(None),
+            active_stream: Mutex::new(None),
             next_generation: std::sync::atomic::AtomicU64::new(0),
             test_runs: Mutex::default(),
             stopped: Mutex::new(false),
@@ -207,8 +211,8 @@ impl Drop for UnityLink {
     fn drop(&mut self) {
         *self.inner.stopped.lock() = true;
         self.inner.wake.notify_all();
-        if let Some(c) = self.inner.connection.lock().as_ref() {
-            let _ = c.stream.shutdown(Shutdown::Both);
+        if let Some(stream) = self.inner.active_stream.lock().as_ref() {
+            let _ = stream.shutdown(Shutdown::Both);
         }
     }
 }
@@ -255,6 +259,7 @@ impl Inner {
     fn run(self: Arc<Self>) {
         let mut backoff = BACKOFF_START;
         let mut lost_at: Option<Instant> = None;
+        let mut incompatible: Option<(u32, u16, String)> = None;
         while !self.stopped() {
             let Some(file) = read_link_file(&self.file) else {
                 // Right after a reload the Editor rewrites the file: a missed read isn't a quit.
@@ -268,14 +273,23 @@ impl Inner {
                 self.lose_test_runs();
                 self.publish_compile(&[]);
                 lost_at = None;
+                incompatible = None;
                 backoff = BACKOFF_START;
                 if !self.wait(POLL) {
                     break;
                 }
                 continue;
             };
-            let connected_before = self.status.lock().connection == UnityLinkConnection::Connected;
-            if !connected_before {
+            let key = (file.pid, file.port, file.token.clone());
+            if incompatible.as_ref() == Some(&key) {
+                if !self.wait(POLL) {
+                    break;
+                }
+                continue;
+            }
+            incompatible = None;
+            let prev = self.status.lock().connection;
+            if prev != UnityLinkConnection::Connected && prev != UnityLinkConnection::Incompatible {
                 self.set_connection(UnityLinkConnection::Connecting);
             }
             match self.session(&file) {
@@ -284,6 +298,7 @@ impl Inner {
                     lost_at = Some(Instant::now());
                 }
                 Ended::Incompatible => {
+                    incompatible = Some(key);
                     self.set_connection(UnityLinkConnection::Incompatible);
                     self.lose_test_runs();
                     lost_at = None;
@@ -312,16 +327,32 @@ impl Inner {
 
     /// One connection: handshake, then notifications and replies until the socket closes.
     fn session(&self, file: &LinkFile) -> Ended {
+        let ended = self.session_inner(file);
+        self.active_stream.lock().take();
+        ended
+    }
+
+    fn session_inner(&self, file: &LinkFile) -> Ended {
         let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, file.port));
         let Ok(stream) = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) else { return Ended::Failed };
         let _ = stream.set_nodelay(true);
+        if let Ok(handle) = stream.try_clone() {
+            *self.active_stream.lock() = Some(handle);
+        }
+        if self.stopped() {
+            let _ = stream.shutdown(Shutdown::Both);
+            return Ended::Failed;
+        }
         let Ok(read_half) = stream.try_clone() else { return Ended::Failed };
         let mut reader = BufReader::new(read_half);
         let hello = json!({
             "jsonrpc": "2.0", "id": 0, "method": "hello",
             "params": {"token": file.token, "protocol": PROTOCOL, "client": concat!("Prefabric ", env!("CARGO_PKG_VERSION"))},
         });
-        if stream.set_read_timeout(Some(HELLO_TIMEOUT)).is_err() || writeln!(&stream, "{hello}").is_err() {
+        if stream.set_read_timeout(Some(HELLO_TIMEOUT)).is_err()
+            || stream.set_write_timeout(Some(HELLO_TIMEOUT)).is_err()
+            || writeln!(&stream, "{hello}").is_err()
+        {
             return Ended::Failed;
         }
         let mut line = Vec::new();
@@ -342,6 +373,7 @@ impl Inner {
             self.publish_compile(messages);
         }
         let Ok(writer) = stream.try_clone() else { return Ended::Failed };
+        let _ = writer.set_write_timeout(Some(WRITE_TIMEOUT));
         let generation = self.next_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         *self.connection.lock() = Some(Connection { generation, stream: writer, next_id: 0, pending: HashMap::new() });
         if self.stopped() {
@@ -510,12 +542,27 @@ fn compile_diagnostics(root: &Path, messages: &[Value]) -> BTreeMap<PathBuf, Vec
 
 /// `Assets/A.cs(3,10): error CS1002: ; expected` → (`CS1002`, `; expected`).
 fn split_message(message: &str) -> (Option<&str>, &str) {
-    let rest = message.split_once("): ").map_or(message, |(_, r)| r);
+    let rest = strip_location_prefix(message);
     let rest = rest.strip_prefix("error ").or_else(|| rest.strip_prefix("warning ")).unwrap_or(rest);
     match rest.split_once(": ") {
         Some((code, text)) if !code.is_empty() && code.chars().all(|c| c.is_ascii_alphanumeric()) => (Some(code), text),
         _ => (None, rest),
     }
+}
+
+fn strip_location_prefix(message: &str) -> &str {
+    if let Some((prefix, rest)) = message.split_once("): ")
+        && let Some((path, coords)) = prefix.rsplit_once('(')
+        && !path.is_empty()
+        && !path.starts_with("error ")
+        && !path.starts_with("warning ")
+        && !coords.is_empty()
+        && coords.bytes().all(|b| b.is_ascii_digit() || b == b',')
+        && coords.bytes().any(|b| b.is_ascii_digit())
+    {
+        return rest;
+    }
+    message
 }
 
 const PREFAB_INSTANCE: u32 = 1001;

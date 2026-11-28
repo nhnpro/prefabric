@@ -150,9 +150,14 @@ fn ignores_the_file_of_an_editor_that_is_gone() {
 fn an_older_package_is_incompatible() {
     let dir = tempfile::tempdir().unwrap();
     let listener = editor(dir.path());
-    let link = UnityLink::start(dir.path(), Arc::new(Events::default()));
+    let events = Arc::new(Events::default());
+    let link = UnityLink::start(dir.path(), events.clone());
     let (_stream, _reader) = accept(&listener, 0);
     wait_for(&link, |s| s.connection == UnityLinkConnection::Incompatible);
+    let count = events.0.lock().len();
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(link.status().connection, UnityLinkConnection::Incompatible);
+    assert_eq!(events.0.lock().len(), count);
 }
 
 #[test]
@@ -173,10 +178,13 @@ fn a_wrong_token_is_never_reported_as_connected() {
 #[test]
 fn splits_compiler_messages() {
     assert_eq!(split_message("Assets/A.cs(3,10): error CS1002: ; expected"), (Some("CS1002"), "; expected"));
+    assert_eq!(split_message("Assets/Foo (1)/A.cs(3,10): error CS1002: ; expected"), (Some("CS1002"), "; expected"));
     assert_eq!(
         split_message("Assets/A.cs(1,1): warning CS0414: The field 'x' is assigned but never used"),
         (Some("CS0414"), "The field 'x' is assigned but never used")
     );
+    assert_eq!(split_message("error CS1002: Foo(): bar"), (Some("CS1002"), "Foo(): bar"));
+    assert_eq!(split_message("error CS1002: Foo(1): bar"), (Some("CS1002"), "Foo(1): bar"));
     assert_eq!(split_message("plain text: here"), (None, "plain text: here"));
 }
 

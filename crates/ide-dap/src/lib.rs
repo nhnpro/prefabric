@@ -1056,7 +1056,23 @@ impl DebugManager {
         if request != "launch" && request != "attach" {
             return Err(IdeError::invalid(format!("request must be `launch` or `attach`, got `{request}`")));
         }
-        let io = self.launcher.launch(spec.clone(), reuse_port).await?;
+        let unity_forward_port = (adapter_name == unity::ADAPTER)
+            .then(|| arguments.get("port").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok()))
+            .flatten();
+        let io = match self.launcher.launch(spec.clone(), reuse_port).await {
+            Ok(io) => io,
+            Err(e) => {
+                if let Some(port) = unity_forward_port {
+                    let detached = unity_devices::detach_local_port(port);
+                    if !detached.is_empty()
+                        && let Ok(handle) = tokio::runtime::Handle::try_current()
+                    {
+                        handle.spawn_blocking(move || detached.cleanup());
+                    }
+                }
+                return Err(e);
+            }
+        };
         let launch_after_configuration = io.launch_after_configuration && request == "launch";
         let stderr = io.stderr.clone();
         let (conn, incoming) = {
@@ -1068,10 +1084,8 @@ impl DebugManager {
             .flatten();
         let mut session = Session::new(id, owner, name, adapter_name, parent, request, conn, spec, io.port, io.child);
         session.exception_classes = exception_classes;
-        if session.adapter == unity::ADAPTER
-            && let Some(port) = arguments.get("port").and_then(Value::as_u64).and_then(|p| u16::try_from(p).ok())
-        {
-            session.unity_forward_port = Some(port);
+        if let Some(port) = unity_forward_port {
+            *session.unity_forward_port.lock() = Some(port);
         }
         let session = Arc::new(session);
         if let Some(launch_type) = arguments.get("type").and_then(Value::as_str) {
@@ -1354,10 +1368,13 @@ impl DebugManager {
     /// The connection dropped (adapter exited or `shutdown` finished).
     pub(crate) fn session_closed(&self, s: &Arc<Session>) {
         s.kill_processes();
-        if let Some(port) = s.unity_forward_port
-            && let Ok(handle) = tokio::runtime::Handle::try_current()
-        {
-            handle.spawn_blocking(move || unity_devices::release_local_port(port));
+        if let Some(port) = s.unity_forward_port.lock().take() {
+            let detached = unity_devices::detach_local_port(port);
+            if !detached.is_empty()
+                && let Ok(handle) = tokio::runtime::Handle::try_current()
+            {
+                handle.spawn_blocking(move || detached.cleanup());
+            }
         }
         let removed = self.sessions.lock().remove(&s.id).is_some();
         self.order.lock().retain(|id| *id != s.id);

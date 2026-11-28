@@ -3,7 +3,7 @@
 
 use crate::scan::{Guid, ScannedFile};
 use crate::walk::Stamp;
-use parking_lot::RwLock;
+use rayon::prelude::*;
 #[cfg(test)]
 use redb::ReadableTableMetadata;
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition, TableError};
@@ -46,7 +46,7 @@ fn create(file: &Path) -> std::result::Result<Database, redb::DatabaseError> {
 }
 
 pub(crate) struct Store {
-    db: RwLock<Database>,
+    db: Database,
 }
 
 impl Store {
@@ -71,7 +71,7 @@ impl Store {
                 create(&file).map_err(|e| tracing::warn!("unity index: {e}")).ok()?
             }
         };
-        let store = Self { db: RwLock::new(db) };
+        let store = Self { db };
         let stamp = format!("{SCHEMA}\n{}", root.display());
         match store.meta("stamp") {
             Ok(Some(v)) if v == stamp.as_bytes() => {}
@@ -86,7 +86,7 @@ impl Store {
     }
 
     fn meta(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        let txn = self.db.read().begin_read().map_err(err)?;
+        let txn = self.db.begin_read().map_err(err)?;
         let table = match txn.open_table(META) {
             Ok(t) => t,
             Err(TableError::TableDoesNotExist(_)) => return Ok(None),
@@ -96,7 +96,7 @@ impl Store {
     }
 
     fn reset(&self, stamp: &str) -> Result<()> {
-        let txn = self.db.read().begin_write().map_err(err)?;
+        let txn = self.db.begin_write().map_err(err)?;
         for table in [FILES, SCANS] {
             match txn.delete_table(table) {
                 Ok(_) | Err(TableError::TableDoesNotExist(_)) => {}
@@ -114,7 +114,7 @@ impl Store {
 
     /// Every stored record.
     pub(crate) fn records(&self) -> Result<HashMap<String, Record>> {
-        let txn = self.db.read().begin_read().map_err(err)?;
+        let txn = self.db.begin_read().map_err(err)?;
         let table = txn.open_table(FILES).map_err(err)?;
         let mut out = HashMap::new();
         for entry in table.iter().map_err(err)? {
@@ -127,9 +127,31 @@ impl Store {
     }
 
     pub(crate) fn scan(&self, rel: &str) -> Result<Option<ScannedFile>> {
-        let txn = self.db.read().begin_read().map_err(err)?;
+        let txn = self.db.begin_read().map_err(err)?;
         let table = txn.open_table(SCANS).map_err(err)?;
         Ok(table.get(rel).map_err(err)?.and_then(|v| postcard::from_bytes(v.value()).ok()))
+    }
+
+    /// Reads many stored scans in one read transaction and deserializes them in parallel.
+    pub(crate) fn scans(&self, rels: &[&str]) -> Result<HashMap<String, ScannedFile>> {
+        if rels.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let raw: Vec<(String, Vec<u8>)> = {
+            let txn = self.db.begin_read().map_err(err)?;
+            let table = txn.open_table(SCANS).map_err(err)?;
+            let mut out = Vec::with_capacity(rels.len());
+            for &rel in rels {
+                if let Some(v) = table.get(rel).map_err(err)? {
+                    out.push((rel.to_owned(), v.value().to_vec()));
+                }
+            }
+            out
+        };
+        Ok(raw
+            .into_par_iter()
+            .filter_map(|(rel, bytes)| postcard::from_bytes(&bytes).ok().map(|scan| (rel, scan)))
+            .collect())
     }
 
     /// A flag kept with the index (a notice already shown).
@@ -138,23 +160,23 @@ impl Store {
     }
 
     pub(crate) fn set_flag(&self, key: &str) -> Result<()> {
-        let txn = self.db.read().begin_write().map_err(err)?;
+        let txn = self.db.begin_write().map_err(err)?;
         txn.open_table(META).map_err(err)?.insert(key, &b"1"[..]).map_err(err)?;
         txn.commit().map_err(err)
     }
 
-    pub(crate) fn write_record(&self, rel: &str, record: Record) -> Result<()> {
-        let txn = self.db.read().begin_write().map_err(err)?;
-        {
-            let bytes = postcard::to_allocvec(&record).map_err(err)?;
-            txn.open_table(FILES).map_err(err)?.insert(rel, bytes.as_slice()).map_err(err)?;
+    /// Stores `put` (a scan of `None` drops the stored one), updates `touched` records without
+    /// changing their scans, and forgets `removed`, all in one write transaction.
+    pub(crate) fn commit(
+        &self,
+        put: &[(&str, Record, Option<&ScannedFile>)],
+        touched: &[(&str, Record)],
+        removed: &[&str],
+    ) -> Result<()> {
+        if put.is_empty() && touched.is_empty() && removed.is_empty() {
+            return Ok(());
         }
-        txn.commit().map_err(err)
-    }
-
-    /// Stores `put` (a scan of `None` drops the stored one) and forgets `removed`, in one transaction.
-    pub(crate) fn write(&self, put: &[(&str, Record, Option<&ScannedFile>)], removed: &[&str]) -> Result<()> {
-        let txn = self.db.read().begin_write().map_err(err)?;
+        let txn = self.db.begin_write().map_err(err)?;
         {
             let mut files = txn.open_table(FILES).map_err(err)?;
             let mut scans = txn.open_table(SCANS).map_err(err)?;
@@ -174,6 +196,11 @@ impl Store {
                     }
                 }
             }
+            for (rel, record) in touched {
+                buf = postcard::to_extend(record, std::mem::take(&mut buf)).map_err(err)?;
+                files.insert(*rel, buf.as_slice()).map_err(err)?;
+                buf.clear();
+            }
             for rel in removed {
                 files.remove(*rel).map_err(err)?;
                 scans.remove(*rel).map_err(err)?;
@@ -182,10 +209,15 @@ impl Store {
         txn.commit().map_err(err)
     }
 
+    /// Stores `put` (a scan of `None` drops the stored one) and forgets `removed`, in one transaction.
+    pub(crate) fn write(&self, put: &[(&str, Record, Option<&ScannedFile>)], removed: &[&str]) -> Result<()> {
+        self.commit(put, &[], removed)
+    }
+
     /// Number of stored file records.
     #[cfg(test)]
     pub(crate) fn file_count(&self) -> Result<u64> {
-        let txn = self.db.read().begin_read().map_err(err)?;
+        let txn = self.db.begin_read().map_err(err)?;
         match txn.open_table(FILES) {
             Ok(t) => t.len().map_err(err),
             Err(TableError::TableDoesNotExist(_)) => Ok(0),
@@ -203,7 +235,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         {
             let store = Store::open(dir.path(), Path::new("/a")).unwrap();
-            let txn = store.db.read().begin_write().unwrap();
+            let txn = store.db.begin_write().unwrap();
             txn.open_table(FILES).unwrap().insert("Assets/A.prefab", &b"x"[..]).unwrap();
             txn.commit().unwrap();
             assert_eq!(store.file_count().unwrap(), 1);

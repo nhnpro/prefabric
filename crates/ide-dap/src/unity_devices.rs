@@ -17,6 +17,8 @@ const IOS_PLAYER_PORT: u16 = 56000;
 /// Timeout for device discovery/forwarding commands (`adb`, `idevice_id`, `idevicename`).
 const CMD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+const MAX_CMD_STDOUT: u64 = 4 * 1024 * 1024;
+
 fn run(program: &Path, args: &[&str]) -> Option<String> {
     let mut child = ide_core::process::prepare(&mut Command::new(program))
         .args(args)
@@ -25,11 +27,11 @@ fn run(program: &Path, args: &[&str]) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let mut stdout = child.stdout.take()?;
+    let stdout = child.stdout.take()?;
     let reader = std::thread::spawn(move || {
         use std::io::Read;
         let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
+        let _ = stdout.take(MAX_CMD_STDOUT).read_to_end(&mut buf);
         buf
     });
     let deadline = std::time::Instant::now() + CMD_TIMEOUT;
@@ -42,7 +44,8 @@ fn run(program: &Path, args: &[&str]) -> Option<String> {
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                let _ = reader.join();
+                // Do not join `reader`: a grandchild (e.g. an auto-started adb daemon) may still hold stdout open.
+                drop(reader);
                 return None;
             }
         }
@@ -231,39 +234,63 @@ fn free_local_port() -> IdeResult<u16> {
     Ok(listener.local_addr().map_err(|e| IdeError::unavailable(e.to_string()))?.port())
 }
 
-/// Releases any `iproxy` process or `adb forward` rule bound to `local_port`. Blocking.
-pub fn release_local_port(local_port: u16) {
-    let mut to_kill = Vec::new();
+/// Detached port-forwarding handles removed synchronously from the global caches so a quick
+/// re-attach cannot reuse a dying local port while blocking teardown runs off-thread.
+pub(crate) struct DetachedForwards {
+    proxies: Vec<ProxyEntry>,
+    adb_forwards: Vec<AdbForwardEntry>,
+}
+
+impl DetachedForwards {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.proxies.is_empty() && self.adb_forwards.is_empty()
+    }
+
+    pub(crate) fn cleanup(self) {
+        for mut entry in self.proxies {
+            let _ = entry.child.kill();
+            let _ = entry.child.wait();
+        }
+        for entry in self.adb_forwards {
+            let _ =
+                run(&entry.adb, &["-s", &entry.serial, "forward", "--remove", &format!("tcp:{}", entry.local_port)]);
+        }
+    }
+}
+
+/// Synchronously detaches any `iproxy` process or `adb forward` rule bound to `local_port`.
+pub(crate) fn detach_local_port(local_port: u16) -> DetachedForwards {
+    let mut proxies_out = Vec::new();
     {
         let mut proxies = PROXIES.lock();
         let mut i = 0;
         while i < proxies.len() {
             if proxies[i].local_port == local_port {
-                to_kill.push(proxies.swap_remove(i));
+                proxies_out.push(proxies.swap_remove(i));
             } else {
                 i += 1;
             }
         }
     }
-    for mut entry in to_kill {
-        let _ = entry.child.kill();
-        let _ = entry.child.wait();
-    }
-    let mut to_remove = Vec::new();
+    let mut adb_out = Vec::new();
     {
         let mut forwards = ADB_FORWARDS.lock();
         let mut i = 0;
         while i < forwards.len() {
             if forwards[i].local_port == local_port {
-                to_remove.push(forwards.swap_remove(i));
+                adb_out.push(forwards.swap_remove(i));
             } else {
                 i += 1;
             }
         }
     }
-    for entry in to_remove {
-        let _ = run(&entry.adb, &["-s", &entry.serial, "forward", "--remove", &format!("tcp:{}", entry.local_port)]);
-    }
+    DetachedForwards { proxies: proxies_out, adb_forwards: adb_out }
+}
+
+/// Releases any `iproxy` process or `adb forward` rule bound to `local_port`. Blocking.
+#[allow(dead_code)]
+pub fn release_local_port(local_port: u16) {
+    detach_local_port(local_port).cleanup();
 }
 
 /// Maps a device target's port to a local one and returns it. Blocking.
@@ -283,12 +310,14 @@ pub fn forward(host: &str, port: u16) -> IdeResult<u16> {
         })?;
         let local: u16 =
             out.trim().parse().map_err(|_| IdeError::unavailable(format!("unexpected adb forward output: {out}")))?;
-        ADB_FORWARDS.lock().push(AdbForwardEntry {
-            adb,
-            serial: serial.to_owned(),
-            device_port: port,
-            local_port: local,
-        });
+        let mut forwards = ADB_FORWARDS.lock();
+        if let Some(existing) = forwards.iter().find(|e| e.serial == serial && e.device_port == port) {
+            let existing_port = existing.local_port;
+            drop(forwards);
+            let _ = run(&adb, &["-s", serial, "forward", "--remove", &format!("tcp:{local}")]);
+            return Ok(existing_port);
+        }
+        forwards.push(AdbForwardEntry { adb, serial: serial.to_owned(), device_port: port, local_port: local });
         return Ok(local);
     }
     if let Some(udid) = host.strip_prefix(USB_PREFIX) {
@@ -309,23 +338,16 @@ pub fn forward(host: &str, port: u16) -> IdeResult<u16> {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| IdeError::unavailable(format!("cannot start iproxy: {e}")))?;
-        // Wait for iproxy to bind the local port outside the global mutex and fail fast if it exits.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        let mut bound = false;
-        while std::time::Instant::now() < deadline {
+        // Give iproxy a brief startup window outside the global mutex without binding `local`
+        // (which would race with iproxy's own bind or false-fail on SO_REUSEADDR / IPv6).
+        for _ in 0..8 {
             if let Ok(Some(status)) = child.try_wait() {
                 return Err(IdeError::unavailable(format!("iproxy exited early ({status})")));
             }
-            if std::net::TcpListener::bind(("127.0.0.1", local)).is_err() {
-                bound = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(std::time::Duration::from_millis(25));
         }
-        if !bound {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(IdeError::unavailable(format!("iproxy did not listen on port {local}")));
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(IdeError::unavailable(format!("iproxy exited early ({status})")));
         }
         let mut proxies = PROXIES.lock();
         proxies.retain_mut(|entry| matches!(entry.child.try_wait(), Ok(None)));
