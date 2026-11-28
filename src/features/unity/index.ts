@@ -25,6 +25,7 @@ import { unityLenses } from "./lenses";
 import { trackUnitySearchCategory } from "./searchTab";
 import { unityRename } from "./rename";
 import { clearUnityYaml, unityYamlBanner, unityYamlLock } from "./unityYaml";
+import { shaderSupport } from "./shader";
 import { ussSupport } from "./uss";
 import { loadMessageData } from "./messages";
 import { trackUnityLink, UnityLinkItem } from "./link";
@@ -55,9 +56,11 @@ export function activate() {
           ? assemblyDefinitionSupport(ctx.path)
           : ctx.language === "css" && !ctx.virtual
             ? ussSupport(ctx.path)
-            : ctx.language === "yaml" && !ctx.virtual
-              ? [unityYamlLock(ctx.path), isSceneOrPrefab(ctx.path) ? showYamlOnNavigation(ctx.path) : []]
-              : [],
+            : (ctx.language === "shaderlab" || ctx.language === "hlsl") && !ctx.virtual
+              ? shaderSupport(ctx.path)
+              : ctx.language === "yaml" && !ctx.virtual
+                ? [unityYamlLock(ctx.path), isSceneOrPrefab(ctx.path) ? showYamlOnNavigation(ctx.path) : []]
+                : [],
   });
   const unregisterBanner = registerEditorBanner(unityYamlBanner);
   const unregisterSearch = trackUnitySearchCategory();

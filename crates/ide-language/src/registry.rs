@@ -42,6 +42,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("haskell", include_str!("../../../languages/haskell.toml")),
     ("hcl", include_str!("../../../languages/hcl.toml")),
     ("helm-template", include_str!("../../../languages/helm-template.toml")),
+    ("hlsl", include_str!("../../../languages/hlsl.toml")),
     ("html", include_str!("../../../languages/html.toml")),
     ("http", include_str!("../../../languages/http.toml")),
     ("ignore", include_str!("../../../languages/ignore.toml")),
@@ -80,6 +81,7 @@ const BUILTIN: &[(&str, &str)] = &[
     ("sass", include_str!("../../../languages/sass.toml")),
     ("scala", include_str!("../../../languages/scala.toml")),
     ("scss", include_str!("../../../languages/scss.toml")),
+    ("shaderlab", include_str!("../../../languages/shaderlab.toml")),
     ("shellscript", include_str!("../../../languages/shellscript.toml")),
     ("slint", include_str!("../../../languages/slint.toml")),
     ("sql", include_str!("../../../languages/sql.toml")),
@@ -635,6 +637,8 @@ mod tests {
         "JSP",
         "Astro",
         "GoMod",
+        "ShaderLab",
+        "HLSL",
     ];
 
     fn reg() -> LanguageRegistry {
@@ -1158,6 +1162,10 @@ mod tests {
             ("icon.svg.import", "godot-resource"),
             ("export_presets.cfg", "godot-resource"),
             ("water.gdshader", "gdshader"),
+            ("unlit.shader", "shaderlab"),
+            ("lighting.hlsl", "hlsl"),
+            ("UnityCG.cginc", "hlsl"),
+            ("particles.compute", "hlsl"),
             ("app-window.slint", "slint"),
             ("notes.txt", "plaintext"),
         ];

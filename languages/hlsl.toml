@@ -1,0 +1,14 @@
+id = "hlsl"
+name = "HLSL"
+extensions = ["hlsl", "cginc", "glslinc", "compute", "raytrace", "shaderinc"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "HLSL"
+
+[[language-servers]]
+name = "shader-ls"
+command = "shader-language-server"
+args = []
+root-markers = ["ProjectSettings/ProjectVersion.txt", "*.shader", "*.hlsl", "*.compute"]
+install-hint = "cargo install shader-language-server"

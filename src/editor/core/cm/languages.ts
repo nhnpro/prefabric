@@ -240,6 +240,18 @@ const OWN_MODES = [
     filename: /^(?:go\.mod|go\.work)$/,
     load: async () => new LanguageSupport((await import("./gomod")).goModLanguage),
   }),
+  LanguageDescription.of({
+    name: "ShaderLab",
+    alias: ["shaderlab", "shader"],
+    extensions: ["shader"],
+    load: async () => new LanguageSupport((await import("./shaderlab")).shaderlabLanguage),
+  }),
+  LanguageDescription.of({
+    name: "HLSL",
+    alias: ["hlsl", "cginc", "compute"],
+    extensions: ["hlsl", "cginc", "glslinc", "compute", "raytrace", "shaderinc"],
+    load: async () => new LanguageSupport((await import("./shaderlab")).hlslLanguage),
+  }),
 ];
 
 const BATCH_KEYWORDS = new Set([

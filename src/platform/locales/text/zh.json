@@ -9405,5 +9405,6 @@
   "Pauses the Editor's Play mode (a pausepoint's hit); nothing in Edit mode": "暂停编辑器的播放模式（命中暂停点时）；编辑模式下不执行任何操作",
   "UnityYAMLMerge: {count} properties changed on both sides": "UnityYAMLMerge：{count} 个属性在双方都有更改",
   "Merge {name} with UnityYAMLMerge": "使用 UnityYAMLMerge 合并 {name}",
-  "{name} merged by UnityYAMLMerge": "{name} 已由 UnityYAMLMerge 合并"
+  "{name} merged by UnityYAMLMerge": "{name} 已由 UnityYAMLMerge 合并",
+  "Shader include '{includePath}' not found in project": "项目中未找到着色器包含文件 '{includePath}'"
 }

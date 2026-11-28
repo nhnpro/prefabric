@@ -1,0 +1,7 @@
+id = "shaderlab"
+name = "ShaderLab"
+extensions = ["shader"]
+line-comment = "//"
+block-comment = ["/*", "*/"]
+indent = { tab-size = 4, insert-spaces = true }
+ui-mode = "ShaderLab"
