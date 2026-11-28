@@ -61,7 +61,10 @@ fn main() {
 
 fn server_home() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
-    std::env::var_os("OPENIDEA_SERVER_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".openidea"))
+    std::env::var_os("PREFABRIC_SERVER_HOME")
+        .or_else(|| std::env::var_os("OPENIDEA_SERVER_HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".prefabric"))
 }
 
 async fn run(base: PathBuf) -> i32 {

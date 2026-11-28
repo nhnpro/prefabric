@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn the_server_starts_in_the_folder_trusted_and_without_the_lifecycle() {
         let up = Up { container: ID.into(), user: "vscode".into(), folder: "/workspaces/my app".into() };
-        let args = server_args(&up, "/home/vscode/.openidea/server/1/ab/openidea-server");
+        let args = server_args(&up, "/home/vscode/.prefabric/server/1/ab/openidea-server");
         assert_eq!(
             args,
             [
@@ -252,7 +252,7 @@ mod tests {
                 "-e",
                 "OPENIDEA_LIFECYCLE_DONE=1",
                 ID,
-                "/home/vscode/.openidea/server/1/ab/openidea-server",
+                "/home/vscode/.prefabric/server/1/ab/openidea-server",
                 "--stdio",
             ]
         );
