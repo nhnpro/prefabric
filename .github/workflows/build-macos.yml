@@ -1,0 +1,70 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: Target macOS architecture
+        required: true
+        default: aarch64-apple-darwin
+        type: choice
+        options:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - universal-apple-darwin
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      TARGET: ${{ inputs.arch || 'aarch64-apple-darwin' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.arch == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || inputs.arch }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-${{ env.TARGET }}
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Prefabric macOS bundle
+        run: >-
+          pnpm tauri build
+          --ci
+          --target "$TARGET"
+          --bundles dmg,app
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Archive Prefabric.app
+        run: |
+          APP_PATH="target/${TARGET}/release/bundle/macos/Prefabric.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "target/${TARGET}/release/bundle/Prefabric-${TARGET}.app.zip"
+
+      - name: Upload macOS build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prefabric-macos-${{ env.TARGET }}
+          path: |
+            target/${{ env.TARGET }}/release/bundle/dmg/*.dmg
+            target/${{ env.TARGET }}/release/bundle/Prefabric-${{ env.TARGET }}.app.zip
+          retention-days: 14
